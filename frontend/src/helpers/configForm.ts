@@ -52,7 +52,7 @@ export function toNullableConfigString(
     return normalized.length > 0 ? normalized : null
 }
 
-function parseOptionalJsonConfigValue(value: string | null): unknown {
+function parseOptionalJsonConfigValue(value: string | null | undefined): unknown {
     const normalized = toNullableConfigString(value)
     if (normalized === null) {
         return null
@@ -65,7 +65,7 @@ function parseOptionalJsonConfigValue(value: string | null): unknown {
     return parsed
 }
 
-function parseOptionalJsonOrStringConfigValue(value: string | null): unknown {
+function parseOptionalJsonOrStringConfigValue(value: string | null | undefined): unknown {
     const normalized = toNullableConfigString(value)
     if (normalized === null) {
         return null

@@ -464,7 +464,7 @@ describe('StrategyBuilderWorkspace', () => {
         const staleInvalid: StrategyValidation = {
             ...valid,
             status: 'invalid',
-            blocking_errors: ['stale response'],
+            blocking_errors: [{ group: 'strategy', message: 'stale response' }],
         }
 
         resolveSecond(valid)
@@ -565,7 +565,7 @@ describe('StrategyBuilderWorkspace', () => {
             const staleInvalid: StrategyValidation = {
                 ...detail(custom).validation,
                 status: 'invalid',
-                blocking_errors: ['stale during debounce'],
+                blocking_errors: [{ group: 'strategy', message: 'stale during debounce' }],
             }
             resolveValidation(staleInvalid)
             await activeValidation

@@ -1,4 +1,4 @@
-import { computed, ref, watch, type Ref } from 'vue'
+import { computed, shallowRef, watch, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import { useWebSocketDataStore } from '../stores/websocket'
@@ -26,7 +26,7 @@ export function useTradeTableFeed<T>(
   const { websocketId, waitingText, emptyText, normalizeRows } = options
   const websocketStore = useWebSocketDataStore(websocketId)
   const websocketState = storeToRefs(websocketStore)
-  const rows = ref<T[]>([])
+  const rows = shallowRef<T[]>([])
 
   watch(
     websocketState.data,

@@ -2,7 +2,7 @@ import { ref } from 'vue'
 
 import type { ControlCenterTransitionIntent } from '../control-center/types'
 
-type TimeoutHandle = ReturnType<typeof setTimeout>
+type TimeoutHandle = number
 
 interface UseControlCenterFeedbackOptions {
     announcementDelayMs?: number

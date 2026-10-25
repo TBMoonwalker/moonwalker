@@ -32,7 +32,7 @@ function snapshot(overrides: Partial<AccumulationDetail> = {}): AccumulationDeta
     revision: 12, reason: null, runtime_wait_reason: null, observations_initialized: true,
     strategy_version_id: 5, strategy_slug: 'accumulation_dip_v1', strategy_version: 2,
     holding_integrity: 'owned',
-    holding: { net_quantity: '0.100000000000000001', remaining_cost: null, contributed_quote: '12.000000000000000001', disposal_proceeds: '0', basis_provenance: 'unknown', execution_history_complete: false, fees: null },
+    holding: { deal_id: null, net_quantity: '0.100000000000000001', remaining_cost: null, contributed_quote: '12.000000000000000001', disposal_proceeds: '0', basis_provenance: 'unknown', execution_history_complete: false, fees: null },
     entry: null, operations: [], older_operations_available: false, ...overrides,
   }
 }

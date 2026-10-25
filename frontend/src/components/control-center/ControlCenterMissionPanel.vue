@@ -14,9 +14,9 @@ defineProps<{
     isDirty: boolean
     isStaleConfigTrustState: (kind: ControlCenterConfigTrustState['kind']) => boolean
     isSubmitDisabled: boolean
-    missionAlertTone: 'info' | 'success' | 'warning'
+    missionAlertTone: 'info' | 'success' | 'warning' | 'error'
     missionPrimaryLabel: string
-    missionSummaryTone: 'info' | 'success' | 'warning'
+    missionSummaryTone: 'info' | 'success' | 'warning' | 'error'
     readiness: ControlCenterReadiness
     saveState: string
     transitionIntent: ControlCenterTransitionIntent | null

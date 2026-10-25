@@ -1,4 +1,4 @@
-import { onMounted, reactive, ref, watch, type Ref } from 'vue'
+import { shallowRef, onMounted, reactive, ref, watch, type Ref } from 'vue'
 
 import { fetchJson } from '../api/client'
 import type { TradeTableSortState } from '../helpers/tradeTable'
@@ -26,7 +26,7 @@ type PaginationState = {
   pageSize: number
   pageSlot: number
   itemCount?: number
-  prefix: (info: { itemCount: number }) => string
+  prefix: (info: { itemCount: number | undefined }) => string
 }
 
 type UsePagedTradeFeedResult<T> = {
@@ -53,7 +53,7 @@ export function usePagedTradeFeed<T>(
   } = options
 
   const totalCount = ref(0)
-  const pagedRows = ref<T[]>([])
+  const pagedRows = shallowRef<T[]>([])
   const lastLengthRefreshAt = ref(0)
   let refreshLengthPromise: Promise<void> | null = null
 

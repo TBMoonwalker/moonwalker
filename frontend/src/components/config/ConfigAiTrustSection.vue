@@ -74,12 +74,13 @@ defineProps<{
 const aiFormRef = ref<FormInst | null>(null)
 
 async function validate(): Promise<boolean> {
-    if (!aiFormRef.value) {
+    const form = aiFormRef.value
+    if (!form) {
         return Promise.resolve(true)
       }
 
     return new Promise<boolean>((resolve) => {
-        aiFormRef.value.validate((errors) => resolve(!errors))
+        form.validate((errors) => resolve(!errors))
       })
 }
 

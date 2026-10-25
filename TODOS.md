@@ -19,24 +19,6 @@ Do not suppress the warnings or bundle either major upgrade into a lock refresh.
 
 **Priority:** P2
 
-### Make frontend CI check the referenced TypeScript projects
-
-**Status:** Confirmed during accumulation dashboard verification (2026-10-20).
-
-`npm run type-check` runs `vue-tsc --noEmit` against a solution config with an
-empty `files` list. It reports success without checking the app project. A direct
-`vue-tsc -p tsconfig.app.json --noEmit --ignoreDeprecations 6.0` found 61 diagnostics
-in both the pre-change frontend and the accumulation dashboard working tree.
-The app/test configs also use TypeScript 6's deprecated `baseUrl` setting.
-
-Repair the existing diagnostics, migrate the deprecated config and make CI check
-the app and test projects explicitly without generating files beside source.
-Keep this tooling repair separate from the accumulation feature; passing the
-current CI step does not establish full frontend type safety.
-
-**Priority:** P2
-
-
 ### Denylist from open trade: symmetric re-enable + DESIGN.md badge pass
 
 **Status:** Ready to design when picked up

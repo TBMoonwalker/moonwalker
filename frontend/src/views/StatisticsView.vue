@@ -3,11 +3,11 @@ import {
    computed,
    h,
    onActivated,
-   reactive,
+   shallowReactive,
    ref,
    watch,
 } from 'vue'
-import type { DataTableColumns, PaginationProps, SorterResult } from 'naive-ui'
+import type { DataTableColumns, PaginationProps, DataTableSortState } from 'naive-ui'
 import Heatmap from '../components/Heatmap.vue'
 import { useViewport } from '../composables/useViewport'
 import { useAnalyticsStore } from '../stores/analytics'
@@ -38,19 +38,19 @@ const symbolSortState = ref<{ columnKey: string; order: 'ascend' | 'descend' } |
    columnKey: 'trades',
    order: 'descend',
 })
-const symbolPagination = reactive<PaginationProps>({
+const symbolPagination = shallowReactive<PaginationProps>({
    page: 1,
    pageSize: SYMBOL_PAGE_SIZE,
    pageSlot: 5,
    prefix: ({ itemCount }) => `Total ${itemCount} symbols`,
 })
-const recentPredictionsPagination = reactive<PaginationProps>({
+const recentPredictionsPagination = shallowReactive<PaginationProps>({
    page: 1,
    pageSize: SYMBOL_PAGE_SIZE,
    pageSlot: 5,
    prefix: ({ itemCount }) => `Total ${itemCount} predictions`,
 })
-const badEntryReviewPagination = reactive<PaginationProps>({
+const badEntryReviewPagination = shallowReactive<PaginationProps>({
    page: 1,
    pageSize: SYMBOL_PAGE_SIZE,
    pageSlot: 5,
@@ -69,10 +69,10 @@ function handleBadEntryReviewPageChange(page: number) {
    badEntryReviewPagination.page = page
 }
 
-function handleSymbolSorterChange(sorter: SorterResult | null) {
+function handleSymbolSorterChange(sorter: (DataTableSortState & { key?: string | number }) | null) {
    if (sorter && sorter.order !== false) {
       symbolSortState.value = {
-         columnKey: sorter.columnKey ?? sorter.key,
+         columnKey: String(sorter.columnKey ?? sorter.key),
          order: sorter.order as 'ascend' | 'descend',
       }
    } else {
@@ -81,10 +81,10 @@ function handleSymbolSorterChange(sorter: SorterResult | null) {
    symbolPagination.page = 1
 }
 
-function columnSortOrder(key: string): string | null {
+function columnSortOrder(key: string): 'ascend' | 'descend' | false {
    return symbolSortState.value?.columnKey === key
      ? symbolSortState.value.order
-     : null
+     : false
 }
 
 function syncPaginationSlots() {
@@ -120,8 +120,8 @@ const aiTrust = computed(
       () => (d.value as AnalyticsOverview | null)?.ai_trust ?? null,
  )
 const aiTrustCalibration = computed(() => aiTrust.value?.calibration ?? null)
-const recentPredictions = computed(() => aiTrust.value?.recent_predictions ?? [])
-const badEntryReview = computed(() => aiTrust.value?.bad_entry_review ?? [])
+const recentPredictions = computed<AiTrustPrediction[]>(() => aiTrust.value?.recent_predictions ?? [])
+const badEntryReview = computed<AiTrustPrediction[]>(() => aiTrust.value?.bad_entry_review ?? [])
 const topCalibrationBuckets = computed(() => (
    aiTrustCalibration.value?.buckets ?? []
 ).slice(0, 4))
@@ -202,14 +202,14 @@ watch(perSymbol, (rows) => {
 })
 
 watch(
-   recentPredictions,
-   (rows) => syncPaginationBounds(recentPredictionsPagination, rows.length),
+   () => recentPredictions.value.length,
+   (length) => syncPaginationBounds(recentPredictionsPagination, length),
    { immediate: true },
 )
 
 watch(
-   badEntryReview,
-   (rows) => syncPaginationBounds(badEntryReviewPagination, rows.length),
+   () => badEntryReview.value.length,
+   (length) => syncPaginationBounds(badEntryReviewPagination, length),
    { immediate: true },
 )
 
@@ -413,6 +413,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
       },
       {
        title: 'Range',
+       key: 'range',
        width: 160,
        render(row: any) {
         return fmtProfitRange(row)

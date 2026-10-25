@@ -33,7 +33,7 @@ const statistics_data = storeToRefs(statistics_store)
 const historyIsPartial = computed(() => (statistics_data.data.value as any)?.profit_history_scope === 'dynamic_dca_only')
 const profit_store_refs = storeToRefs(profit_store)
 const chart_data = ref({
-    labels: [],
+    labels: [] as string[],
     datasets: [{}]
 })
 const option = ref({})

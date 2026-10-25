@@ -49,6 +49,7 @@ import {
     createSeriesMarkers,
     type CandlestickData,
     type LineData,
+    type Logical,
     type SeriesMarker,
     type UTCTimestamp,
 } from 'lightweight-charts'
@@ -322,7 +323,7 @@ async function renderChart(): Promise<void> {
                 })
                 if (paddedRange) {
                     timeScale.setVisibleLogicalRange(paddedRange)
-                    appliedBoundaryRange = paddedRange
+                    appliedBoundaryRange = { from: paddedRange.from as Logical, to: paddedRange.to as Logical }
                  }
              }
          }

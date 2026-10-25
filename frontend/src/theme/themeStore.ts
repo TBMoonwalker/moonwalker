@@ -65,7 +65,7 @@ export const useThemeStore = defineStore("theme", () => {
   const mode = ref<ThemeMode>(readInitialMode())
 
   // The concrete scheme the Naive UI override and the CSS cascade consume.
-  const scheme = computed(() => resolveScheme(mode.value, osScheme.value))
+  const scheme = computed(() => resolveScheme(mode.value, osScheme.value ?? 'light'))
 
   // Re-apply the restored choice on mount: the pre-paint script already set the
   // attribute, but a reload can clear it without clearing storage, so re-mirror.

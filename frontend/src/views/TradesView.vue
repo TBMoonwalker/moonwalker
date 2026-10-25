@@ -39,6 +39,7 @@ const performanceRanges: { value: PerformanceRange; label: string }[] = [
   { value: '365d', label: '1Y' },
 ]
 const profitPeriod = computed(() => ({
+  all: 'daily',
   '1d': 'daily',
   '30d': 'monthly',
   '365d': 'yearly',

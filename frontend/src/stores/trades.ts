@@ -246,7 +246,7 @@ export const useTradesStore = defineStore('trades', {
     },
     setClosedTrades(raw: any[]) {
       this.closedTrades = raw.map((val: any) => {
-        const amountPrecision = !dust && isFloat(val.amount)
+        const amountPrecision = isFloat(val.amount)
           ? val.amount.toString().split('.')[1].length
           : 0
         const tpPrecision = isFloat(val.tp_price)

@@ -171,7 +171,7 @@ const {
     availableFunds,
     dialog,
     message,
-    onAfterDeny: () => configSnapshotStore.refresh(),
+    onAfterDeny: async () => { await configSnapshotStore.refresh() },
 })
 const {
     handlePauseMission,
@@ -304,7 +304,7 @@ function getOpenTradeRowProps(rowData: OpenTradeRow) {
         class: 'trade-row-clickable',
         tabindex: 0,
         'aria-expanded': isOpenTradeRowExpanded(rowData),
-        'aria-haspopup': isMobile.value ? 'dialog' : undefined,
+        'aria-haspopup': isMobile.value ? 'dialog' as const : undefined,
         'aria-label': `Toggle trade details for ${rowData.symbol}`,
         onClick: (event: MouseEvent) => {
             if (!isInteractiveRowTarget(event.target)) {

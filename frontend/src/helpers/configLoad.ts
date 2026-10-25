@@ -183,8 +183,9 @@ function toStrategyConfigOptions(
 function buildTradeModeSwitchGuard(
     response: ConfigApiResponse,
 ): TradeModeSwitchGuardState {
-    const rawGuard = response.trade_mode_switch_guard
-    if (!rawGuard || typeof rawGuard !== 'object') {
+    const value = response.trade_mode_switch_guard
+    const rawGuard = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+    if (!rawGuard) {
         return {
             blocked: false,
             can_switch: true,

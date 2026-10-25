@@ -13,7 +13,7 @@ interface AdvancedSection {
 const props = defineProps<{
     activeTarget: ControlCenterTarget | null
     advancedSections: AdvancedSection[]
-    bindTargetElement: (target: ControlCenterTarget) => (element: Element | null) => void
+    bindTargetElement: (target: ControlCenterTarget) => (element: Element | import('vue').ComponentPublicInstance | null) => void
 }>()
 
 const emit = defineEmits<{
@@ -30,7 +30,7 @@ const selectedTarget = computed(() =>
 <template>
     <div class="advanced-layout">
         <ControlCenterSectionNavigation
-            aria-label="Advanced settings sections"
+            :ariaLabel="'Advanced settings sections'"
             heading="Expert settings"
             select-label="Choose advanced settings section"
             :sections="advancedSections"

@@ -55,7 +55,7 @@ const customStrategy = {
   duplicated_from: 'ema_cross',
 }
 
-function strategyDetail(strategy: typeof builtinStrategy) {
+function strategyDetail(strategy: Omit<typeof builtinStrategy, 'duplicated_from'> & { duplicated_from: string | null }) {
   return {
     ...strategy,
     ir: {

@@ -43,7 +43,7 @@ defineProps<{
     capitalFormRef?: VNodeRef
     bindTargetElement: (
         target: ControlCenterTarget,
-    ) => (element: Element | null) => void
+    ) => (element: Element | import('vue').ComponentPublicInstance | null) => void
     dca: DcaAdvancedModel
     dcaFormRef?: VNodeRef
     exchange: ExchangeAdvancedModel

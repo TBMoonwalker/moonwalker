@@ -262,9 +262,9 @@ describe('OpenTrades mobile replay interaction', () => {
         const actions = mount(defineComponent({ render: () => render(row) }), { global: { stubs: tradeStubs } })
         expect(actions.text()).toBe('SellMore')
         await actions.get('button[aria-label="Sell SEI/USDC"]').trigger('click')
-        expect(wrapper.get('[data-test="mobile-trade-details"]').exists()).toBe(true)
+        expect(wrapper.find('[data-test="mobile-trade-details"]').exists()).toBe(true)
         await actions.get('button[aria-label="Sell SEI/USDC"]').trigger('click')
-        expect(wrapper.get('[data-test="mobile-trade-details"]').exists()).toBe(true)
+        expect(wrapper.find('[data-test="mobile-trade-details"]').exists()).toBe(true)
     })
 
     it('omits the expand column and opens replay details in a modal', async () => {
@@ -285,7 +285,7 @@ describe('OpenTrades mobile replay interaction', () => {
         expect(wrapper.get('[data-test="mobile-trade-details"]').attributes('role')).toBe(
             'dialog',
         )
-        expect(wrapper.get('[data-test="expanded-replay"]').exists()).toBe(true)
+        expect(wrapper.find('[data-test="expanded-replay"]').exists()).toBe(true)
     })
 
     it('keeps the expand column and inline replay on larger viewports', async () => {
@@ -305,6 +305,6 @@ describe('OpenTrades mobile replay interaction', () => {
         expect(wrapper.find('[data-test="mobile-trade-details"]').exists()).toBe(
             false,
         )
-        expect(wrapper.get('[data-test="expanded-replay"]').exists()).toBe(true)
+        expect(wrapper.find('[data-test="expanded-replay"]').exists()).toBe(true)
     })
 })

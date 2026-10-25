@@ -17,7 +17,7 @@ export function useConfiguredMinTimeframe() {
                 (await configSnapshotStore.ensureLoaded(false)) ??
                 configSnapshotStore.snapshot.value
             configuredMinTimeframe.value = resolveMinTimeframe(
-                config?.timeframe ?? null,
+                typeof config?.timeframe === 'string' ? config.timeframe : null,
             )
         } catch (_error) {
             configuredMinTimeframe.value = resolveMinTimeframe(null)

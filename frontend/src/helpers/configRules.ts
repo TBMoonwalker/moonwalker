@@ -27,9 +27,9 @@ interface SignalRulesState {
     csvsignal_source: string | null
     signal: string | null
     symbol_list: string | null
-    websocket_headers: string | null
-    websocket_min_confidence: number | null
-    websocket_url: string | null
+    websocket_headers?: string | null
+    websocket_min_confidence?: number | null
+    websocket_url?: string | null
 }
 
 interface BuildConfigRulesOptions {
@@ -117,7 +117,7 @@ function createPositiveNumberAfterSubmitValidator(
     }
 }
 
-function parseOptionalJsonObject(value: string | null): boolean {
+function parseOptionalJsonObject(value: string | null | undefined): boolean {
     if (value === null || value === undefined || value.trim().length === 0) {
         return true
     }

@@ -6,7 +6,7 @@ import type { SetupEntryChoice } from '../../control-center/setupEntryHistory'
 type BackupRestoreMode = 'config' | 'full'
 
 defineProps<{
-    bindBackupFileInput: (element: Element | null) => void
+    bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
     hasSelectedBackupPayload: boolean
     restoreLoading: boolean
     restoreReview: RestoreReviewState | null

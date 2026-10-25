@@ -44,7 +44,12 @@ import { resolveBudgetAllocation } from '../helpers/portfolioExposure'
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
 const configSnapshotStore = useSharedConfigSnapshot()
-const includesCsvDeclarations = computed(() => Boolean(statistics_data.data.value?.accumulation_performance?.includes_csv_declarations))
+const includesCsvDeclarations = computed(() => {
+    const value = statistics_data.data.value
+    if (!value || typeof value !== 'object' || !('accumulation_performance' in value)) return false
+    const performance = value.accumulation_performance
+    return Boolean(performance && typeof performance === 'object' && 'includes_csv_declarations' in performance && performance.includes_csv_declarations)
+})
 const hasStatisticsData = computed(() => statistics_data.hasReceivedData.value)
 const performanceComplete = ref(true)
 const profit_overall = ref(0)

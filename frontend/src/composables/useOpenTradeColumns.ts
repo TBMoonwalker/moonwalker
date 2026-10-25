@@ -355,7 +355,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     h(OpenTradeExpandedRow, {
                         rowData,
                         minTimeframe: options.configuredMinTimeframe.value,
-                        onAddOrderManually: options.onAddManualBuy,
+                        onAddOrderManually: () => options.onAddManualBuy(rowData),
                         accumulationIntent: options.accumulationIntent?.value?.symbol === rowData.symbol ? options.accumulationIntent.value : null,
                     }),
             },

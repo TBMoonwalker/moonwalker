@@ -37,10 +37,10 @@ defineProps<{
     activeTarget: ControlCenterTarget
     activationDisabled: boolean
     activationLoading: boolean
-    bindBackupFileInput: (element: Element | null) => void
+    bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
     bindTargetElement: (
         target: ControlCenterTarget,
-    ) => (element: Element | null) => void
+    ) => (element: Element | import('vue').ComponentPublicInstance | null) => void
     canTestMonitoringTelegram: boolean
     capital: CapitalModel
     capitalFormRef?: VNodeRef
@@ -170,7 +170,7 @@ const emit = defineEmits<{
 
         <template #dca>
             <ConfigDcaSection
-                 ref="dcaFormRef"
+                 :ref="dcaFormRef"
                  :dca="dca"
                  :signal-name="signal.signal"
                  :rules="rules"

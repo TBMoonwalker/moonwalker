@@ -309,7 +309,6 @@ export function useAccumulationPanel(symbol?: string) {
         return
       }
       rememberRequest(null, command.operation_id)
-      performance.value = null
       uncertain.value = null
       notice.value = result.operation.status === 'pending'
         ? command.action === 'correct_import'

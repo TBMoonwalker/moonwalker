@@ -55,6 +55,7 @@ import {
     LineSeries,
     createChart,
     createSeriesMarkers,
+    type UTCTimestamp,
 } from 'lightweight-charts'
 
 import { fetchJson } from '../api/client'
@@ -95,8 +96,8 @@ type TradeReplayMarker = {
 }
 
 type NormalizedTradeReplayMarker = {
-    time: number
-    position: TradeReplayMarker['position']
+    time: UTCTimestamp
+    position: 'aboveBar' | 'belowBar' | 'inBar'
     color: string
     shape: TradeReplayMarker['shape']
     text: string
@@ -478,8 +479,8 @@ async function initChart(): Promise<void> {
 
         const localOffsetSeconds = getLocalOffsetSeconds()
         const localTickerData = tickerData.map((entry) => ({
-            ...entry,
-            time: Number(entry.time) + localOffsetSeconds,
+            open: entry.open, high: entry.high, low: entry.low, close: entry.close,
+            time: (Number(entry.time) + localOffsetSeconds) as UTCTimestamp,
         }))
         await nextAnimationFrame()
         candlestickSeries.setData(localTickerData)
@@ -506,7 +507,7 @@ async function initChart(): Promise<void> {
         }
 
         const candleMarkerData = props.markers
-            .map((marker) => {
+            .map((marker): NormalizedTradeReplayMarker | null => {
                 const markerTime = normalizeMarkerTime(
                     marker.timestamp,
                     timeframe.seconds,
@@ -515,12 +516,12 @@ async function initChart(): Promise<void> {
                 if (markerTime === null) {
                     return null
                 }
-                if (toFiniteNumber(marker.price) !== null) {
+                if (toFiniteNumber(marker.price) !== null || !['aboveBar', 'belowBar', 'inBar'].includes(marker.position)) {
                     return null
                 }
                 return {
-                    time: markerTime,
-                    position: marker.position,
+                    time: markerTime as UTCTimestamp,
+                    position: marker.position as NormalizedTradeReplayMarker['position'],
                     color: marker.color,
                     shape: marker.shape,
                     text: marker.text,
@@ -539,7 +540,7 @@ async function initChart(): Promise<void> {
                     return null
                 }
                 return {
-                    time: markerTime,
+                    time: markerTime as UTCTimestamp,
                     position: 'inBar' as const,
                     color: marker.color,
                     shape: marker.shape,

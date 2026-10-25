@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { bindConfigSectionForm } from '../composables/useConfigValidationFlow'
 import { computed, nextTick, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
@@ -170,6 +171,19 @@ const {
         },
     },
 })
+
+const formBindings = {
+    aiTrust: bindConfigSectionForm(aiTrustFormRef),
+    autopilot: bindConfigSectionForm(autopilotFormRef),
+    capital: bindConfigSectionForm(capitalFormRef),
+    dca: bindConfigSectionForm(dcaFormRef),
+    exchange: bindConfigSectionForm(exchangeFormRef),
+    filter: bindConfigSectionForm(filterFormRef),
+    general: bindConfigSectionForm(generalFormRef),
+    indicator: bindConfigSectionForm(indicatorFormRef),
+    monitoring: bindConfigSectionForm(monitoringFormRef),
+    signal: bindConfigSectionForm(signalFormRef),
+}
 
 const syncControlCenterConfigChange =
     createControlCenterConfigChangeSynchronizer({
@@ -394,20 +408,20 @@ useControlCenterLifecycle({
                     :bind-backup-file-input="bindBackupFileInput"
                     :bind-target-element="bindTargetElement"
                     :capital="capital"
-                    :capital-form-ref="capitalFormRef"
+                    :capital-form-ref="formBindings.capital"
                     :can-test-monitoring-telegram="canTestMonitoringTelegram()"
                     :currency="currency"
                     :dca="dca"
-                    :dca-form-ref="dcaFormRef"
+                    :dca-form-ref="formBindings.dca"
                     :dry-run-activation-locked="
                         baselineState?.exchange?.dry_run === true
                     "
                     :exchange="exchange"
-                    :exchange-form-ref="exchangeFormRef"
+                    :exchange-form-ref="formBindings.exchange"
                     :exchanges="exchanges"
                     :fetch-asap-symbols-for-currency="fetchAsapSymbolsForCurrency"
                     :general="general"
-                    :general-form-ref="generalFormRef"
+                    :general-form-ref="formBindings.general"
                     :get-asap-missing-fields-label="getAsapMissingFieldsLabel"
                     :get-setup-task-status="getSetupTaskStatus"
                     :get-setup-task-summary="getSetupTaskSummary"
@@ -421,7 +435,7 @@ useControlCenterLifecycle({
                     :live-activation-available="readiness.complete && readiness.dryRun"
                     :market="market"
                     :monitoring="monitoring"
-                    :monitoring-form-ref="monitoringFormRef"
+                    :monitoring-form-ref="formBindings.monitoring"
                     :monitoring-test-loading="monitoringTestLoading"
                     :readiness-complete="readiness.complete"
                     :readiness-first-run="readiness.firstRun"
@@ -439,7 +453,7 @@ useControlCenterLifecycle({
                     :show-setup-entry-gate="showSetupEntryGate"
                     :show-setup-style-selector="showSetupStyleSelector"
                     :signal="signal"
-                    :signal-form-ref="signalFormRef"
+                    :signal-form-ref="formBindings.signal"
                     :symsignals="symsignals"
                     :timerange="timerange"
                     :trade-mode-switch-guard="tradeModeSwitchGuard"
@@ -461,23 +475,23 @@ useControlCenterLifecycle({
                     :active-target="routeState.target"
                     :advanced-sections="advancedSections"
                     :autopilot="autopilot"
-                    :autopilot-form-ref="autopilotFormRef"
+                    :autopilot-form-ref="formBindings.autopilot"
                     :bind-target-element="bindTargetElement"
                     :capital="capital"
-                    :capital-form-ref="capitalFormRef"
+                    :capital-form-ref="formBindings.capital"
                     :dca="dca"
-                    :dca-form-ref="dcaFormRef"
+                    :dca-form-ref="formBindings.dca"
                     :exchange="exchange"
-                    :exchange-form-ref="exchangeFormRef"
+                    :exchange-form-ref="formBindings.exchange"
                     :filter="filter"
-                    :filter-form-ref="filterFormRef"
+                    :filter-form-ref="formBindings.filter"
                     :general="general"
-                    :general-form-ref="generalFormRef"
+                    :general-form-ref="formBindings.general"
                     :ai-trust="aiTrust"
-                    :ai-trust-form-ref="aiTrustFormRef"
+                    :ai-trust-form-ref="formBindings.aiTrust"
                     :history-lookback-options="historyLookbackOptions"
                     :indicator="indicator"
-                    :indicator-form-ref="indicatorFormRef"
+                    :indicator-form-ref="formBindings.indicator"
                     :rules="rules"
                     :signal="signal"
                     @select-target="navigateToControlCenter('advanced', $event)"

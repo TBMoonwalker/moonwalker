@@ -5,10 +5,10 @@
     "vitest.config.*",
     "playwright.config.*",
     "cypress.config.*",
-    "nightwatch.conf.*",
+    "nightwatch.conf.*"
   ],
   "compilerOptions": {
-    "composite": true,
+    "composite": false,
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "types": [

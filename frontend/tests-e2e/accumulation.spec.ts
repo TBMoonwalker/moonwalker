@@ -18,7 +18,7 @@ test('reviews an exact inventory declaration without adding it to order history'
     activation_id: 'correction', symbol: 'BTC/USDC', state: 'paused', explicitly_paused: true, account_matches: true,
     revision: 20, reason: null, runtime_wait_reason: null, observations_initialized: true,
     strategy_version_id: 5, strategy_slug: 'Patient dip', strategy_version: 1,
-    holding_integrity: 'owned', holding: { net_quantity: '0.100000000000000001', remaining_cost: '12.000000000000000001', contributed_quote: '12.000000000000000001', disposal_proceeds: '0', basis_provenance: 'csv_declared', execution_history_complete: false, fees: { totals: {}, pending_reports: 0 } },
+    holding_integrity: 'owned', holding: { deal_id: null, net_quantity: '0.100000000000000001', remaining_cost: '12.000000000000000001', contributed_quote: '12.000000000000000001', disposal_proceeds: '0', basis_provenance: 'csv_declared', execution_history_complete: false, fees: { totals: {}, pending_reports: 0 } },
     entry: null, operations: [], older_operations_available: false,
   }
   const requests: Record<string, unknown>[] = []
@@ -68,7 +68,7 @@ test('reviews rotated credentials and keeps the holding paused after proof retry
     activation_id: 'rotation', symbol: 'BTC/USDC', state: 'enabled', explicitly_paused: false, account_matches: false,
     revision: 20, reason: null, runtime_wait_reason: null, observations_initialized: true,
     strategy_version_id: 5, strategy_slug: 'Patient dip', strategy_version: 1,
-    holding_integrity: 'owned', holding: { net_quantity: '0.100000000000000001', remaining_cost: '12.000000000000000001', contributed_quote: '12.000000000000000001', disposal_proceeds: '0', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } },
+    holding_integrity: 'owned', holding: { deal_id: null, net_quantity: '0.100000000000000001', remaining_cost: '12.000000000000000001', contributed_quote: '12.000000000000000001', disposal_proceeds: '0', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } },
     entry: null, operations: [], older_operations_available: false,
   }
   const requests: Record<string, unknown>[] = []
@@ -116,7 +116,7 @@ test('retires an unsent close while preserving Closing and requiring a separate 
     activation_id: 'retirement', symbol: 'BTC/USDC', state: 'closing', explicitly_paused: true,
     revision: 20, reason: 'restore_validation_required', runtime_wait_reason: null, observations_initialized: true,
     strategy_version_id: 5, strategy_slug: 'Patient dip', strategy_version: 1,
-    holding_integrity: 'owned', holding: { net_quantity: '0.100000000000000001', remaining_cost: null, contributed_quote: null, disposal_proceeds: '0', basis_provenance: 'unknown', execution_history_complete: false, fees: null },
+    holding_integrity: 'owned', holding: { deal_id: null, net_quantity: '0.100000000000000001', remaining_cost: null, contributed_quote: null, disposal_proceeds: '0', basis_provenance: 'unknown', execution_history_complete: false, fees: null },
     entry: null, operations: [], older_operations_available: false,
     quarantined_commands: [previous], quarantined_orders: [],
   }
@@ -240,6 +240,7 @@ test('reviews manual sales and retains an uncertain request across reload', asyn
     explicitly_paused: false, revision: 12, reason: null, runtime_wait_reason: null,
     observations_initialized: true, strategy_version_id: 5, strategy_slug: 'accumulation_dip_v1', strategy_version: 2,
     holding_integrity: 'owned', holding: {
+      deal_id: null,
       net_quantity: '0.100000000000000001', remaining_cost: null,
       contributed_quote: '12.000000000000000001', disposal_proceeds: '0',
       basis_provenance: 'unknown', execution_history_complete: false, fees: null,
@@ -395,7 +396,7 @@ for (const action of ['declare_ownership', 'restore_inventory', 'acknowledge_set
       timeframe: '1h', key: 'test-only', secret: 'test-only', currency: 'USDC', max_bots: 2,
       bo: 10, tp: 1, capital_max_fund: 100, history_lookback_time: '180d', dca: false, dry_run: true, mstc: 4,
     } }))
-    const owned = { net_quantity: '0.100000000000000001', remaining_cost: '12', contributed_quote: '12', disposal_proceeds: '0', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } }
+    const owned = { deal_id: null, net_quantity: '0.100000000000000001', remaining_cost: '12', contributed_quote: '12', disposal_proceeds: '0', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } }
     const prior = { operation_id: 'settled-close', action: 'close', status: 'quarantined', result_state: 'closing', result_revision: 19, reason: 'restore_validation_required' }
     const detail: AccumulationDetail = {
       activation_id: 'reviewed-repair', symbol: 'BTC/USDC', state: action === 'acknowledge_settlement' ? 'closing' : 'paused', explicitly_paused: true,
@@ -456,7 +457,7 @@ test('reviews and archives exact dust without a sale, then shows the preserved U
     activation_id: 'dust', symbol: 'BTC/USDC', state: 'closing', explicitly_paused: false, account_matches: true,
     revision: 34, reason: null, runtime_wait_reason: 'WAIT_REMAINDER', observations_initialized: true,
     strategy_version_id: 5, strategy_slug: 'Patient dip', strategy_version: 1,
-    holding_integrity: 'owned', holding: { net_quantity: '0.0000048', remaining_cost: '0.390128303007857464591', contributed_quote: '1299', disposal_proceeds: '1298', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } },
+    holding_integrity: 'owned', holding: { deal_id: null, net_quantity: '0.0000048', remaining_cost: '0.390128303007857464591', contributed_quote: '1299', disposal_proceeds: '1298', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } },
     entry: null, operations: [{ operation_id: 'close-1', action: 'close', status: 'pending', result_state: 'closing', result_revision: 34, reason: null }], older_operations_available: false,
   }
   const requests: Record<string, unknown>[] = []

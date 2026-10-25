@@ -28,6 +28,7 @@ export interface AccumulationStatus {
   inventory_restore_required?: boolean
   holding_integrity: 'unlinked' | 'owned' | 'invalid'
   holding: null | {
+    deal_id: string | null
     net_quantity: string | null
     remaining_cost: string | null
     contributed_quote: string | null

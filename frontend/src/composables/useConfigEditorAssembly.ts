@@ -134,7 +134,7 @@ export function useConfigEditorAssembly(
         message: options.message,
         onInvalid: options.validation?.onInvalid,
         onSubmitShortcut: options.validation?.onSubmitShortcut,
-        onValidSubmit: options.validation?.onValidSubmit ?? saveFlow.submitForm,
+        onValidSubmit: options.validation?.onValidSubmit ?? (async () => { await saveFlow.submitForm() }),
         setSaveError: saveFlow.setSaveError,
     })
 

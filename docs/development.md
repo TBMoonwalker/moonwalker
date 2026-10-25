@@ -165,3 +165,12 @@ account. Do not migrate historical financial data to make recovery pass.
 `GET /trades/executions/{deal_id}` projects adopted CSV purchases separately from
 native fills. Keep CSV rows out of the execution ledger and routine WebSocket
 status snapshots. Validate their receipt's exact deal identity on every read.
+
+
+### Frontend type checking
+
+`cd frontend && npm run type-check` explicitly checks the application, test and
+Node tooling projects with `--noEmit`. The root references file alone does not
+check those projects. Test configuration includes the application sources it
+imports, and path aliases resolve without the deprecated `baseUrl` option.
+The mandatory CI type-check step uses this same command; builds also run it.

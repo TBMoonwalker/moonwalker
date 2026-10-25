@@ -6,7 +6,7 @@ type BackupRestoreMode = 'config' | 'full'
 withDefaults(
     defineProps<{
         actionButtonClass?: string | null
-        bindBackupFileInput: (element: Element | null) => void
+        bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
         hasSelectedBackupPayload: boolean
         restoreLoading: boolean
         restoreReview?: RestoreReviewState | null

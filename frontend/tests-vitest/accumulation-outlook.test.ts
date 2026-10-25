@@ -36,7 +36,7 @@ describe('accumulation operator outlook', () => {
     [{ account_matches: false }, 'Account ownership needs review'],
     [{ inventory_restore_required: true }, 'Inventory needs repair'],
     [{ quarantined_orders: [{ placement_operation_id: 'order', side: 'buy', has_lookup_identity: true }] }, 'Recorded work needs review'],
-  ] as const)('puts repair ahead of an entry or resume suggestion', (overrides, title) => {
+  ] satisfies Array<[Partial<AccumulationDetail>, string]>)('puts repair ahead of an entry or resume suggestion', (overrides, title) => {
     const outlook = accumulationOutlook(row({ state: 'paused', explicitly_paused: true, ...overrides }), true)
     expect(outlook.title).toBe(title)
     expect(outlook.action).toBeUndefined()

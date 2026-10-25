@@ -17,7 +17,7 @@ function createTargetElementMap(): TargetElementMap {
     }, {} as TargetElementMap)
 }
 
-function toHtmlElement(element: Element | null): HTMLElement | null {
+function toHtmlElement(element: Element | import('vue').ComponentPublicInstance | null): HTMLElement | null {
     if (typeof HTMLElement === 'undefined') {
         return null
     }
@@ -28,7 +28,7 @@ export function useControlCenterTargetRegistry() {
     const targetElements = createTargetElementMap()
 
     function bindTargetElement(target: ControlCenterTarget) {
-        return (element: Element | null) => {
+        return (element: Element | import('vue').ComponentPublicInstance | null) => {
             targetElements[target].value = toHtmlElement(element)
         }
     }

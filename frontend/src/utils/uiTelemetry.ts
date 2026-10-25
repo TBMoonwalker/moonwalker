@@ -92,7 +92,8 @@ function observeInp(): void {
       }
     }
   })
-  observer.observe({ type: 'event', buffered: true, durationThreshold: 40 })
+  const options: PerformanceObserverInit & { durationThreshold: number } = { type: 'event', buffered: true, durationThreshold: 40 }
+  observer.observe(options)
 }
 
 export function initUiTelemetry(): void {

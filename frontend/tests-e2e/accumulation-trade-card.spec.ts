@@ -16,7 +16,7 @@ test(`integrates accumulation with order status and trade details with pushed wa
   const detail: AccumulationDetail = { activation_id: 'fixture', symbol: 'BTC/USDC', state: 'enabled', explicitly_paused: false,
     account_matches: true, revision: 4, reason: null, runtime_wait_reason: 'WAIT_DEPTH', observations_initialized: true,
     strategy_version_id: 7, strategy_slug: 'dip', strategy_version: 1, holding_integrity: 'owned',
-    holding: { net_quantity: '0.1', remaining_cost: '10', contributed_quote: '10', disposal_proceeds: '0', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } },
+    holding: { deal_id: null, net_quantity: '0.1', remaining_cost: '10', contributed_quote: '10', disposal_proceeds: '0', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } },
     entry: null, operations: [], older_operations_available: false,
     wait_condition: { reason: 'WAIT_DEPTH', timeframe: '1h', observed_close_ms: stamp, observed_price: '100', next_close_ms: stamp + 3600000,
       levels: [{ kind: 'depth', direction: 'at_or_below', target_price: '98', change_percent: '-2' }] } }
@@ -157,7 +157,7 @@ test('opens the requested recovery symbol outside the first registry page', asyn
   const summary = { activation_id: 'btc', symbol: 'BTC/USDC', state: 'paused', explicitly_paused: true,
     revision: 2, reason: null, runtime_wait_reason: null, observations_initialized: true,
     strategy_version_id: 7, strategy_slug: 'dip', strategy_version: 1, holding_integrity: 'owned',
-    account_matches: false, holding: { net_quantity: '0.1', remaining_cost: '100', contributed_quote: '100', disposal_proceeds: '0', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } } }
+    account_matches: false, holding: { deal_id: null, net_quantity: '0.1', remaining_cost: '100', contributed_quote: '100', disposal_proceeds: '0', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } } }
   const requested: string[] = []
   await page.route('**/accumulation/**', route => {
     const url = new URL(route.request().url())

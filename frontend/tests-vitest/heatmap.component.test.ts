@@ -31,7 +31,7 @@ const MIN_COLOR: Record<'light' | 'dark', string> = {
 }
 
 function rectStyleColors(wrapper: VueWrapper): string[] {
-  return wrapper.findAll('.n-heatmap-rect').map((el) => el.attributes('style'))
+  return wrapper.findAll('.n-heatmap-rect').map((el) => el.attributes('style') ?? '')
 }
 
 function hasWash(wrapper: VueWrapper, scheme: 'light' | 'dark'): boolean {
@@ -61,7 +61,7 @@ describe('Heatmap', () => {
   it('renders the calendar surface when trade data exists', () => {
     const wrapper = mountHeatmap([{ timestamp: Date.UTC(2026, 0, 2), value: 3 }])
 
-    expect(wrapper.get('.n-heatmap').exists()).toBe(true)
+    expect(wrapper.find('.n-heatmap').exists()).toBe(true)
     expect(wrapper.findAll('.n-heatmap-rect').length).toBeGreaterThan(0)
     expect(wrapper.text()).toContain('less')
     expect(wrapper.text()).toContain('more')

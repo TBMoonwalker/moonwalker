@@ -61,12 +61,13 @@ defineProps<{
 const runtimeFormRef = ref<FormInst | null>(null)
 
 async function validate(): Promise<boolean> {
-    if (!runtimeFormRef.value) {
+    const form = runtimeFormRef.value
+    if (!form) {
         return Promise.resolve(true)
     }
 
     return new Promise<boolean>((resolve) => {
-        runtimeFormRef.value.validate((errors) => resolve(!errors))
+        form.validate((errors) => resolve(!errors))
     })
 }
 
