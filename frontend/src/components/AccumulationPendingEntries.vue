@@ -15,7 +15,7 @@ function toggle(symbol: string, event: Event) { if ((event.target as HTMLDetails
 </script>
 
 <template>
-  <section v-if="panel.visible.value && (entries.length || requestedOutsidePage || panel.error.value || panel.pendingRequest.value)" class="pending-accumulation" aria-label="Accumulation registrations">
+  <section v-if="panel.visible.value && (entries.length || panel.next.value || requestedOutsidePage || panel.error.value || panel.pendingRequest.value)" class="pending-accumulation" aria-label="Accumulation registrations">
     <p v-if="panel.error.value" role="alert">{{ panel.error.value }}</p>
     <details v-for="entry in entries" :key="entry.activation_id" class="pending-entry" :open="selected === entry.symbol" @toggle="toggle(entry.symbol, $event)">
       <summary><strong>{{ entry.symbol }}</strong> <span>{{ accumulationPendingStatus(entry, panel.fresh.value) }}</span></summary>

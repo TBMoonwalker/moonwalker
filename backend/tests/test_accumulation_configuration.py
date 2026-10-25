@@ -8,9 +8,13 @@ import model
 import pytest
 import pytest_asyncio
 from service import accumulation_config, accumulation_runtime
+from service.accumulation_lifecycle import AccumulationLifecycleService
 from service.accumulation_strategy import build_accumulation_strategy_document
 from service.config import Config
 from service.config_migrations import canonicalize_trade_mode_rows
+from service.csv_signal_import import CSVSignalImportService
+from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
+from service.orders import Orders
 from service.trading_maintenance import TradingMaintenanceBarrier
 from tortoise import Tortoise
 
@@ -165,6 +169,147 @@ async def test_live_mode_change_requires_pause_and_no_managed_exposure(selection
     await activation.save()
     await config.batch_set(updates)
     assert config.get("trade_mode") == "accumulation"
+
+
+# Value: protects=settled mode handoff preserves history and new DCA ownership;
+# fails_when=historical registration permanently blocks DCA; why_new=existing
+# mode and routing tests cover each half separately; seam=none;
+# no_claim=exchange acceptance (admission and real SQLite only).
+@pytest.mark.asyncio
+async def test_settled_mode_switch_releases_dca_admission_without_deleting_history(
+    selection,
+):
+    config, updates, *_ = selection
+    await config.batch_set(updates)
+    activation = await model.AccumulationActivation.create(
+        symbol="BTC/USDC",
+        account_scope="test",
+        state="stopped",
+        observations_initialized=True,
+    )
+    operation = await model.AccumulationLifecycleOperation.create(
+        operation_id="test-stopped-history",
+        activation=activation,
+        action="empty_stop",
+        request_json="{}",
+        status="applied",
+        previous_state="enabled",
+        previous_paused=False,
+        result_state="stopped",
+        result_revision=1,
+    )
+    assert (await load_lifecycle_route("BTC/USDC")).route == LifecycleRoute.ACCUMULATION
+    await config.set("trade_mode", {"value": "dynamic_dca", "type": "str"})
+    with pytest.raises(ValueError, match="Select Accumulation"):
+        await AccumulationLifecycleService().submit(
+            {
+                "symbol": "BTC/USDC",
+                "action": "reactivate",
+                "operation_id": "test-stale-tab-reactivation",
+                "expected_revision": activation.revision,
+            },
+            account_scope="test",
+        )
+    assert not await model.AccumulationLifecycleOperation.filter(
+        operation_id="test-stale-tab-reactivation"
+    ).exists()
+    assert await Orders()._legacy_lifecycle_rejection("BTC/USDC", "buy") is None
+    await CSVSignalImportService().import_from_csv(
+        "date;symbol;price;amount\n18/08/2025 19:32:00;BTC/USDC;100;1\n",
+        "USDC",
+        1,
+    )
+    holding = await model.OpenTrades.get(symbol="BTC/USDC")
+    assert holding.amount == 1 and holding.cost == 100
+    assert await model.Trades.filter(symbol="BTC/USDC", baseorder=True).count() == 1
+    assert (await load_lifecycle_route("BTC/USDC")).route == LifecycleRoute.CLASSIC_DCA
+    intent = await model.PlacementIntent.create(
+        operation_id="test-new-dca-intent",
+        exchange_name="test",
+        symbol="BTC/USDC",
+        action="buy",
+        side="buy",
+        order_type="market",
+        state="prepared",
+    )
+    # The new DCA order's own intent must remain eligible for legacy recovery.
+    assert (await load_lifecycle_route("BTC/USDC")).route == LifecycleRoute.CLASSIC_DCA
+    assert await model.AccumulationLifecycleOperation.filter(id=operation.id).exists()
+    await activation.refresh_from_db()
+    assert activation.state == "stopped" and activation.holding_id is None
+    with pytest.raises(ValueError, match="Finish existing"):
+        await config.set("trade_mode", {"value": "accumulation", "type": "str"})
+    await holding.delete()
+    await intent.delete()
+    await config.set("trade_mode", {"value": "accumulation", "type": "str"})
+    assert (await load_lifecycle_route("BTC/USDC")).route == LifecycleRoute.ACCUMULATION
+
+
+# Value: protects=unsettled accumulation work prevents mode handoff;
+# fails_when=pending commands or opportunity commitments lose their owner;
+# why_new=existing switch guard covers placements and holdings only; seam=none;
+# no_claim=exchange recovery (real SQLite admission boundary only).
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pending", ["command", "opportunity", "placement"])
+async def test_mode_handoff_rejects_unsettled_stopped_registrations(selection, pending):
+    config, updates, version, _ = selection
+    await config.batch_set(updates)
+    activation = await model.AccumulationActivation.create(
+        symbol="BTC/USDC", account_scope="test", state="stopped"
+    )
+    if pending in {"command", "placement"}:
+        placement = (
+            await model.PlacementIntent.create(
+                operation_id="test-unresolved-accumulation",
+                exchange_name="test",
+                symbol="BTC/USDC",
+                action="sell",
+                side="sell",
+                order_type="market",
+                state="indeterminate",
+            )
+            if pending == "placement"
+            else None
+        )
+        await model.AccumulationLifecycleOperation.create(
+            operation_id="test-pending-reactivation",
+            activation=activation,
+            action="reactivate",
+            request_json="{}",
+            previous_state="stopped",
+            previous_paused=True,
+            result_state="stopped",
+            result_revision=1,
+            status="quarantined" if placement else "pending",
+            placement=placement,
+        )
+    else:
+        await model.AccumulationOpportunity.create(
+            activation=activation,
+            generation=activation.generation,
+            strategy_version=version,
+            observation_epoch=0,
+            signal_close_ms=1,
+            expires_at_ms=2,
+            signal_price="100",
+            signal_atr="1",
+            unresolved_slot=activation.id,
+        )
+    guard = await accumulation_config.configuration_mode_guard(config.snapshot())
+    assert guard["blocked"] is True
+    with pytest.raises(ValueError, match="Finish existing"):
+        await config.set("trade_mode", {"value": "dynamic_dca", "type": "str"})
+    # A corrupt/direct mode write must not bypass unresolved ownership either.
+    await model.AppConfig.filter(key="trade_mode").update(value="dynamic_dca")
+    assert (await load_lifecycle_route("BTC/USDC")).route == LifecycleRoute.ACCUMULATION
+    with pytest.raises(ValueError, match="managed or reserved"):
+        await CSVSignalImportService().import_from_csv(
+            "date;symbol;price;amount\n18/08/2025 19:32:00;BTC/USDC;100;1\n",
+            "USDC",
+            1,
+        )
+    assert not await model.OpenTrades.all().exists()
+    assert not await model.Trades.all().exists()
 
 
 @pytest.mark.asyncio

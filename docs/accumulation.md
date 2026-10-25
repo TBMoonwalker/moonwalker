@@ -71,6 +71,10 @@ still requires an explicit retry after a failed check.
 Changing the global entry mode requires no open holdings, non-stopped
 registrations or unresolved orders. Pause an already-live instance first. The
 server drains order work and rechecks these conditions when saving.
+Pending accumulation commands and reserved opportunities also block the switch.
+After a settled switch to Dynamic DCA, a stopped, empty registration no longer
+blocks a new DCA trade for its symbol. Its accumulation history remains recorded;
+switching back to accumulation retains the explicit-reactivation requirement.
 
 Authenticated balance reads must complete within ten seconds. For Binance spot,
 CCXT copies the last account update (`info.updateTime`) into the balance timestamp;

@@ -14,6 +14,7 @@ from service.accumulation_import import (
     parse_accumulation_csv,
 )
 from service.database import run_sqlite_write_with_retry
+from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.trade_math import (
     calculate_order_size,
     calculate_so_percentage,
@@ -148,14 +149,20 @@ class CSVSignalImportService:
 
         async def _persist_import() -> None:
             async with in_transaction() as conn:
-                # A stopped accumulation activation still owns its symbol. Check
-                # inside the write transaction so concurrent staging cannot be
-                # bypassed by this legacy importer after its initial read.
-                for table in (
-                    model.AccumulationActivation,
-                    model.OpenTrades,
-                    model.Trades,
-                ):
+                # Use the same settled handoff as ordinary DCA admission, in the
+                # persistence snapshot. Historical registrations are retained.
+                reserved_symbols = (
+                    await model.AccumulationActivation.filter(symbol__in=symbols)
+                    .using_db(conn)
+                    .values_list("symbol", flat=True)
+                )
+                for symbol in reserved_symbols:
+                    decision = await load_lifecycle_route(symbol, connection=conn)
+                    if decision.route != LifecycleRoute.CLASSIC_DCA:
+                        raise ValueError(
+                            "CSV signal import blocked: symbols are already managed or reserved."
+                        )
+                for table in (model.OpenTrades, model.Trades):
                     if await table.filter(symbol__in=symbols).using_db(conn).exists():
                         raise ValueError(
                             "CSV signal import blocked: symbols are already managed or reserved."

@@ -60,6 +60,9 @@ with spot markets, fixed ASAP symbols or CSV imports, and Autopilot disabled.
 Changing trade modes drains active order work and requires no open holdings,
 non-stopped accumulation registrations or unresolved placements. A live instance
 must first be globally paused. These conditions are checked again when saving.
+Pending accumulation commands and reserved opportunities must also settle. After
+switching to Dynamic DCA, stopped, empty registrations retain their history while
+allowing new DCA trades for those symbols.
 Follow the [accumulation operating guide](howto-operate-accumulation.md) for setup
 and manual exits, or the [accumulation reference](accumulation.md) for exact rules.
 

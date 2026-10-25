@@ -9,6 +9,7 @@ from typing import Any
 import model
 from service.accumulation_contracts import AccumulationStateError, canonical_decimal
 from service.config_runtime_store import ConfigUpdateAction
+from service.lifecycle_routing import has_pending_accumulation_work
 from service.order_requests import normalize_order_symbol
 from service.strategy_runtime import load_accumulation_strategy_version
 from service.trading_maintenance import trading_maintenance_barrier
@@ -22,9 +23,12 @@ async def configuration_mode_guard(current: Mapping[str, Any]) -> dict[str, Any]
         active_count = await model.AccumulationActivation.exclude(
             state="stopped"
         ).count()
-        unsettled = await model.PlacementIntent.exclude(
-            state__in=("completed", "rejected")
-        ).exists()
+        unsettled = (
+            await model.PlacementIntent.exclude(
+                state__in=("completed", "rejected")
+            ).exists()
+            or await has_pending_accumulation_work()
+        )
         live_running = (
             current.get("dry_run", True) is False
             and current.get("trading_paused") is not True
@@ -172,6 +176,7 @@ async def validate_accumulation_configuration(
             or await model.PlacementIntent.exclude(
                 state__in=("completed", "rejected")
             ).exists()
+            or await has_pending_accumulation_work()
         ):
             raise AccumulationStateError(
                 "Finish existing holdings, registrations and unresolved orders before changing entry mode."

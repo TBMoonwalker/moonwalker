@@ -504,6 +504,18 @@ class AccumulationLifecycleService:
         connection: BaseDBAsyncClient,
     ) -> tuple[str, str | None]:
         action = command.action
+        if action == AccumulationAction.REACTIVATE and (
+            await model.AppConfig.filter(
+                key="trade_mode", value="dynamic_dca", value_type="str"
+            )
+            .using_db(connection)
+            .exists()
+        ):
+            # This runs inside the lifecycle transaction and maintenance/symbol
+            # boundary: an old dashboard cannot reclaim a handed-off DCA symbol.
+            raise AccumulationConflictError(
+                "Select Accumulation mode before reactivating this registration."
+            )
         if (
             action
             in {

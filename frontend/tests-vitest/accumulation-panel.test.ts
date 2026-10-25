@@ -1,8 +1,9 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, reactive } from 'vue'
+import { defineComponent, h, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AccumulationOrderTimeline from '../src/components/AccumulationOrderTimeline.vue'
 import AccumulationPanel from '../src/components/AccumulationPanel.vue'
+import AccumulationPendingEntries from '../src/components/AccumulationPendingEntries.vue'
 import AccumulationTradeStatus from '../src/components/AccumulationTradeStatus.vue'
 import AccumulationStrategyAssignment from '../src/components/config/AccumulationStrategyAssignment.vue'
 import { NSelect } from 'naive-ui/es/select'
@@ -119,6 +120,30 @@ describe('accumulation controls', () => {
     expect(wrapper.find('section').exists()).toBe(false)
     expect(api.fetchAccumulationDetail).not.toHaveBeenCalled()
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+  })
+
+  // Value: protects=later registrations remain reachable after a fully open page;
+  // fails_when=filtering open holdings hides the only pagination control;
+  // why_new=existing panel tests do not render registration pagination; seam=none;
+  // no_claim=HTTP pagination implementation (API responses are routed fixtures).
+  it('loads later registrations when the first page contains only open holdings', async () => {
+    const first = Array.from({ length: 25 }, (_, index) => snapshot({
+      activation_id: `open-${index}`, symbol: `COIN${index}/USDC`,
+    }))
+    api.fetchAccumulationPage.mockResolvedValueOnce({ activations: first, next_after: 'page-2' })
+      .mockResolvedValueOnce({ activations: [snapshot({ symbol: 'ZZZ/USDC', state: 'paused', holding: null })], next_after: null })
+    const wrapper = mount(defineComponent({ setup() {
+      const panel = useAccumulationPanel()
+      return () => h(AccumulationPendingEntries, { context: panel, openSymbols: first.map(row => row.symbol) })
+    } }))
+    await flushPromises()
+    expect(wrapper.findAll('details')).toHaveLength(0)
+    await click(wrapper, 'Load more registrations')
+    expect(api.fetchAccumulationPage).toHaveBeenLastCalledWith('page-2')
+    expect(wrapper.text()).toContain('ZZZ/USDC')
+    expect(wrapper.findAll('details')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('Load more registrations')
+    wrapper.unmount()
   })
 
   it.each([0, 1])('labels declared CSV returns and preserves pending native fee warnings (%i)', async pending => {
