@@ -9,7 +9,9 @@ const condition = computed(() => {
   if (!props.fresh || !row || row.state !== 'enabled' || row.explicitly_paused || row.account_matches === false || row.holding_integrity === 'invalid' || row.inventory_restore_required || !value || value.reason !== row.runtime_wait_reason || !['WAIT_BASELINE', 'WAIT_DEPTH', 'WAIT_DECLINE', 'WAIT_REARM', 'WAIT_NEW_CANDLE'].includes(value.reason) || !Array.isArray(value.levels) || !value.levels.every(level => Number(level.target_price) > 0 && Number.isFinite(Number(level.target_price)) && Number.isFinite(Number(level.change_percent)))) return null
   return value
 })
-const title = computed(() => props.status ? accumulationPendingStatus(props.status, props.fresh) : 'Status unavailable · open trade details')
+const title = computed(() => condition.value && ['WAIT_BASELINE', 'WAIT_NEW_CANDLE'].includes(condition.value.reason)
+  ? `Waiting for the next ${condition.value.timeframe} close`
+  : props.status ? accumulationPendingStatus(props.status, props.fresh) : 'Status unavailable · open trade details')
 function movement(value: string) {
   const amount = Math.abs(Number(value))
   return `${Number(value) > 0 ? 'Rise' : 'Fall'} ≈ ${amount < 0.01 ? '<0.01' : amount.toFixed(2)}%`

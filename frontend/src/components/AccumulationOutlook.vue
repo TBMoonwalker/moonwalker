@@ -19,7 +19,7 @@ const condition = computed(() => {
 const buyLevels = computed(() => condition.value?.levels.filter(level => level.kind !== 'recovery_then_correction') ?? [])
 const recoveryLevels = computed(() => condition.value?.levels.filter(level => level.kind === 'recovery_then_correction') ?? [])
 const quote = computed(() => props.detail.symbol.split('/')[1] ?? '')
-const heading = computed(() => condition.value ? condition.value.price_basis === 'ask' ? 'Waiting for buy price' : recoveryLevels.value.length && !buyLevels.value.length ? 'Waiting for a fresh dip' : condition.value.levels.length ? props.detail.holding ? 'Waiting for next buy' : 'Waiting for entry' : `Waiting for the next ${condition.value.timeframe} close` : outlook.value.title)
+const heading = computed(() => condition.value ? condition.value.price_basis === 'ask' ? 'Waiting for buy price' : recoveryLevels.value.length && !buyLevels.value.length ? 'Waiting for a fresh dip' : condition.value.levels.length ? props.detail.holding ? 'Waiting for next buy' : 'Waiting for entry' : ['WAIT_BASELINE', 'WAIT_NEW_CANDLE'].includes(condition.value.reason) ? `Waiting for the next ${condition.value.timeframe} close` : outlook.value.title : outlook.value.title)
 function price(value: string) {
   return Number(value).toLocaleString(undefined, { maximumSignificantDigits: 10 })
 }
@@ -45,7 +45,8 @@ function movement(value: string) {
               <span :title="level.target_price">{{ level.direction === 'below' ? 'below' : level.direction === 'at_or_below' ? 'to ≤' : 'to ≥' }} ≈ {{ price(level.target_price) }} {{ quote }}</span>
             </li>
           </ul>
-          <p v-if="condition.reason === 'WAIT_BASELINE'">{{ outlook.description }}</p>
+          <p v-if="condition.reason === 'WAIT_BASELINE'">No price target yet. Waiting for the next completed candle to evaluate a new buy signal; a buy is not guaranteed.</p>
+          <p v-else-if="!condition.levels.length">{{ outlook.description }}</p>
           <p v-if="!condition.levels.length">Next close: {{ new Date(condition.next_close_ms).toISOString().replace('T', ' ').slice(0, 16) }} UTC</p>
           <div v-if="recoveryLevels.length" class="recovery-condition">
             <h4>Recovery needed before another dip buy</h4>

@@ -120,17 +120,43 @@ describe('accumulation operator outlook', () => {
       observed_price: '81596.7', next_close_ms: 1792756800000, levels: [],
     } })
     const table = mount(AccumulationOrderStatus, { props: { status: detail, fresh: true } })
-    expect(table.text()).toContain('Waiting for a fresh candle close')
+    expect(table.text()).toContain('Waiting for the next 1h close')
     expect(table.text()).toContain('Next close: 2026-10-23 12:00 UTC')
     expect(table.text()).not.toContain('Trading check pending')
     const card = mount(AccumulationOutlook, { props: { detail, fresh: true } })
     expect(card.text()).toContain('Waiting for the next 1h close')
-    expect(card.text()).toContain('Waiting for the next completed candle to evaluate a new buy signal.')
+    expect(card.text()).toContain('Waiting for the next completed candle to evaluate a new buy signal;')
     expect(card.text()).toContain('Next close: 2026-10-23 12:00 UTC')
     expect(card.find('.wait-levels').exists()).toBe(false)
     const stale = mount(AccumulationOrderStatus, { props: { status: detail, fresh: false } })
     expect(stale.text()).not.toContain('Next close:')
     expect(stale.text()).toContain('Status needs refresh')
+  })
+
+  it('explains the actual four-hour baseline without promising a price trigger', () => {
+    const detail = row({ runtime_wait_reason: 'WAIT_BASELINE', wait_condition: {
+      reason: 'WAIT_BASELINE', timeframe: '4h', observed_close_ms: 1792900800000,
+      observed_price: '80772.18', next_close_ms: 1792915200000, levels: [],
+    } })
+    const table = mount(AccumulationOrderStatus, { props: { status: detail, fresh: true } })
+    expect(table.text()).toContain('Waiting for the next 4h close')
+    expect(table.text()).toContain('Next close: 2026-10-25 08:00 UTC')
+    const card = mount(AccumulationOutlook, { props: { detail, fresh: true } })
+    expect(card.text()).toContain('No price target yet')
+    expect(card.text()).toContain('a buy is not guaranteed')
+    expect(card.find('.wait-levels').exists()).toBe(false)
+  })
+
+  it('keeps an unmet strategy condition distinct from waiting for an open candle', () => {
+    const detail = row({ runtime_wait_reason: 'WAIT_CONDITIONS', wait_condition: {
+      reason: 'WAIT_CONDITIONS', timeframe: '4h', observed_close_ms: 1792900800000,
+      observed_price: '80772.18', next_close_ms: 1792915200000, levels: [],
+    } })
+    const card = mount(AccumulationOutlook, { props: { detail, fresh: true } })
+    expect(card.find('h3').text()).toBe('Waiting for strategy conditions')
+    expect(card.text()).toContain('buy conditions have not matched')
+    expect(card.text()).not.toContain('No price target yet')
+    expect(card.text()).toContain('Next close:')
   })
 
   it('does not show cached price levels when the snapshot is stale', () => {

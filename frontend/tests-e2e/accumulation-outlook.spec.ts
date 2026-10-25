@@ -73,7 +73,7 @@ test('puts entry state and its reviewed next action before secondary information
   waiting.wait_condition!.levels = []
   live!.send(JSON.stringify({ type: 'snapshot', page: { activations: [waiting], next_after: null }, detail: waiting }))
   await expect(panel.getByRole('heading', { name: 'Waiting for the next 1h close', exact: true })).toBeVisible()
-  await expect(panel.getByText('The strategy is ready. Waiting for the next completed candle to evaluate a new buy signal.', { exact: true })).toBeVisible()
+  await expect(panel.getByText('No price target yet. Waiting for the next completed candle to evaluate a new buy signal; a buy is not guaranteed.', { exact: true })).toBeVisible()
   await expect(panel.getByText(/^Next close:.*UTC$/)).toBeVisible()
   await expect(panel.getByRole('list', { name: 'Current buy conditions' })).toHaveCount(0)
   await page.clock.fastForward(15000)
