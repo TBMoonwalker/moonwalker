@@ -5,6 +5,8 @@ PID_FILE="moonwalker.pid"
 LOCK_FILE="moonwalker.lock"
 STOP_TIMEOUT_SECONDS=30
 
+source "$(dirname "$0")/scripts/python_runtime.sh"
+
 usage() {
     echo "Usage: $0 {start|stop} [-d|--debug] [-t|--trace] [-p|--port PORT]"
 }
@@ -172,6 +174,7 @@ start_services() {
     local active_target=""
     local app_pid
     local release_venv
+    local bootstrap_python
     # Check if services are already running
     if [ -f "$LOCK_FILE" ]; then
         if service_process_is_running; then
@@ -184,6 +187,7 @@ start_services() {
     fi
 
     check_frontend_runtime
+    bootstrap_python="$(find_python_runtime .python-version)" || return 1
 
     echo "📦 Installing frontend deps & building Vue..."
     cd frontend
@@ -211,10 +215,7 @@ start_services() {
     fi
 
     echo "🐍 Building a verified Python environment..."
-    if [ "$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "3.14" ]; then
-        echo "❌ Python 3.14 is required. See .python-version."
-        exit 1
-    fi
+    echo "   Using $bootstrap_python"
     if [ -L .venv ]; then
         active_target="$(readlink .venv)"
     fi
@@ -225,7 +226,7 @@ start_services() {
     fi
     mkdir -p .venvs
     rm -rf "$release_venv" .venv.next
-    python3 -m venv "$release_venv"
+    "$bootstrap_python" -m venv "$release_venv"
     ./scripts/install_python_dependencies.sh \
         "$release_venv/bin/python" \
         backend/requirements.txt

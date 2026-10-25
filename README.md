@@ -56,6 +56,12 @@ The script builds the Vue frontend, copies assets into the backend, creates a
 Python venv, installs backend deps, and starts the Litestar app in the
 background. Logs go to `run.log`.
 
+On macOS, startup also looks for the required Python in Homebrew when the
+`python3` on PATH is missing or unsupported. It checks Homebrew on PATH and
+the standard Apple Silicon and Intel locations. Install the runtime with
+`brew install python@3.14` if it is missing. Startup selects the interpreter
+without changing your shell PATH or installing Python automatically.
+
 By default the app listens on port `8130`. The backend runtime is intentionally
 single-process because the trading engine uses shared in-memory runtime state.
 

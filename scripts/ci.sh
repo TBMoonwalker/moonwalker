@@ -24,7 +24,9 @@ EOF
 fi
 
 if [ ! -x "$PYTHON_BIN" ]; then
-    python3 -m venv "$VENV_DIR"
+    source "$ROOT_DIR/scripts/python_runtime.sh"
+    bootstrap_python="$(find_python_runtime "$ROOT_DIR/.python-version")"
+    "$bootstrap_python" -m venv "$VENV_DIR"
 fi
 
 "$ROOT_DIR/scripts/install_python_dependencies.sh" \
