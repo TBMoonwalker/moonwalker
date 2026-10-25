@@ -6,6 +6,7 @@ LOCK_FILE="moonwalker.lock"
 STOP_TIMEOUT_SECONDS=30
 
 source "$(dirname "$0")/scripts/python_runtime.sh"
+source "$(dirname "$0")/scripts/node_runtime.sh"
 
 usage() {
     echo "Usage: $0 {start|stop} [-d|--debug] [-t|--trace] [-p|--port PORT]"
@@ -39,49 +40,6 @@ build_frontend_with_fallback() {
 
     echo "❌ Frontend build failed after fallback attempts (last exit ${status})."
     return ${status}
-}
-
-print_node_runtime_help() {
-    echo "Moonwalker uses the Node.js version pinned in .nvmrc."
-    echo
-    echo "macOS or Linux with nvm (recommended):"
-    echo "  Install nvm: https://github.com/nvm-sh/nvm#installing-and-updating"
-    echo "  nvm install"
-    echo "  nvm use"
-    echo "  ./run.sh start"
-    echo
-    echo "macOS with Homebrew:"
-    echo "  brew install node@24"
-    # Print the command literally for the user to run in their own shell.
-    # shellcheck disable=SC2016
-    echo '  export PATH="$(brew --prefix node@24)/bin:$PATH"'
-    echo "  ./run.sh start"
-}
-
-check_frontend_runtime() {
-    local node_major
-    local node_minor
-    local node_version
-    local npm_major
-    local npm_version
-
-    if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-        echo "❌ Node.js 24 and npm 11 are required but were not both found."
-        print_node_runtime_help
-        return 1
-    fi
-
-    node_version="$(node -p 'process.versions.node')"
-    npm_version="$(npm --version)"
-    IFS=. read -r node_major node_minor _ <<< "$node_version"
-    IFS=. read -r npm_major _ <<< "$npm_version"
-
-    if [ "$node_major" -ne 24 ] || [ "$node_minor" -lt 11 ] || [ "$npm_major" -ne 11 ]; then
-        echo "❌ Unsupported frontend runtime: Node.js v${node_version}, npm ${npm_version}."
-        echo "   Required: Node.js >=24.11.0 <25 and npm >=11 <12."
-        print_node_runtime_help
-        return 1
-    fi
 }
 
 service_process_is_running() {

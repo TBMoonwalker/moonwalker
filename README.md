@@ -62,6 +62,11 @@ the standard Apple Silicon and Intel locations. Install the runtime with
 `brew install python@3.14` if it is missing. Startup selects the interpreter
 without changing your shell PATH or installing Python automatically.
 
+Startup and CI also discover Homebrew's `node@24` when Node.js or npm on PATH
+is missing or unsupported. They select its Node.js and npm for the current
+process and its builds; your shell configuration stays unchanged. Install
+the runtime with `brew install node@24` if needed.
+
 By default the app listens on port `8130`. The backend runtime is intentionally
 single-process because the trading engine uses shared in-memory runtime state.
 

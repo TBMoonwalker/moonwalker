@@ -7,21 +7,8 @@ PYTHON_BIN="$VENV_DIR/bin/python"
 FAILURES=0
 RESULTS=()
 
-if ! command -v npm >/dev/null 2>&1; then
-    cat >&2 <<'EOF'
-ERROR: npm is required but was not found on PATH.
-Moonwalker development requires Node.js 24 and npm 11.
-
-With nvm:
-  nvm install
-  nvm use
-
-With Homebrew on macOS:
-  brew install node@24
-  export PATH="$(brew --prefix node@24)/bin:$PATH"
-EOF
-    exit 127
-fi
+source "$ROOT_DIR/scripts/node_runtime.sh"
+check_frontend_runtime
 
 if [ ! -x "$PYTHON_BIN" ]; then
     source "$ROOT_DIR/scripts/python_runtime.sh"

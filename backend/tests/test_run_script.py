@@ -53,11 +53,12 @@ def test_startup_script_rejects_unsupported_node_before_creating_lock() -> None:
     runtime_check = "check_frontend_runtime"
     lock_step = 'touch "$LOCK_FILE"'
 
-    assert "Required: Node.js >=24.11.0 <25 and npm >=11 <12." in script
-    assert "nvm install" in script
-    assert "nvm use" in script
-    assert "brew install node@24" in script
-    assert 'export PATH="$(brew --prefix node@24)/bin:$PATH"' in script
+    runtime = (ROOT_DIR / "scripts/node_runtime.sh").read_text()
+    assert "Required: Node.js >=24.11.0 <25 and npm >=11 <12." in runtime
+    assert "nvm install" in runtime
+    assert "nvm use" in runtime
+    assert "brew install node@24" in runtime
+    assert 'export PATH="$(brew --prefix node@24)/bin:$PATH"' in runtime
     assert script.index(runtime_check, script.index("start_services()")) < script.index(
         lock_step, script.index("start_services()")
     )
@@ -203,3 +204,90 @@ def test_python_detection_rejects_wrong_version_and_explains_install(
     assert not result.stdout
     assert "Python 3.99 is required" in result.stderr
     assert "brew install python@3.99" in result.stderr
+
+
+def _probe_node(
+    commands: Path, check: str = "check_frontend_runtime"
+) -> subprocess.CompletedProcess[str]:
+    (commands / "dirname").symlink_to("/usr/bin/dirname")
+    definitions = RUN_SCRIPT.read_text().split("service_process_is_running()")[0]
+    return subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            definitions + f"\n{check} || exit $?\ncommand -v node\ncommand -v npm\n",
+            str(RUN_SCRIPT),
+        ],
+        env={**os.environ, "PATH": str(commands)},
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("path_node", ["missing", "unsupported"])
+def test_node_detection_selects_homebrew_pair(tmp_path: Path, path_node: str) -> None:
+    """Homebrew Node and npm must be selected together for subsequent commands."""
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    runtime = tmp_path / "Homebrew Node" / "bin"
+    runtime.mkdir(parents=True)
+    node = runtime / "node"
+    node.write_text("#!/bin/bash\nprintf '24.18.0\\n'\n")
+    node.chmod(0o755)
+    npm = runtime / "npm"
+    npm.write_text(
+        '#!/bin/bash\n[ "$(node -p process.versions.node)" = 24.18.0 ] || exit 1\n'
+        "printf '11.16.0\\n'\n"
+    )
+    npm.chmod(0o755)
+    if path_node == "unsupported":
+        wrong = commands / "node"
+        wrong.write_text("#!/bin/bash\nprintf '26.11.1\\n'\n")
+        wrong.chmod(0o755)
+        (commands / "npm").symlink_to(npm)
+    brew = commands / "brew"
+    brew.write_text(
+        '#!/bin/bash\n[ "$1" = --prefix ] && [ "$2" = node@24 ] || exit 1\n'
+        + f"printf '%s\\n' '{runtime.parent}'\n"
+    )
+    brew.chmod(0o755)
+    uname = commands / "uname"
+    uname.write_text("#!/bin/bash\nprintf 'Darwin\\n'\n")
+    uname.chmod(0o755)
+    result = _probe_node(commands)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[-2:] == [str(node), str(npm)]
+
+
+@pytest.mark.parametrize(
+    ("node_version", "npm_version", "supported"),
+    [
+        ("24.11.0", "11.0.0", True),
+        ("24.18.0", "11.16.0", True),
+        ("24.10.0", "11.16.0", False),
+        ("26.11.1", "11.16.0", False),
+        ("24.18.0", "12.0.0", False),
+        ("unknown", "11.16.0", False),
+        ("24.18.0", "unknown", False),
+    ],
+)
+def test_node_runtime_validation_preserves_supported_path_and_rejects_others(
+    tmp_path: Path, node_version: str, npm_version: str, supported: bool
+) -> None:
+    """Discovery must retain the existing supported Node and npm version ranges."""
+    for name, version in [("node", node_version), ("npm", npm_version)]:
+        executable = tmp_path / name
+        executable.write_text(f"#!/bin/bash\nprintf '%s\\n' '{version}'\n")
+        executable.chmod(0o755)
+    # Successful public checks must preserve the user's PATH installation.
+    result = _probe_node(
+        tmp_path, "check_frontend_runtime" if supported else "frontend_runtime_matches"
+    )
+    assert (result.returncode == 0) is supported
+    if supported:
+        assert result.stdout.splitlines()[-2:] == [
+            str(tmp_path / "node"),
+            str(tmp_path / "npm"),
+        ]
