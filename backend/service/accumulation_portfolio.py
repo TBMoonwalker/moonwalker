@@ -327,7 +327,7 @@ async def prepare_accumulation_buy(
         if not admitted:
             return wait("WAIT_MAINTENANCE")
         # Same lock as ordinary DCA leases. There is no exchange I/O in persist.
-        async with CapitalBudgetService._lock:
+        async with CapitalBudgetService.reservation_guard():
             return await run_sqlite_write_with_retry(
                 persist, "reserving accumulation buy"
             )

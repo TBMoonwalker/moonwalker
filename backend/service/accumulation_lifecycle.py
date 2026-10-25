@@ -848,7 +848,7 @@ class AccumulationLifecycleService:
                 return await self._finish(operation, activation, connection)
 
         async def commit() -> AccumulationCommandResult:
-            async with CapitalBudgetService._lock:
+            async with CapitalBudgetService.reservation_guard():
                 return await persist()
 
         return await self._mutate(request.symbol, commit)

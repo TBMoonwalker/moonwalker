@@ -100,5 +100,36 @@ def test_real_websocket_pushes_to_two_clients_and_preserves_origin_gate(monkeypa
                     == "WAIT_DEPTH"
                 )
                 assert second.receive_json()["detail"]["revision"] == 2
-                assert producer.await_count == 4
+                assert producer.await_count == 2
+    assert not events.connected
+
+
+@pytest.mark.asyncio
+async def test_new_client_cannot_reuse_a_condition_after_its_candle_expires(
+    monkeypatch,
+):
+    events = AccumulationStatusEvents()
+    runtime = SimpleNamespace(
+        status={"BTC/USDC": "WAIT_DROP"},
+        wait_conditions={
+            "BTC/USDC": {"observed_close_ms": 1000, "next_close_ms": 2000}
+        },
+        current_account_scope="account",
+        status_events=events,
+    )
+    monkeypatch.setattr(controller, "_runtime", lambda: runtime)
+    clock = [1500]
+    monkeypatch.setattr(controller.time, "time_ns", lambda: clock[0] * 1_000_000)
+    producer = AsyncMock(side_effect=lambda *args, **kwargs: kwargs["wait_conditions"])
+    monkeypatch.setattr(controller, "accumulation_stream_snapshot", producer)
+    first = controller.stream_status.fn(symbol=None)
+    second = controller.stream_status.fn(symbol=None)
+    assert await anext(first) == await anext(second)
+    assert producer.await_count == 1
+    clock[0] = 2000
+    third = controller.stream_status.fn(symbol=None)
+    assert await anext(third) == "{}"
+    assert producer.await_count == 2
+    for stream in (first, second, third):
+        await stream.aclose()
     assert not events.connected

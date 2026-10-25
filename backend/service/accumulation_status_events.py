@@ -3,6 +3,8 @@
 import asyncio
 from collections.abc import AsyncGenerator
 
+from service.websocket_fanout import CurrentStateProjection
+
 
 class AccumulationStatusEvents:
     """Wake each dashboard once per changed snapshot, without polling tasks."""
@@ -10,9 +12,11 @@ class AccumulationStatusEvents:
     def __init__(self) -> None:
         self._queues: set[asyncio.Queue[bool]] = set()
         self._closed = False
+        self.projections = CurrentStateProjection()
 
     def publish(self) -> None:
         """Coalesce a burst of changes to the latest snapshot for slow clients."""
+        self.projections.invalidate()
         if not self._closed:
             for queue in self._queues:
                 if not queue.full():
@@ -26,6 +30,7 @@ class AccumulationStatusEvents:
     def close(self) -> None:
         """End subscriptions when their lifespan owner stops."""
         self._closed = True
+        self.projections.invalidate()
         for queue in self._queues:
             if queue.full():
                 queue.get_nowait()
@@ -35,6 +40,8 @@ class AccumulationStatusEvents:
         """Yield immediately on connect, then only after a runtime change."""
         if self._closed:
             return
+        if not self._queues:
+            self.projections.invalidate()
         queue: asyncio.Queue[bool] = asyncio.Queue(maxsize=1)
         self._queues.add(queue)
         try:
@@ -43,3 +50,5 @@ class AccumulationStatusEvents:
                 yield None
         finally:
             self._queues.discard(queue)
+            if not self._queues:
+                self.projections.invalidate()

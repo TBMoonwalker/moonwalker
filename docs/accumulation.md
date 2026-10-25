@@ -155,6 +155,22 @@ changing the global initial pin never changes existing registrations.
 
 ## Buying strategy and capital
 
+Dynamic DCA backfill and accumulation use the same source-qualified completed
+history window layer. Identical windows coalesce within the instance; complete
+windows are retained for at most 60 seconds in a bounded cache. Venue, account
+configuration, market, demo/live mode, timeframe and candle boundary qualify the
+request. Incomplete evidence is retried rather than cached. Existing unqualified
+ticker rows cannot substitute for accumulation's strict contiguous history.
+Authenticated exchange clients keep their existing owners. This changes neither
+the immediate ASAP base order nor the fresh startup baseline.
+
+The existing capital service owns reservation locking and exposes immutable
+reservation and usage snapshots. Accumulation uses its public guard with the
+existing lifecycle → capital → database lock order; exchange calls stay outside
+that guard. Mode-specific sizing and safety-order reserve policies remain with
+their respective trading engines.
+
+
 The initial implementation is `accumulation_dip_v1`, with configurable immutable
 variants. The completed-candle base interval follows **Exchange → Timeframe**
 for live trading, warmup, portfolio ranking and Backtest. The peak reference is
@@ -356,6 +372,13 @@ and clears the initial strategy pin because a numeric ID alone is not portable.
 Schema 1/2 backups retain compatibility for their original data.
 
 ## Value, return history and scale
+
+Routine valuation reads completeness flags and the latest checkpoint for all
+registrations in one database query. SQLite returns at most one checkpoint
+summary per registration, including stopped registrations; latest evidence is
+ordered by update time and then checkpoint ID. Lifetime fill rows are not loaded
+into Python for routine snapshots.
+
 
 The reporting API groups exact remaining cost by quote currency. Unknown cost
 stays null, with a separate known subtotal. Order reporting retains cumulative

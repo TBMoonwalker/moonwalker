@@ -146,3 +146,44 @@ async def test_shutdown_rejects_queued_concurrent_subscribers_without_database_a
         for stream in streams:
             await stream.aclose()
         await fanout.stop()
+
+
+@pytest.mark.asyncio
+async def test_current_projection_shares_generation_and_keeps_selections_separate():
+    from service.websocket_fanout import CurrentStateProjection
+
+    projection = CurrentStateProjection()
+    calls = 0
+
+    async def produce():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        return str(calls)
+
+    assert await asyncio.gather(
+        projection.read(("scope", "BTC"), produce),
+        projection.read(("scope", "BTC"), produce),
+    ) == ["1", "1"]
+    assert await projection.read(("scope", "ETH"), produce) == "2"
+    assert await projection.read(("other-account", "BTC"), produce) == "3"
+    projection.invalidate()
+    assert await projection.read(("scope", "BTC"), produce) == "4"
+
+
+@pytest.mark.asyncio
+async def test_current_projection_does_not_cache_across_inflight_invalidation():
+    from service.websocket_fanout import CurrentStateProjection
+
+    projection = CurrentStateProjection()
+    calls = 0
+
+    async def produce():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            projection.invalidate()
+        return str(calls)
+
+    assert await projection.read("BTC", produce) == "1"
+    assert await projection.read("BTC", produce) == "2"

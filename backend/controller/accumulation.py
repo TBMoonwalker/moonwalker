@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from dataclasses import asdict
 from typing import Any
 
@@ -204,18 +206,34 @@ async def stream_status(
         symbol = normalize_order_symbol(symbol)
     previous: str | None = None
     try:
-        async for _ in runtime.status_events.subscribe():
-            snapshot = await accumulation_stream_snapshot(
-                symbol,
-                wait_reasons=dict(runtime.status),
-                wait_conditions=dict(runtime.wait_conditions),
-                configured_account_scope=runtime.current_account_scope,
-            )
-            payload = json.dumps(snapshot)
-            if payload != previous:
-                previous = payload
-                yield payload
+        async with aclosing(runtime.status_events.subscribe()) as updates:
+            async for _ in updates:
+                reasons = dict(runtime.status)
+                now_ms = time.time_ns() // 1_000_000
+                conditions = {
+                    name: condition
+                    for name, condition in runtime.wait_conditions.items()
+                    if condition["observed_close_ms"]
+                    <= now_ms
+                    < condition["next_close_ms"]
+                }
+                scope = runtime.current_account_scope
+                key = json.dumps([symbol, scope, reasons, conditions], sort_keys=True)
 
+                async def produce() -> str:
+                    return json.dumps(
+                        await accumulation_stream_snapshot(
+                            symbol,
+                            wait_reasons=reasons,
+                            wait_conditions=conditions,
+                            configured_account_scope=scope,
+                        )
+                    )
+
+                payload = await runtime.status_events.projections.read(key, produce)
+                if payload != previous:
+                    previous = payload
+                    yield payload
     except (asyncio.CancelledError, WebSocketDisconnect):
         return
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from uuid import uuid4
@@ -37,6 +39,15 @@ class CapitalBudgetUsage:
     durable_pending_quote: float
     unavailable_reason: str | None = None
     funds_locked_exact: str | None = None
+
+
+@dataclass(frozen=True)
+class CapitalReservation:
+    """Immutable process reservation, interpreted only by the capital owner."""
+
+    lease_id: str
+    quote: Decimal
+    operation_id: str | None
 
 
 async def load_pending_capital() -> dict[str, Decimal]:
@@ -112,6 +123,28 @@ class CapitalBudgetService:
 
     _lock = asyncio.Lock()
     _leases: dict[str, tuple[float, str | None]] = {}
+
+    @classmethod
+    @asynccontextmanager
+    async def reservation_guard(cls) -> AsyncIterator[None]:
+        """Serialize ledger changes: lifecycle guard, capital guard, then DB.
+
+        Callers must not perform network I/O or reacquire this guard inside it.
+        """
+        async with cls._lock:
+            yield
+
+    @classmethod
+    def reservation_snapshot(cls) -> tuple[CapitalReservation, ...]:
+        """Return detached reservations; acquire the guard for coherent DB reads."""
+        return tuple(
+            CapitalReservation(lease_id, Decimal(str(amount)), operation_id)
+            for lease_id, (amount, operation_id) in sorted(cls._leases.items())
+        )
+
+    async def usage_snapshot(self, config: dict) -> CapitalBudgetUsage:
+        """Read the owner's immutable usage without exposing storage internals."""
+        return await self._load_usage(config)
 
     async def get_runtime_state(self, config: dict) -> dict[str, float | bool | str]:
         """Return capital-budget telemetry for dashboard/statistics payloads."""

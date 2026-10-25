@@ -14,6 +14,7 @@ from service.config import resolve_timeframe
 from service.data_history_sync import (
     HistorySyncState,
     HistorySyncWindow,
+    completed_history_window,
     plan_boundary_fetch_starts,
 )
 from service.data_ohlcv import (
@@ -271,12 +272,19 @@ class Data:
         refresh_existing: bool = False,
     ) -> tuple[set[int], set[int]]:
         """Fetch OHLCV from exchange and return fetched and inserted candle timestamps."""
-        ohlcv_data = await self.exchange.get_history_for_symbol(
-            config,
-            symbol,
-            resolve_timeframe(config),
-            limit=1000,
-            since=fetch_since_ms,
+        timeframe = resolve_timeframe(config)
+        ohlcv_data = await completed_history_window(
+            config=config,
+            symbol=symbol,
+            timeframe=timeframe,
+            window=HistorySyncWindow.build(
+                required_since=fetch_since_ms,
+                required_until=required_until,
+                timeframe_ms=int(ccxt.Exchange.parse_timeframe(timeframe) * 1000),
+            ),
+            fetch=lambda: self.exchange.get_history_for_symbol(
+                config, symbol, timeframe, limit=1000, since=fetch_since_ms
+            ),
         )
         if not ohlcv_data:
             logging.warning(

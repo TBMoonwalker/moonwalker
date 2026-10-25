@@ -180,7 +180,7 @@ class AccumulationBuyExecutor:
                 await row.save(using_db=conn)
                 return "claimed"
 
-        async with CapitalBudgetService._lock:
+        async with CapitalBudgetService.reservation_guard():
             return await run_sqlite_write_with_retry(
                 persist, "claiming accumulation submission"
             )

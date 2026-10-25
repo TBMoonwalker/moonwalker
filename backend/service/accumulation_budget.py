@@ -52,7 +52,7 @@ class AccumulationFundingSnapshot:
 async def _budget_state(
     config: dict[str, Any],
 ) -> tuple[str, CapitalBudgetUsage, dict[str, Decimal]]:
-    usage = await CapitalBudgetService()._load_usage(config)
+    usage = await CapitalBudgetService().usage_snapshot(config)
     pending = await load_pending_capital()
     # Include lifecycle changes even if their monetary aggregate is unchanged.
     holdings = (
@@ -81,7 +81,7 @@ async def _budget_state(
             pending,
             holdings,
             placements,
-            sorted(CapitalBudgetService._leases.items()),
+            [asdict(row) for row in CapitalBudgetService.reservation_snapshot()],
         ],
         sort_keys=True,
         default=str,
@@ -92,7 +92,7 @@ async def _budget_state(
 
 async def capture_accumulation_funding_token(config: dict[str, Any]) -> str:
     """Capture a coherent ledger identity before fetching fresh account evidence."""
-    async with CapitalBudgetService._lock:
+    async with CapitalBudgetService.reservation_guard():
         async with in_transaction():
             token, _, _ = await _budget_state(config)
             return token
@@ -152,18 +152,17 @@ async def usable_accumulation_quote(
             if hold > amount:
                 return None
             exchange_pending += amount - hold
-        active_ids = CapitalBudgetService._active_operation_ids()
+        reservations = CapitalBudgetService.reservation_snapshot()
+        active_ids = {
+            row.operation_id for row in reservations if row.operation_id is not None
+        }
         local = sum(
-            (Decimal(str(value[0])) for value in CapitalBudgetService._leases.values()),
+            (row.quote for row in reservations),
             Decimal(0),
         )
         # Bound leases replace their durable records, rather than counting both.
         unbound = sum(
-            (
-                Decimal(str(value[0]))
-                for value in CapitalBudgetService._leases.values()
-                if value[1] not in pending
-            ),
+            (row.quote for row in reservations if row.operation_id not in pending),
             Decimal(0),
         )
         exchange_available = max(Decimal(0), free - exchange_pending - unbound)

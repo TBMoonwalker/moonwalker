@@ -383,6 +383,14 @@ Manual buy payload:
 
 ### WebSocket streams
 
+Accumulation snapshots are shared across dashboard clients with matching symbol,
+account scope and runtime state. Each connection receives an initial snapshot;
+subsequent builds follow runtime/lifecycle change events. Slow subscribers keep
+only the newest notification. The projection cache is bounded and cleared on
+state changes, last-client disconnect and shutdown. Clients never start the
+trading worker, and snapshot sharing does not introduce status polling.
+
+
 These streams are fan-out based: one producer loop refreshes shared data every
 5 seconds and broadcasts it to all connected dashboard clients.
 

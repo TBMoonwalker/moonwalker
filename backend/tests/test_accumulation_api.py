@@ -905,3 +905,74 @@ async def test_retired_dip_presets_leave_catalogs_without_losing_pinned_history(
         assert (await model.StrategyVersion.get(id=version.id)).ir_json == original
         assert await get_strategy_detail(version.strategy_slug) is not None
     assert await model.AccumulationActivation.filter(state="stopped").count() == 2
+
+
+@pytest.mark.asyncio
+async def test_matching_dashboard_clients_share_database_projection(
+    status_db, monkeypatch
+):
+    import asyncio
+
+    from service.accumulation_runtime import AccumulationRuntime
+
+    runtime = AccumulationRuntime(
+        SimpleNamespace(
+            exchange=SimpleNamespace(), readiness=AsyncMock(), account_scope=AsyncMock()
+        )
+    )
+    monkeypatch.setattr(
+        AccumulationRuntime, "current_account_scope", property(lambda _: "account")
+    )
+    events = runtime.status_events
+    monkeypatch.setattr(controller, "_runtime", lambda: runtime)
+    snapshot = controller.accumulation_stream_snapshot
+    builds = 0
+
+    async def count(*args, **kwargs):
+        nonlocal builds
+        builds += 1
+        return await snapshot(*args, **kwargs)
+
+    monkeypatch.setattr(controller, "accumulation_stream_snapshot", count)
+    first = controller.stream_status.fn(symbol=None)
+    second = controller.stream_status.fn(symbol=None)
+    initial = await asyncio.gather(anext(first), anext(second))
+    assert initial[0] == initial[1]
+    assert builds == 1
+    # A real DB projection changes, while the runtime owns the notification.
+    version = await model.StrategyVersion.create(
+        strategy_slug="test",
+        version=1,
+        ir_json="{}",
+        validation_json="{}",
+        explanation="test",
+    )
+    await model.AccumulationActivation.create(
+        symbol="BTC/USDC", account_scope="account", strategy_version=version
+    )
+    events.publish()
+    updated = await asyncio.gather(anext(first), anext(second))
+    assert updated[0] == updated[1] and updated[0] != initial[0]
+    assert builds == 2
+    # A journal mutation invalidates reads before the worker's next tick.
+    await model.AccumulationActivation.filter(symbol="BTC/USDC").update(revision=3)
+    runtime.notify("BTC/USDC")
+    third = controller.stream_status.fn(symbol=None)
+    latest = await anext(third)
+    assert latest != updated[0]
+    assert builds == 3
+    await first.aclose()
+    await second.aclose()
+    await third.aclose()
+    assert not events.connected
+    # The next session must read DB state rather than a disconnected cache.
+    await model.AccumulationActivation.filter(symbol="BTC/USDC").update(revision=4)
+    fourth = controller.stream_status.fn(symbol=None)
+    assert await anext(fourth) != latest
+    assert builds == 4
+    await fourth.aclose()
+    events.close()
+    late = controller.stream_status.fn(symbol=None)
+    with pytest.raises(StopAsyncIteration):
+        await anext(late)
+    assert builds == 4

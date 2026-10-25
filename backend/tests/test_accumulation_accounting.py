@@ -1461,3 +1461,70 @@ async def test_native_missing_ids_can_be_repaired_under_rotated_credentials_only
         assert await model.TradeExecutions.all().count() == 1
         assert await AccumulationOrderRepair(adapter).submit(request) == result
         adapter.exchange.lookup_spot_order.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("registrations", [1, 25])
+async def test_checkpoint_summary_batches_flags_and_exact_latest_order(
+    accounting_db, monkeypatch, registrations
+):
+    from service.accumulation_performance import _checkpoint_summaries
+
+    owner, _, _ = await _buy()
+    owners = [owner]
+    for index in range(1, registrations):
+        owners.append(
+            await model.AccumulationActivation.create(
+                symbol=f"COIN{index}/USDC",
+                account_scope="account-1",
+                state="stopped",
+                strategy_version_id=owner.strategy_version_id,
+            )
+        )
+    stamp = datetime.now(timezone.utc)
+    for index, activation in enumerate(owners):
+        for attempt in range(2):
+            placement = await model.PlacementIntent.create(
+                operation_id=f"summary-{index}-{attempt}",
+                symbol=activation.symbol,
+                exchange_name="binance",
+                side="buy",
+                action="buy",
+                order_type="limit",
+                state="completed",
+            )
+            checkpoint = await model.AccumulationFillCheckpoint.create(
+                activation=activation,
+                placement=placement,
+                inventory_json=json.dumps({"attempt": attempt}),
+                deal_id=f"deal-{attempt}",
+                fees_complete=attempt == 1,
+                terminal=attempt == 1,
+                evidence_json="{}",
+            )
+            await model.AccumulationFillCheckpoint.filter(id=checkpoint.id).update(
+                updated_at=stamp
+            )
+    conn = Tortoise.get_connection("default")
+    execute = conn.execute_query_dict
+    queries = []
+
+    async def capture(query, *args, **kwargs):
+        queries.append(query)
+        return await execute(query, *args, **kwargs)
+
+    monkeypatch.setattr(conn, "execute_query_dict", capture)
+    summaries = await _checkpoint_summaries(conn)
+    assert len(queries) == 1
+    assert len(summaries) == registrations
+    for activation in owners:
+        latest = (
+            await model.AccumulationFillCheckpoint.filter(activation=activation)
+            .order_by("-updated_at", "-id")
+            .first()
+        )
+        summary = summaries[str(activation.id)]
+        assert summary["deal_id"] == latest.deal_id == "deal-1"
+        assert summary["inventory_json"] == latest.inventory_json
+        assert summary["incomplete_fees"] == 1
+        assert summary["unsettled"] == 1

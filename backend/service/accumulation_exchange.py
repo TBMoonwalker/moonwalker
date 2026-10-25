@@ -39,6 +39,7 @@ from service.accumulation_strategy import (
     calculate_accumulation_market,
     rebuild_accumulation_observations,
 )
+from service.data_history_sync import HistorySyncWindow, completed_history_window
 from service.exchange import Exchange
 from service.exchange_capabilities import (
     exchange_execution_scope,
@@ -609,14 +610,25 @@ class AccumulationExchangeAdapter:
                 if rebase
                 else parameters.history_length
             )
-            rows = await self.exchange.get_history_for_symbol_batched(
-                config,
-                symbol,
-                parameters.timeframe,
-                since=close - count * parameters.interval_ms,
-                until=close - 1,
-                max_candles=count,
-                page_size=min(1000, count),
+            since = close - count * parameters.interval_ms
+            rows = await completed_history_window(
+                config=config,
+                symbol=symbol,
+                timeframe=parameters.timeframe,
+                window=HistorySyncWindow.build(
+                    required_since=since,
+                    required_until=close - parameters.interval_ms,
+                    timeframe_ms=parameters.interval_ms,
+                ),
+                fetch=lambda: self.exchange.get_history_for_symbol_batched(
+                    config,
+                    symbol,
+                    parameters.timeframe,
+                    since=since,
+                    until=close - 1,
+                    max_candles=count,
+                    page_size=min(1000, count),
+                ),
             )
             result = []
             for row in rows:

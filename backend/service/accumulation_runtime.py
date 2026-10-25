@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 import ccxt.async_support as ccxt
+import helper
 import model
 from service.accumulation_budget import usable_accumulation_quote
 from service.accumulation_commands import (
@@ -49,6 +50,10 @@ from service.order_requests import normalize_order_symbol
 from service.strategy_runtime import load_accumulation_strategy_version
 from service.trading_controls import is_global_trading_paused
 from service.trading_maintenance import trading_maintenance_barrier
+
+logging = helper.LoggerFactory.get_logger(
+    "logs/accumulation_runtime.log", "accumulation_runtime"
+)
 
 # Source-owned capability: editable config and restored rows cannot override it.
 ACCUMULATION_RUNTIME_AVAILABLE = True
@@ -98,8 +103,29 @@ class AccumulationRuntime:
         self.status: dict[str, str] = {}
         self.wait_conditions: dict[str, dict[str, Any]] = {}
         self.status_events = AccumulationStatusEvents()
+        self._failures: dict[tuple[str, str], tuple[str, str]] = {}
         self._status_fingerprint: str | None = None
         self.entry = AccumulationEntryService(adapter, self.notify)
+
+    def _failed(self, symbol: str, stage: str, wait: str, exc: Exception) -> None:
+        """Log controlled failure metadata once; never stringify exchange errors."""
+        failure = (wait, type(exc).__name__)
+        key = (symbol, stage)
+        if self._failures.get(key) != failure:
+            logging.warning(
+                "Accumulation failure: symbol=%s stage=%s wait=%s exception=%s",
+                symbol,
+                stage,
+                wait,
+                failure[1],
+            )
+        self._failures[key] = failure
+        self.status[symbol] = wait
+
+    def _recovered(self, symbol: str, stage: str) -> None:
+        """Emit recovery only after the previously failed operation succeeds."""
+        if self._failures.pop((symbol, stage), None) is not None:
+            logging.info("Accumulation recovered: symbol=%s stage=%s", symbol, stage)
 
     @property
     def ready(self) -> bool:
@@ -144,6 +170,7 @@ class AccumulationRuntime:
         if self._stopping:
             return
         self._performance_cache_until_ms = 0
+        self.status_events.projections.invalidate()
         if symbol is None or len(self._dirty) >= 256:
             self._all_dirty = True
             self._dirty.clear()
@@ -172,6 +199,7 @@ class AccumulationRuntime:
         """Coalesce market hints without fetching evidence or adding buy cooldowns."""
         if not self.ready or symbol is not None and symbol not in self._input_symbols:
             return
+        self.status_events.projections.invalidate()
         if symbol is None:
             self._performance_cache_until_ms = 0
         if symbol is None or len(self._dirty) >= 256:
@@ -261,9 +289,10 @@ class AccumulationRuntime:
                 str(activation.id),
                 account_scope=await self.adapter.account_scope(self.adapter.config()),
             )
-        except _EXPECTED_FAILURES:
-            self.status[activation.symbol] = "WAIT_REBASE"
+        except _EXPECTED_FAILURES as exc:
+            self._failed(activation.symbol, "rebase", "WAIT_REBASE", exc)
             return False
+        self._recovered(activation.symbol, "rebase")
         self._rebased.add(str(activation.id))
         self.status[activation.symbol] = "REBASED"
         return True
@@ -276,6 +305,8 @@ class AccumulationRuntime:
             state__in=["completed", "rejected"]
         )
         changed = False
+        failed = False
+        reconciled = False
         for row in pending:
             if row.state in {"quarantined", "restored_quarantined"}:
                 self.status[activation.symbol] = "WAIT_REPAIR"
@@ -287,8 +318,12 @@ class AccumulationRuntime:
                 await row.refresh_from_db()
                 if row.side == "buy" and row.state not in {"completed", "rejected"}:
                     await self._expire_buy(row, config)
-            except _EXPECTED_FAILURES:
-                self.status[activation.symbol] = "WAIT_RECONCILIATION"
+                reconciled = True
+            except _EXPECTED_FAILURES as exc:
+                failed = True
+                self._failed(activation.symbol, "recovery", "WAIT_RECONCILIATION", exc)
+        if not failed and (reconciled or not pending):
+            self._recovered(activation.symbol, "recovery")
         await activation.refresh_from_db()
         return changed or activation.revision != before
 
@@ -379,8 +414,9 @@ class AccumulationRuntime:
                     result = await self.buys.execute(admission.operation_id)
                     self.status[activation.symbol] = result.reason
                     self.notify(activation.symbol)
-            except _EXPECTED_FAILURES:
-                self.status[activation.symbol] = "WAIT_DATA"
+                self._recovered(activation.symbol, "initial_entry")
+            except _EXPECTED_FAILURES as exc:
+                self._failed(activation.symbol, "initial_entry", "WAIT_DATA", exc)
             return
         if str(activation.id) not in self._rebased:
             await self._rebase(activation)
@@ -417,6 +453,7 @@ class AccumulationRuntime:
                 minimum_quote=inputs.minimum_quote,
                 timeframe=config.get("timeframe"),
             )
+            self._recovered(activation.symbol, "evaluation")
             self.status[activation.symbol] = decision.reason
             if decision.wait_condition is not None:
                 self.wait_conditions[activation.symbol] = {
@@ -430,8 +467,8 @@ class AccumulationRuntime:
             elif decision.action == "BUY":
                 assert self._portfolio is not None
                 self._portfolio.offer(decision, priority)
-        except _EXPECTED_FAILURES:
-            self.status[activation.symbol] = "WAIT_DATA"
+        except _EXPECTED_FAILURES as exc:
+            self._failed(activation.symbol, "evaluation", "WAIT_DATA", exc)
 
     async def _retry_due(self, now: int) -> set[str]:
         dirty: set[str] = set()
@@ -520,6 +557,11 @@ class AccumulationRuntime:
             rows = await model.AccumulationActivation.all().order_by("symbol")
             symbols = {row.symbol for row in rows}
             self._input_symbols = symbols
+            self._failures = {
+                key: value
+                for key, value in self._failures.items()
+                if key[0] in symbols or key[0] == "*"
+            }
             dirty = symbols if self._all_dirty else self._dirty & symbols
             self._all_dirty = False
             self._dirty = set()
@@ -552,12 +594,15 @@ class AccumulationRuntime:
                             activation.strategy_version_id,
                             timeframe=config.get("timeframe"),
                         )
+                        self._recovered(activation.symbol, "strategy")
                         close = version.parameters.latest_close(now)
                         if self._candle_closes.get(activation.symbol) != close:
                             dirty.add(activation.symbol)
                             self._candle_closes[activation.symbol] = close
-                    except _EXPECTED_FAILURES:
-                        self.status[activation.symbol] = "WAIT_STRATEGY"
+                    except _EXPECTED_FAILURES as exc:
+                        self._failed(
+                            activation.symbol, "strategy", "WAIT_STRATEGY", exc
+                        )
                         continue
                 if activation.symbol not in dirty:
                     continue
@@ -580,8 +625,9 @@ class AccumulationRuntime:
                         else:
                             result = await self.commands.execute(operation.operation_id)
                             self.status[activation.symbol] = result.reason
-                    except _EXPECTED_FAILURES:
-                        self.status[activation.symbol] = "WAIT_COMMAND"
+                        self._recovered(activation.symbol, "command")
+                    except _EXPECTED_FAILURES as exc:
+                        self._failed(activation.symbol, "command", "WAIT_COMMAND", exc)
                 await activation.refresh_from_db()
                 await self._evaluate(activation, config)
             if config.get("trade_mode") != "accumulation":
@@ -600,8 +646,9 @@ class AccumulationRuntime:
                     result = await self.buys.execute(admission.operation_id)
                     placement = await self.buys.intents.get(admission.operation_id)
                     self.status[placement.symbol] = result.reason
-                except _EXPECTED_FAILURES:
-                    self.status["*"] = "WAIT_RECONCILIATION"
+                    self._recovered("*", "buy_execution")
+                except _EXPECTED_FAILURES as exc:
+                    self._failed("*", "buy_execution", "WAIT_RECONCILIATION", exc)
 
     async def run(self) -> None:
         """Run as an application TaskGroup child, never as an unowned background task."""
@@ -640,6 +687,7 @@ class AccumulationRuntime:
         """Stop new admission and wake the loop; never pretend orders were cancelled."""
         self._stopping = True
         self.status_events.close()
+        self._failures.clear()
         accumulation_input_notifications.detach(self)
         self._wake.set()
 

@@ -550,3 +550,89 @@ async def test_pair_age_without_old_history_remains_blocked(monkeypatch):
     )
     assert await data.is_token_old_enough({}, "NEW/USDC") is False
     save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_completed_windows_share_concurrent_reads_and_isolate_sources():
+    import asyncio
+
+    from service.data_history_sync import CompletedHistoryWindows
+
+    cache = CompletedHistoryWindows()
+    window = HistorySyncWindow.build(
+        required_since=1000, required_until=2000, timeframe_ms=1000
+    )
+    calls = 0
+
+    async def fetch():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        return [_make_candle(1000, 1), _make_candle(2000, 2), _make_candle(3000, 3)]
+
+    async def read(config):
+        return await cache.read(
+            config=config, symbol="BTC/USDC", timeframe="1s", window=window, fetch=fetch
+        )
+
+    rows, other = await asyncio.gather(
+        read({"exchange": "binance"}), read({"exchange": "binance"})
+    )
+    assert calls == 1
+    assert len(rows) == 2  # forming/future candles never enter the shared window
+    rows[0][4] = 999
+    assert other[0][4] == 1
+    assert (await read({"exchange": "binance"}))[0][4] == 1
+    for config in (
+        {"exchange": "bybit"},
+        {"exchange": "binance", "dry_run": True},
+        {"exchange": "binance", "key": "changed"},
+    ):
+        await read(config)
+    assert calls == 4
+    assert not cache._locks
+
+
+@pytest.mark.asyncio
+async def test_completed_windows_retry_gaps_and_cancelled_fetches():
+    import asyncio
+
+    from service.data_history_sync import CompletedHistoryWindows
+
+    cache = CompletedHistoryWindows()
+    window = HistorySyncWindow.build(
+        required_since=1000, required_until=2000, timeframe_ms=1000
+    )
+    started = asyncio.Event()
+    mode = "cancel"
+    calls = 0
+
+    async def fetch():
+        nonlocal calls
+        calls += 1
+        if mode == "cancel":
+            started.set()
+            await asyncio.Event().wait()
+        return (
+            [_make_candle(1000, 1)]
+            if mode == "gap"
+            else [_make_candle(1000, 1), _make_candle(2000, 2)]
+        )
+
+    async def read():
+        return await cache.read(
+            config={}, symbol="BTC/USDC", timeframe="1s", window=window, fetch=fetch
+        )
+
+    task = asyncio.create_task(read())
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    mode = "gap"
+    await read()
+    mode = "complete"
+    assert len(await read()) == 2
+    await read()
+    assert calls == 3
+    assert not cache._locks

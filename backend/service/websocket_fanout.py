@@ -1,6 +1,7 @@
 """Shared fan-out helper for periodic WebSocket payload streaming."""
 
 import asyncio
+from collections import OrderedDict
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any, cast
 
@@ -142,3 +143,36 @@ class WebSocketFanout:
             except asyncio.QueueEmpty:
                 pass
         queue.put_nowait(payload)
+
+
+class CurrentStateProjection:
+    """Share event-driven read-only payloads without starting a producer task.
+
+    The lifespan owner invalidates on state changes and after its last client
+    leaves. The caller owns DB context and cancellation completion. Entries are
+    bounded independently of the number of distinct dashboard selections.
+    """
+
+    def __init__(self) -> None:
+        self._generation = 0
+        self._payloads: OrderedDict[object, str] = OrderedDict()
+        self._lock = asyncio.Lock()
+
+    def invalidate(self) -> None:
+        """Forget payloads without disrupting a read already in progress."""
+        self._generation += 1
+        self._payloads.clear()
+
+    async def read(self, key: object, producer: Callable[[], Awaitable[str]]) -> str:
+        """Build a matching selection once per state generation."""
+        async with self._lock:
+            if key in self._payloads:
+                self._payloads.move_to_end(key)
+                return self._payloads[key]
+            generation = self._generation
+            payload = await producer()
+            if generation == self._generation:
+                self._payloads[key] = payload
+                if len(self._payloads) > 128:
+                    self._payloads.popitem(last=False)
+            return payload

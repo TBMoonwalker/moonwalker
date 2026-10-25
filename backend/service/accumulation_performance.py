@@ -536,6 +536,26 @@ async def ensure_return_totals() -> None:
                             )
 
 
+async def _checkpoint_summaries(conn: Any) -> dict[str, dict[str, Any]]:
+    """Read one latest row and lifetime completeness flags per registration.
+
+    SQLite computes the window over the ledger, but only O(registrations) rows
+    cross into Python. Ordering matches the former ORM query including id ties.
+    """
+    rows = await conn.execute_query_dict(
+        "SELECT activation_id, inventory_json, deal_id, incomplete_fees, unsettled "
+        "FROM (SELECT activation_id, inventory_json, deal_id, "
+        "MAX(CASE WHEN fees_complete = 0 THEN 1 ELSE 0 END) "
+        "OVER (PARTITION BY activation_id) AS incomplete_fees, "
+        "MAX(CASE WHEN terminal = 0 THEN 1 ELSE 0 END) "
+        "OVER (PARTITION BY activation_id) AS unsettled, "
+        "ROW_NUMBER() OVER (PARTITION BY activation_id "
+        "ORDER BY updated_at DESC, id DESC) AS position "
+        "FROM accumulation_fill_checkpoints) WHERE position = 1"
+    )
+    return {str(row["activation_id"]): row for row in rows}
+
+
 async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
     """Routine work returns O(registrations) rows, never lifetime fills."""
     owners = await model.AccumulationActivation.all().using_db(conn)
@@ -550,33 +570,18 @@ async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
         for row in await model.AccumulationReturnTotals.all().using_db(conn)
     }
     transfers, invalid_transfers = await _archived_transfers(conn)
+    checkpoints = await _checkpoint_summaries(conn)
     result = []
     for owner in owners:
         holding = holdings.pop(owner.symbol, None)
         cached = totals.get(owner.id)
         complete = cached is not None and cached.provenance_complete
         complete &= str(owner.id) not in invalid_transfers
-        complete &= (
-            not await model.AccumulationFillCheckpoint.filter(
-                activation=owner, fees_complete=False
-            )
-            .using_db(conn)
-            .exists()
+        latest = checkpoints.get(str(owner.id))
+        complete &= not bool(
+            latest and (latest["incomplete_fees"] or latest["unsettled"])
         )
-        complete &= (
-            not await model.AccumulationFillCheckpoint.filter(
-                activation=owner, terminal=False
-            )
-            .using_db(conn)
-            .exists()
-        )
-        latest = (
-            await model.AccumulationFillCheckpoint.filter(activation=owner)
-            .using_db(conn)
-            .order_by("-updated_at", "-id")
-            .first()
-        )
-        inv = _inventory(latest.inventory_json) if latest else None
+        inv = _inventory(latest["inventory_json"]) if latest else None
         origin = None
         declared_basis = (
             holding.accumulation_basis_provenance
@@ -586,7 +591,7 @@ async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
             else None
         ) == CSV_RETURN_BASIS
         if declared_basis:
-            deal_id = holding.deal_id if holding else latest.deal_id
+            deal_id = holding.deal_id if holding else latest["deal_id"]
             origin = (
                 await csv_inventory_origins(
                     conn, activation_id=owner.id, deal_id=deal_id
@@ -621,7 +626,9 @@ async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
         elif (
             owner.holding_id is None
             and latest is not None
-            and _same_inventory(inv, transfers.get((str(owner.id), latest.deal_id), {}))
+            and _same_inventory(
+                inv, transfers.get((str(owner.id), latest["deal_id"]), {})
+            )
         ):
             pass  # Settled unsold transfer: managed inventory is empty at basis.
         elif (

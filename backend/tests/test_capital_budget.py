@@ -459,3 +459,37 @@ async def test_manual_ledger_buy_add_warns_but_persists_when_over_budget(
 
     assert result["capital_budget_warning"]["reason"] == "capital_budget_exceeded"
     assert persisted
+
+
+@pytest.mark.asyncio
+async def test_public_reservation_guard_and_snapshot_keep_atomic_binding(monkeypatch):
+    import asyncio
+    from dataclasses import FrozenInstanceError
+    from decimal import Decimal
+    from unittest.mock import AsyncMock
+
+    from service.capital_budget import CapitalBudgetUsage
+
+    service = CapitalBudgetService()
+    monkeypatch.setattr(CapitalBudgetService, "_leases", {})
+    monkeypatch.setattr(
+        service, "_load_usage", AsyncMock(return_value=CapitalBudgetUsage(0, 0, 0, 0))
+    )
+    lease, check = await service.acquire_order_lease(
+        {"symbol": "BTC/USDC", "ordersize": 10},
+        {"capital_max_fund": 100, "capital_reserve_safety_orders": False},
+    )
+    assert check.ok
+    async with service.reservation_guard():
+        snapshot = service.reservation_snapshot()
+        binding = asyncio.create_task(lease.bind_operation("durable-1"))
+        await asyncio.sleep(0)
+        assert not binding.done()
+        assert snapshot[0].quote >= Decimal(10)
+        with pytest.raises(FrozenInstanceError):
+            snapshot[0].operation_id = "changed"
+    await binding
+    assert snapshot[0].operation_id is None
+    assert service.reservation_snapshot()[0].operation_id == "durable-1"
+    await lease.release()
+    assert service.reservation_snapshot() == ()
