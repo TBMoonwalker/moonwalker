@@ -121,6 +121,18 @@ async def stage_entry_command(
                         "operation_id was already used for a different request."
                     )
                 return AccumulationCommandResult.from_operation(existing)
+            if command.action in {"retry_entry", "correct_import"} and (
+                await model.AppConfig.filter(
+                    key="trade_mode", value="dynamic_dca", value_type="str"
+                )
+                .using_db(connection)
+                .exists()
+            ):
+                # Check committed mode before a stale dashboard can reclaim the
+                # symbol. Historical receipts and safe abandonment stay usable.
+                raise AccumulationConflictError(
+                    "Select Accumulation mode before retrying or correcting entry."
+                )
             activation = await model.AccumulationActivation.get_or_none(
                 symbol=command.symbol
             ).using_db(connection)

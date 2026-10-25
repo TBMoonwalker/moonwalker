@@ -42,6 +42,7 @@ from service.exchange_capabilities import (
     ExchangeOrderLookupStatus,
 )
 from service.lifecycle_mutation import LifecycleMutationCoordinator
+from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.placement_intents import PlacementIntentService
 from service.trading_maintenance import TradingMaintenanceBarrier
 from tortoise import Tortoise
@@ -54,8 +55,8 @@ CONFIG = {
     "exchange": "binance",
     "market": "spot",
     "dry_run": False,
-    "key": "test-only-api-key",
-    "secret": "test-only-secret",
+    "key": "test-key-only-api",
+    "secret": "test-secret-only",
     "currency": "USDC",
     "capital_max_fund": 1000,
 }
@@ -2435,6 +2436,44 @@ async def test_staged_commands_reject_stale_revision_and_changed_idempotent_payl
         )
     with pytest.raises(AccumulationStateError, match="Stale lifecycle"):
         await service.submit_staged({**payload, "operation_id": "stale-client"})
+
+
+# Value: protects=stale entry actions cannot reclaim a settled DCA handoff;
+# fails_when=retry or correction journals ownership before checking saved mode;
+# why_new=reactivate coverage does not exercise staged-entry persistence; seam=none;
+# no_claim=exchange acceptance (real services and isolated SQLite ownership only).
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["retry_entry", "correct_import"])
+@pytest.mark.parametrize("cached_mode", ["dynamic_dca", "accumulation"])
+async def test_staged_entry_actions_preserve_persisted_dca_handoff(
+    env, monkeypatch, action, cached_mode
+):
+    service, _ = await _entry_service(env, monkeypatch)
+    adapter, client, _, config, *_ = env
+    initial = (await service.csv(ENTRY_CSV))[0]
+    abandon_payload = await _staged_payload(initial, "abandon_entry")
+    abandoned = await service.submit_staged(abandon_payload)
+    await model.AppConfig.create(
+        key="trade_mode", value="dynamic_dca", value_type="str"
+    )
+    config["trade_mode"] = cached_mode
+    assert (await load_lifecycle_route("BTC/USDC")).route == LifecycleRoute.CLASSIC_DCA
+    before = await model.AccumulationActivation.all().values()
+    history = await model.AccumulationLifecycleOperation.all().values()
+    # A repeated historical receipt remains readable without changing ownership.
+    assert await service.submit_staged(abandon_payload) == abandoned
+    extra = {"csv_content": ENTRY_CSV} if action == "correct_import" else {}
+    payload = await _staged_payload(abandoned, action, "stale-entry", **extra)
+    adapter.readiness = AsyncMock(side_effect=AssertionError("No readiness reads"))
+    with pytest.raises(AccumulationStateError, match="Select Accumulation mode"):
+        await service.submit_staged(payload)
+    assert await model.AccumulationActivation.all().values() == before
+    assert await model.AccumulationLifecycleOperation.all().values() == history
+    assert (await load_lifecycle_route("BTC/USDC")).route == LifecycleRoute.CLASSIC_DCA
+    adapter.readiness.assert_not_awaited()
+    assert not await model.OpenTrades.all().exists()
+    assert not await model.PlacementIntent.all().exists()
+    assert not client.calls
 
 
 @pytest.mark.asyncio
