@@ -63,7 +63,7 @@ const { versions: accumulationStrategies, cursor: accumulationCursor,
     )
 const isAccumulation = computed(() => form.tradeMode === 'accumulation')
 const selectedAccumulation = computed(() => accumulationStrategies.value.find(version => version.id === form.accumulationVersionId))
-const accumulationOptions = computed(() => accumulationStrategies.value.map(version => ({ value: version.id, label: `${version.name} · v${version.version} · ${version.parameters.timeframe}` })))
+const accumulationOptions = computed(() => accumulationStrategies.value.map(version => ({ value: version.id, label: `${version.name} · v${version.version}` })))
 watch([isAccumulation, configuredTimeframe], () => {
     if (isAccumulation.value) form.timeframe = configuredTimeframe.value
 })

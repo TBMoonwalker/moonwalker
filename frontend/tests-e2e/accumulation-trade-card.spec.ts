@@ -82,7 +82,7 @@ test(`integrates accumulation with order status and trade details with pushed wa
   await card.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(page.locator('.expanded-order-card').getByRole('heading', { name: 'Waiting for next buy' })).toBeVisible()
   await expect(page.locator('.expanded-order-card').getByText('≈ 2.00% fall', { exact: true })).toBeVisible()
-  await expect(card.getByText('Patient dip · v1 · 1h', { exact: true })).toHaveCount(0)
+  await expect(card.getByText('Patient dip · v1', { exact: true })).toHaveCount(0)
   await expect(card.locator('.assigned-strategy')).toHaveCount(0)
   await expect(card.getByRole('button', { name: 'Pause accumulation', exact: true })).toHaveCount(0)
   await expect(card.getByRole('button', { name: 'Sell and close', exact: true })).toHaveCount(0)

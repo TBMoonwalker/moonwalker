@@ -238,7 +238,7 @@ const { versions: accumulationVersions, cursor: accumulationCursor,
         () => 'Could not load compatible accumulation strategies.',
     )
 const accumulationStrategies = computed(() => accumulationVersions.value.map(version => ({
-    label: `${version.name} · v${version.version} · ${version.parameters.timeframe}`,
+    label: `${version.name} · v${version.version}`,
     value: version.id,
 })))
 async function loadAccumulationStrategies(more = false) {

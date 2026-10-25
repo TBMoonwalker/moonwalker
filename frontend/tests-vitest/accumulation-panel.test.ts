@@ -472,7 +472,7 @@ describe('accumulation controls', () => {
     await flushPromises()
     await click(wrapper, 'Review strategy change')
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Selected strategy: Patient dip · v1 · 4h')
+    expect(wrapper.text()).toContain('Selected strategy: Patient dip · v1')
     await click(wrapper, 'Confirm strategy change')
     expect(api.sendAccumulationCommand.mock.calls[0][0]).toMatchObject({ action: 'switch_strategy', symbol: 'BTC/USDC', target_version_id: 17, expected_revision: 12 })
     wrapper.unmount()

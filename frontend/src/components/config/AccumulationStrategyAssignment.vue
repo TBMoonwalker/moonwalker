@@ -10,7 +10,7 @@ const panel = useAccumulationPanel(requested.value)
 const { detail, draft, uncertain, selected, busy, disabled, fresh, actions, error, notice } = panel
 watch(requested, symbol => { if (symbol && symbol !== selected.value) void panel.selectSymbol(symbol) })
 const registrations = computed(() => panel.rows.value.map(row => ({ label: row.symbol, value: row.symbol })))
-const versions = computed(() => panel.strategies.value.map(version => ({ label: `${version.name} · v${version.version} · ${version.parameters.timeframe}`, value: version.id })))
+const versions = computed(() => panel.strategies.value.map(version => ({ label: `${version.name} · v${version.version}`, value: version.id })))
 const current = computed(() => versions.value.find(version => version.value === detail.value?.strategy_version_id)?.label ?? `Version ${detail.value?.strategy_version_id ?? 'unavailable'}`)
 const action = computed(() => actions.value.includes('switch_strategy') ? 'switch_strategy' : actions.value.includes('retry_entry') ? 'retry_entry' : null)
 const reviewHeading = ref<HTMLElement | null>(null)

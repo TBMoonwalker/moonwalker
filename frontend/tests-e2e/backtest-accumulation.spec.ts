@@ -29,7 +29,7 @@ test('runs accumulation in the existing Backtest form, chart and results tabs', 
   await page.getByLabel('Backtest trade mode', { exact: true }).click()
   await page.locator('.n-base-select-option').filter({ hasText: 'Accumulation' }).click()
   await expect(page.getByLabel('Backtest accumulation strategy', { exact: true })).toBeVisible()
-  await expect(page.getByText('Patient dip · v1 · 1h', { exact: true })).toBeVisible()
+  await expect(page.getByText('Patient dip · v1', { exact: true })).toBeVisible()
   await expect(page.getByText('Take profit %', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Base order', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Completed OHLC candles', { exact: true })).toHaveCount(0)
