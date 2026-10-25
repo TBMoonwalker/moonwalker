@@ -179,3 +179,40 @@ describe('accumulation operator outlook', () => {
     expect(wrapper.find('details').exists()).toBe(false)
   })
 })
+
+it('shows a labelled baseline preview in the trade card and order status without declaring a buy', () => {
+  const detail = row({ runtime_wait_reason: 'WAIT_BASELINE', wait_condition: {
+    reason: 'WAIT_BASELINE', timeframe: '4h', observed_close_ms: 1792915200000,
+    observed_price: '80593.6', next_close_ms: 1792929600000, levels: [],
+    indicative: { level: { kind: 'dip', direction: 'at_or_below', target_price: '78981.728', change_percent: '-2' }, conditions_match: false },
+  } })
+  const card = mount(AccumulationOutlook, { props: { detail, fresh: true } })
+  expect(card.find('h3').text()).toBe('Waiting for the next 4h close')
+  const preview = card.get('[aria-label="Indicative buy condition"]')
+  expect(preview.text()).toContain('2.00% fall')
+  expect(preview.text()).toContain('78,981.728 USDC')
+  expect(card.text()).toContain('Strategy filters: not met')
+  expect(card.text()).toContain('Rechecked at the next close; not a buy signal.')
+  expect(card.text()).toContain('Next close: 2026-10-25 12:00 UTC')
+  expect(card.text()).not.toContain('No price target yet')
+  const table = mount(AccumulationOrderStatus, { props: { status: detail, fresh: true } })
+  expect(table.text()).toContain('Indicative: Fall ≈ 2.00%')
+  expect(table.text()).toContain('Next close:')
+  for (const fresh of [false, true]) {
+    const hidden = mount(AccumulationOutlook, { props: { detail: fresh ? { ...detail, explicitly_paused: true } : detail, fresh } })
+    expect(hidden.find('[aria-label="Indicative buy condition"]').exists()).toBe(false)
+  }
+})
+
+it.each(['NaN', '-1', '0'])('hides malformed indicative prices (%s) while preserving the candle wait', target => {
+  const detail = row({ runtime_wait_reason: 'WAIT_BASELINE', wait_condition: {
+    reason: 'WAIT_BASELINE', timeframe: '4h', observed_close_ms: 1000,
+    observed_price: '100', next_close_ms: 14401000, levels: [],
+    indicative: { level: { kind: 'dip', direction: 'below', target_price: target, change_percent: '-1' }, conditions_match: true },
+  } })
+  const card = mount(AccumulationOutlook, { props: { detail, fresh: true } })
+  expect(card.find('[aria-label="Indicative buy condition"]').exists()).toBe(false)
+  expect(card.text()).toContain('Waiting for the next 4h close')
+  const table = mount(AccumulationOrderStatus, { props: { status: detail, fresh: true } })
+  expect(table.text()).not.toContain('Indicative:')
+})

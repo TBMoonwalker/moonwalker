@@ -74,3 +74,61 @@ def test_nonpositive_depth_level_is_not_presented_as_a_buyable_price():
         )
         is None
     )
+
+
+@pytest.mark.parametrize(
+    ("guarded", "recovered", "target"),
+    [(False, False, "100"), (True, False, "98"), (True, True, "100")],
+)
+def test_baseline_preview_combines_decline_depth_and_existing_spacing(
+    guarded, recovered, target
+):
+    parameters = replace(PARAMETERS, timeframe="4h")
+    market = AccumulationMarket(8 * HOUR, "100", "101", "110", "2", "5", False)
+    guard = (
+        AccumulationGuard(str(uuid4()), 8 * HOUR, "100", "2", 1, 1) if guarded else None
+    )
+    state = AccumulationObservations(
+        8 * HOUR,
+        1 if guarded else 0,
+        high_close="105" if recovered else None,
+        atr_at_high="2" if recovered else None,
+        recovery_ready=recovered,
+    )
+    before = (market, state, guard)
+    wait = accumulation_wait_condition(
+        market, state, guard, parameters, "WAIT_BASELINE"
+    )
+    assert wait["reason"] == "WAIT_BASELINE" and wait["levels"] == []
+    preview = wait["indicative"]
+    assert preview["level"]["target_price"] == target
+    assert preview["level"]["direction"] == (
+        "below" if target == "100" else "at_or_below"
+    )
+    assert preview["conditions_match"] is False
+    assert wait["next_close_ms"] == 12 * HOUR
+    assert before == (market, state, guard)
+    price = Decimal(target) - (Decimal("0.01") if target == "100" else Decimal(0))
+    hypothetical = replace(
+        market,
+        close_ms=12 * HOUR,
+        close=str(price),
+        previous_close=market.close,
+        severity=str((Decimal(market.peak) - price) / Decimal(market.atr)),
+        conditions_match=True,
+    )
+    assert accumulation_signal_reason(
+        hypothetical, state, guard, parameters
+    ).startswith("BUY_")
+
+
+def test_baseline_preview_respects_depth_and_rejects_nonpositive_boundaries():
+    market = AccumulationMarket(HOUR, "109", "108", "110", "2", "0.5")
+    state = AccumulationObservations(HOUR, 0)
+    wait = accumulation_wait_condition(market, state, None, PARAMETERS, "WAIT_BASELINE")
+    assert wait["indicative"]["level"]["target_price"] == "107.0"
+    assert wait["indicative"]["conditions_match"] is True
+    invalid = replace(market, peak="2", atr="10")
+    assert "indicative" not in accumulation_wait_condition(
+        invalid, state, None, PARAMETERS, "WAIT_BASELINE"
+    )

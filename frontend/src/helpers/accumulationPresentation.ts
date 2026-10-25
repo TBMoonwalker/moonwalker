@@ -1,4 +1,4 @@
-import type { AccumulationAction, AccumulationDetail, AccumulationStatus } from '../types/accumulation'
+import type { AccumulationAction, AccumulationDetail, AccumulationStatus, AccumulationWaitCondition } from '../types/accumulation'
 
 interface AccumulationOutlook {
   title: string
@@ -70,4 +70,15 @@ export function accumulationOutlook(row: AccumulationDetail, fresh: boolean): Ac
   if (row.state === 'enabled' && !row.holding && row.entry?.source === 'asap') return { title: 'Starting initial buy', description: 'ASAP opens this holding with the configured base order.', next: '', tone: 'info' }
   if (row.state === 'enabled') return { title: 'Watching for a buy signal', description: 'The registration is enabled. Buys require a qualifying completed candle and available budget.', next: 'No action needed to wait. A buy is not guaranteed at the next candle close.', tone: 'info' }
   return { title: 'Waiting for an update', description: 'A lifecycle step or trading check is still pending.', next: 'Check the reported reason below or refresh status.', tone: 'default' }
+}
+
+
+/** Keep previews separate from actionable levels, and reject malformed evidence. */
+export function accumulationIndicativeCondition(condition: AccumulationWaitCondition | null | undefined) {
+  const preview = condition?.indicative
+  if (condition?.reason !== 'WAIT_BASELINE' || !preview || typeof preview.conditions_match !== 'boolean' ||
+      !['below', 'at_or_below'].includes(preview.level?.direction) ||
+      !Number.isFinite(Number(preview.level?.target_price)) || Number(preview.level.target_price) <= 0 ||
+      !Number.isFinite(Number(preview.level?.change_percent)) || Number(preview.level.change_percent) > 0) return null
+  return preview
 }

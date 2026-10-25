@@ -408,7 +408,18 @@ async def test_missed_candles_and_baseline_do_not_backfill_trades(evaluation_db)
         last_processed_close_ms=253 * HOUR,
         value_json=json.dumps(asdict(AccumulationObservations(253 * HOUR, 0))),
     )
-    assert (await _evaluate(activation)).reason == "WAIT_BASELINE"
+    before = await model.AccumulationStrategyState.filter(
+        activation=activation
+    ).values()
+    decision = await _evaluate(activation)
+    assert decision.action == "WAIT" and decision.reason == "WAIT_BASELINE"
+    assert decision.wait_condition["indicative"]["level"]["direction"] == "below"
+    assert decision.wait_condition["levels"] == []
+    assert (
+        await model.AccumulationStrategyState.filter(activation=activation).values()
+        == before
+    )
+    assert await model.PlacementIntent.all().count() == 0
     later = [replace(row, close_ms=row.close_ms + 2 * HOUR) for row in _candles()]
     assert (
         await _evaluate(activation, candles=later, now_ms=255 * HOUR)

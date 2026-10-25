@@ -111,12 +111,15 @@ export interface AccumulationWaitCondition {
   observed_price: string
   price_basis?: 'ask'
   next_close_ms: number
-  levels: Array<{
-    kind: string
-    direction: 'below' | 'at_or_below' | 'at_or_above'
-    target_price: string
-    change_percent: string
-  }>
+  levels: AccumulationPriceLevel[]
+  indicative?: { level: AccumulationPriceLevel; conditions_match: boolean }
+}
+
+export interface AccumulationPriceLevel {
+  kind: string
+  direction: 'below' | 'at_or_below' | 'at_or_above'
+  target_price: string
+  change_percent: string
 }
 
 export interface AccumulationOrderCheckpoint {

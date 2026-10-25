@@ -81,6 +81,10 @@ for adoption and retry behavior.
 1. Read **Order status** in Open trades. Expand the trade for its chart, order
    history and next-buy condition. A displayed percentage is measured from the
    stated completed close, or the fresh ask for an execution-price wait.
+   During a startup baseline wait, **Indicative buy condition** previews a lower
+   close using the latest completed candle's dip depth and known spacing rules.
+   The strategy-filter status is shown separately. This is not a buy signal:
+   indicators, spacing, lifecycle and funding are rechecked at the next close.
 2. Use the row's **More** actions to pause or resume the registration. Pause
    blocks new buys while retaining managed coins and settling outstanding work.
    Use the top-bar global pause to block new buys across Moonwalker.

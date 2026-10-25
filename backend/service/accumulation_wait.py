@@ -72,7 +72,7 @@ def accumulation_wait_condition(
                     )
         elif reason not in {"WAIT_BASELINE", "WAIT_NEW_CANDLE", "WAIT_CONDITIONS"}:
             return None
-        return {
+        result: dict[str, Any] = {
             "reason": reason,
             "timeframe": parameters.timeframe,
             "observed_close_ms": market.close_ms,
@@ -80,3 +80,35 @@ def accumulation_wait_condition(
             "next_close_ms": market.close_ms + parameters.interval_ms,
             "levels": levels,
         }
+
+        if reason == "WAIT_BASELINE":
+            # A next-bar estimate uses the latest close as the decline boundary.
+            # Indicators are frozen here; actual admission recalculates at close.
+            target = min(
+                price,
+                Decimal(market.peak)
+                - Decimal(parameters.entry_atr) * Decimal(market.atr),
+            )
+            if guard is not None:
+                rearm = (
+                    Decimal(guard.signal_price)
+                    - Decimal(parameters.spacing_atr) * spacing_atr
+                )
+                if state.recovery_ready:
+                    assert (
+                        state.high_close is not None and state.atr_at_high is not None
+                    )
+                    rearm = max(
+                        rearm,
+                        Decimal(state.high_close)
+                        - Decimal(parameters.spacing_atr) * Decimal(state.atr_at_high),
+                    )
+                target = min(target, rearm)
+            if target > 0:
+                result["indicative"] = {
+                    "level": level(
+                        "dip", "below" if target == price else "at_or_below", target
+                    ),
+                    "conditions_match": market.conditions_match,
+                }
+        return result

@@ -76,6 +76,17 @@ test('puts entry state and its reviewed next action before secondary information
   await expect(panel.getByText('No price target yet. Waiting for the next completed candle to evaluate a new buy signal; a buy is not guaranteed.', { exact: true })).toBeVisible()
   await expect(panel.getByText(/^Next close:.*UTC$/)).toBeVisible()
   await expect(panel.getByRole('list', { name: 'Current buy conditions' })).toHaveCount(0)
+  waiting.wait_condition!.indicative = {
+    level: { kind: 'dip', direction: 'at_or_below', target_price: '98', change_percent: '-2' },
+    conditions_match: false,
+  }
+  live!.send(JSON.stringify({ type: 'snapshot', page: { activations: [waiting], next_after: null }, detail: waiting }))
+  await expect(panel.getByRole('list', { name: 'Indicative buy condition' })).toContainText('98 USDC')
+  await expect(panel.getByText('Strategy filters: not met at the latest close.', { exact: true })).toBeVisible()
+  await expect(panel.getByText('Rechecked at the next close; not a buy signal.', { exact: true })).toBeVisible()
+  await expect(panel.getByText('No price target yet.', { exact: false })).toHaveCount(0)
+  expect(commands).toBe(0)
+  expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
   await page.clock.fastForward(15000)
   expect(reads).toBe(0)
   await page.getByRole('button', { name: 'Dark theme', exact: true }).click()
