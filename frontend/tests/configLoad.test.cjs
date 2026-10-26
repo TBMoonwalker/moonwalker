@@ -45,6 +45,29 @@ function createLoadDefaults(overrides = {}) {
     }
 }
 
+for (const method of ['pasted text', 'uploaded file text']) {
+    for (const multiline of [false, true]) {
+        test(`reloads ${method} as inline CSV (${multiline ? 'multiple lines' : 'one row'})`, async () => {
+            const row = '08/10/2026 17:29:20;BTC/USDC;81300;0.01227109;0.00003075;BTC;net;'
+            const text = multiline ? `date;symbol;price;amount;fee;fee_currency;amount_type;fee_quote_value\n${row}` : row
+            const source = method === 'uploaded file text' ? await new Blob([text]).text() : text
+            const state = buildLoadedConfigState({ signal: 'csv_signal', signal_settings: { csv_source: source } }, createLoadDefaults())
+            assert.equal(state.signal.csvsignal_mode, 'inline')
+            assert.equal(state.signal.csvsignal_inline, source)
+            assert.equal(state.signal.csvsignal_source, null)
+        })
+    }
+}
+
+test('keeps CSV URLs and filesystem paths in source mode', () => {
+    for (const source of ['https://csv.example/trades;export;spot;latest', '/tmp/one;trade.csv']) {
+        const state = buildLoadedConfigState({ signal: 'csv_signal', signal_settings: { csv_source: source } }, createLoadDefaults())
+        assert.equal(state.signal.csvsignal_mode, 'source')
+        assert.equal(state.signal.csvsignal_source, source)
+        assert.equal(state.signal.csvsignal_inline, null)
+    }
+})
+
 test(
     'buildLoadedConfigState applies advanced-general defaults and CSV inline parsing',
     () => {

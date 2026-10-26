@@ -37,10 +37,6 @@ class SignalPlugin:
         if not normalized_source:
             raise ValueError("Missing CSV source in signal_settings.csv_source")
 
-        # Allow direct inline CSV payload.
-        if "\n" in normalized_source and ";" in normalized_source:
-            return normalized_source
-
         if normalized_source.startswith(("http://", "https://")):
             try:
                 import httpx
@@ -52,6 +48,12 @@ class SignalPlugin:
                 response = await client.get(normalized_source)
                 response.raise_for_status()
                 return response.text
+
+        # A single purchase is valid CSV, even after its final newline is stripped.
+        if ";" in normalized_source and (
+            "\n" in normalized_source or len(normalized_source.split(";", 3)) == 4
+        ):
+            return normalized_source
 
         path = Path(normalized_source).expanduser()
         if not path.exists() or not path.is_file():
