@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_import import parse_accumulation_csv
-from service.accumulation_repair import AccumulationOrderRepair
-from service.accumulation_staged_entry import StagedEntryCommand, stage_entry_command
-from service.accumulation_state import AccumulationConflictError
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.imports import parse_accumulation_csv
+from service.accumulation.repair import AccumulationOrderRepair
+from service.accumulation.staged_entry import StagedEntryCommand, stage_entry_command
+from service.accumulation.state import AccumulationConflictError
 from service.lifecycle_mutation import LifecycleMutationCoordinator
 from service.trading_maintenance import TradingMaintenanceBarrier
 from tortoise import Tortoise
@@ -29,8 +29,8 @@ async def ownership_db(tmp_path, monkeypatch):
     await Tortoise.generate_schemas()
     coordinator = LifecycleMutationCoordinator(TradingMaintenanceBarrier())
     for module in (
-        "accumulation_ownership_declaration",
-        "accumulation_lifecycle",
+        "accumulation.ownership_declaration",
+        "accumulation.lifecycle",
     ):
         monkeypatch.setattr(
             f"service.{module}.lifecycle_mutation_coordinator", coordinator
@@ -407,7 +407,7 @@ async def test_missing_csv_inventory_is_restored_only_from_the_original_declarat
         state="paused"
     )
     monkeypatch.setattr(
-        "service.accumulation_inventory_restore.lifecycle_mutation_coordinator",
+        "service.accumulation.inventory_restore.lifecycle_mutation_coordinator",
         LifecycleMutationCoordinator(TradingMaintenanceBarrier()),
     )
     original = await model.OpenTrades.get(id=holding.id).values()
@@ -465,7 +465,7 @@ async def test_inventory_restore_rejects_missing_or_conflicting_evidence(
         state="paused"
     )
     monkeypatch.setattr(
-        "service.accumulation_inventory_restore.lifecycle_mutation_coordinator",
+        "service.accumulation.inventory_restore.lifecycle_mutation_coordinator",
         LifecycleMutationCoordinator(TradingMaintenanceBarrier()),
     )
     activation.holding_id = None
@@ -503,7 +503,7 @@ async def test_inventory_restore_rejects_missing_or_conflicting_evidence(
 
 @pytest.mark.asyncio
 async def test_abandoned_entry_can_use_a_new_reviewed_compatible_pin(ownership_db):
-    from service.accumulation_strategy import build_accumulation_strategy_document
+    from service.accumulation.strategy import build_accumulation_strategy_document
 
     activation, _, entry, _, _, _, _ = await declaration_fixture(staged=True)
     abandoned = await stage_entry_command(

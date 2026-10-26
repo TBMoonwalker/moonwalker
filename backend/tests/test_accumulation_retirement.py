@@ -8,12 +8,12 @@ from unittest.mock import AsyncMock
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_import import parse_accumulation_csv
-from service.accumulation_lifecycle import AccumulationLifecycleService
-from service.accumulation_repair import AccumulationOrderRepair
-from service.accumulation_staged_entry import StagedEntryCommand, stage_entry_command
-from service.accumulation_state import AccumulationConflictError
-from service.accumulation_status import get_accumulation_status
+from service.accumulation.imports import parse_accumulation_csv
+from service.accumulation.lifecycle import AccumulationLifecycleService
+from service.accumulation.repair import AccumulationOrderRepair
+from service.accumulation.staged_entry import StagedEntryCommand, stage_entry_command
+from service.accumulation.state import AccumulationConflictError
+from service.accumulation.status import get_accumulation_status
 from service.lifecycle_mutation import LifecycleMutationCoordinator
 from service.trading_maintenance import TradingMaintenanceBarrier
 from tortoise import Tortoise
@@ -25,7 +25,7 @@ async def retired_db(tmp_path, monkeypatch):
     await Tortoise.init(db_url=url, modules={"models": ["model"]})
     await Tortoise.generate_schemas()
     coordinator = LifecycleMutationCoordinator(TradingMaintenanceBarrier())
-    for name in ("accumulation_repair", "accumulation_lifecycle"):
+    for name in ("accumulation.repair", "accumulation.lifecycle"):
         monkeypatch.setattr(
             f"service.{name}.lifecycle_mutation_coordinator", coordinator
         )
@@ -391,7 +391,7 @@ async def test_retirement_rejects_stale_account_or_ownership_changes(
     ],
 )
 async def test_retirement_rejects_ambiguous_transport_fields(retired_db, updates):
-    from service.accumulation_contracts import AccumulationStateError
+    from service.accumulation.contracts import AccumulationStateError
 
     activation, target, adapter, payload = await setup_intent()
     with pytest.raises(AccumulationStateError):

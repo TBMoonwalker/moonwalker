@@ -6,7 +6,7 @@ from typing import Any
 
 import helper
 import httpx
-from service.accumulation_entry import AccumulationEntryService
+from service.accumulation.entry import AccumulationEntryService
 from service.autopilot import Autopilot
 from service.config import resolve_history_lookback_days
 from service.data import Data

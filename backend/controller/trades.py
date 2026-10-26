@@ -10,7 +10,7 @@ from controller.responses import json_response
 from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
 from litestar.params import FromPath, FromQuery
-from service.accumulation_csv_accounting import declared_purchase_history
+from service.accumulation.csv_accounting import declared_purchase_history
 from service.config import Config
 from service.order_requests import normalize_order_symbol
 from service.runtime_services import runtime_service_proxy

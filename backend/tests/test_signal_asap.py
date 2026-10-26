@@ -375,7 +375,7 @@ async def test_asap_run_does_not_log_stale_config_ini_message(monkeypatch) -> No
 async def test_accumulation_asap_uses_entry_adapter_without_classic_order(monkeypatch):
     from unittest.mock import AsyncMock
 
-    from service.accumulation_entry import AccumulationEntryResult
+    from service.accumulation.entry import AccumulationEntryResult
 
     queue = asyncio.Queue()
     plugin = SignalPlugin(queue)

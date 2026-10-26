@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_commands import AccumulationCommand, AccumulationCommandResult
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_lifecycle import (
+from service.accumulation.commands import AccumulationCommand, AccumulationCommandResult
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.lifecycle import (
     AccumulationLifecycleService,
     AccumulationReadiness,
 )
-from service.accumulation_state import AccumulationConflictError
+from service.accumulation.state import AccumulationConflictError
 from service.lifecycle_mutation import LifecycleMutationCoordinator
 from service.trading_controls import TradingControlsService
 from service.trading_maintenance import TradingMaintenanceBarrier
@@ -27,7 +27,7 @@ async def lifecycle_db(tmp_path, monkeypatch):
     # leak across those loops. Both services still share the real coordinator.
     coordinator = LifecycleMutationCoordinator(TradingMaintenanceBarrier())
     monkeypatch.setattr(
-        "service.accumulation_lifecycle.lifecycle_mutation_coordinator", coordinator
+        "service.accumulation.lifecycle.lifecycle_mutation_coordinator", coordinator
     )
     monkeypatch.setattr(
         "service.trading_controls.lifecycle_mutation_coordinator", coordinator

@@ -272,7 +272,7 @@ class Statistic:
             return {}, await self._performance_complete()
         report = await runtime.performance()
         currency = str(runtime.adapter.config_provider().get("currency", "")).upper()
-        from service.accumulation_performance import accumulated_daily_history
+        from service.accumulation.performance import accumulated_daily_history
 
         history = (
             await accumulated_daily_history(since)

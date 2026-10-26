@@ -12,8 +12,8 @@ import helper
 import model
 import service.strategy_builder as strategy_builder
 import talib
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_strategy import (
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.strategy import (
     AccumulationParameters,
     effective_accumulation_parameters,
     parse_accumulation_strategy_document,

@@ -1,6 +1,6 @@
 """Tests for exchange sell status helper utilities."""
 
-from service.exchange_sell_status import (
+from service.dca.sell_status import (
     build_partial_sell_status,
     combine_partial_sell_statuses,
     finalize_sell_order_status,

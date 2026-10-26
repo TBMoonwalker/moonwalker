@@ -47,11 +47,9 @@ async def test_get_history_for_symbol_respects_until_bound(
     async def fake_ensure_markets_loaded() -> None:
         return None
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_resolve_symbol", lambda symbol: symbol)
 
     candles = await exchange.get_history_for_symbol(
         config={"exchange": "binance"},

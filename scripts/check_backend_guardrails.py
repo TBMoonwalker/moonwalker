@@ -75,7 +75,7 @@ def main() -> int:
                 f"missing_in_map={missing_in_map}, stale_in_map={stale_in_map}."
             )
 
-    for service_file in sorted(service_dir.glob("*.py")):
+    for service_file in sorted(service_dir.rglob("*.py")):
         blocks = find_large_commented_blocks(
             service_file, threshold=MAX_COMMENT_BLOCK_LINES
         )

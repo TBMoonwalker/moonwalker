@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError, replace
 
 import pytest
-from service.dca_decision import (
+from service.dca.decision import (
     DcaAction,
     DcaEvaluationContext,
     ExitActionContext,
@@ -14,7 +14,7 @@ from service.dca_decision import (
     evaluate_recovery_trigger_decision,
     evaluate_static_dca_decision,
 )
-from service.dca_recovery_sizing import RecoverySizingPolicy
+from service.dca.recovery_sizing import RecoverySizingPolicy
 
 
 def _context(

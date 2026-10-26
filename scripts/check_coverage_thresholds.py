@@ -12,12 +12,12 @@ GLOBAL_LINE_FLOOR = 71.0
 GLOBAL_BRANCH_FLOOR = 57.0
 CRITICAL_MODULE_BRANCH_FLOORS = {
     "backend/controller/config.py": 64.0,
-     "backend/service/ai_trust.py": 71.0,
+    "backend/service/ai_trust.py": 71.0,
     "backend/service/ai_trust_analytics.py": 95.0,
     "backend/service/ai_trust_calibration.py": 90.0,
     "backend/service/coin_market_cap.py": 76.0,
     "backend/service/config.py": 72.0,
-    "backend/service/dca_decision.py": 100.0,
+    "backend/service/dca/decision.py": 100.0,
     "backend/service/exchange_capabilities.py": 87.0,
     "backend/service/lifecycle_mutation.py": 100.0,
     "backend/service/lifecycle_snapshot.py": 100.0,

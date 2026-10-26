@@ -148,8 +148,8 @@ The backend is a Python application using Litestar with the following structure:
 2. **Services** (`backend/service/`)
     - `config.py` - Singleton configuration manager backed by DB (`AppConfig`), hot-reload via Redis pub/sub
     - `exchange.py` - Async CCXT wrapper: buy/sell lifecycle, precision, balance, retry logic
-    - `dca.py` - Core DCA engine: processes tickers, evaluates TP/SO triggers, places orders
-    - `accumulation_runtime.py` - Lifespan-owned accumulation orchestration, entry recovery, strategy evaluation and operator commands
+    - `dca/engine.py` - Core DCA engine: processes tickers, evaluates TP/SO triggers, places orders
+    - `accumulation/runtime.py` - Lifespan-owned accumulation orchestration, entry recovery, strategy evaluation and operator commands
     - `watcher.py` - Real-time OHLCV/trade streaming via CCXT Pro WebSockets with auto-reconnect
     - `trades.py` - Trade persistence layer: CRUD for open/closed trades, aggregation
     - `orders.py` - Order execution and management

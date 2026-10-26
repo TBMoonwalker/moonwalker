@@ -4,7 +4,7 @@ import json
 
 import pytest
 from service.dca import Dca
-from service.dca_recovery_sizing import RecoverySizingPolicy
+from service.dca.recovery_sizing import RecoverySizingPolicy
 from service.lifecycle_snapshot import LifecycleSnapshotIdentity
 
 

@@ -7,7 +7,7 @@ from typing import Any
 import ccxt.pro as ccxtpro
 import helper
 import model
-from service.accumulation_notifications import accumulation_input_notifications
+from service.accumulation.notifications import accumulation_input_notifications
 from service.config import Config, resolve_history_lookback_days, resolve_timeframe
 from service.config_views import (
     DcaRuntimeConfigView,

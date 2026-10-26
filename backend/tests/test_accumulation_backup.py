@@ -9,8 +9,8 @@ from uuid import uuid4
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_recovery import AccumulationPlacementRecovery
-from service.accumulation_strategy import build_accumulation_strategy_document
+from service.accumulation.recovery import AccumulationPlacementRecovery
+from service.accumulation.strategy import build_accumulation_strategy_document
 from service.backup_restore import BackupService
 from tortoise import Tortoise
 
@@ -186,7 +186,7 @@ async def test_restore_into_empty_catalog_keeps_exact_pin_without_publishing(bac
     service = BackupService()
     payload = await service.export_backup(True)
     # Remove only the local catalog binding after clearing its dependent state.
-    from service.accumulation_backup import ACCUMULATION_TABLE_MODELS
+    from service.accumulation.backup import ACCUMULATION_TABLE_MODELS
 
     for table in reversed(ACCUMULATION_TABLE_MODELS.values()):
         await table.all().delete()

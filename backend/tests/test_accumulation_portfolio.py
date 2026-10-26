@@ -10,24 +10,24 @@ from unittest.mock import AsyncMock
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_accounting import (
+from service.accumulation.accounting import (
     persist_accumulation_order,
     reject_unsubmitted_accumulation_order,
 )
-from service.accumulation_budget import (
+from service.accumulation.budget import (
     AccumulationFundingSnapshot,
     capture_accumulation_funding_token,
     usable_accumulation_quote,
 )
-from service.accumulation_evaluation import evaluate_accumulation
-from service.accumulation_portfolio import (
+from service.accumulation.evaluation import evaluate_accumulation
+from service.accumulation.portfolio import (
     AccumulationAdmissionInputs,
     AccumulationOffer,
     AccumulationPortfolioCoordinator,
     prepare_accumulation_buy,
 )
-from service.accumulation_state import load_accumulation_context
-from service.accumulation_strategy import (
+from service.accumulation.state import load_accumulation_context
+from service.accumulation.strategy import (
     AccumulationCandle,
     AccumulationObservations,
     build_accumulation_strategy_document,
@@ -67,9 +67,9 @@ async def portfolio_db(tmp_path, monkeypatch):
     await Tortoise.generate_schemas()
     coordinator = LifecycleMutationCoordinator(TradingMaintenanceBarrier())
     for name in (
-        "accumulation_evaluation",
-        "accumulation_portfolio",
-        "accumulation_accounting",
+        "accumulation.evaluation",
+        "accumulation.portfolio",
+        "accumulation.accounting",
     ):
         monkeypatch.setattr(
             f"service.{name}.lifecycle_mutation_coordinator", coordinator

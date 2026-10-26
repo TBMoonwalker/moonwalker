@@ -2,6 +2,17 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.4.0.0] - 2026-10-26
+
+### Changed
+- DCA and accumulation keep their trade-specific buy, sell and dust handling
+  separate while using the same exchange execution and recovery infrastructure.
+
+### Fixed
+- Import a single purchase from pasted or uploaded CSV text, including fee
+  columns, without it being mistaken for a file path. CSV URLs and file sources
+  remain supported.
+
 ## [5.3.0.0] - 2026-10-26
 
 ### Added

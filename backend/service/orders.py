@@ -2,20 +2,21 @@
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, TypeGuard
 
 import helper
 from service.ai_trust import evaluate_entry_enforcement
 from service.capital_budget import CapitalBudgetService
-from service.dca_recovery_sizing import build_recovery_sizing_policy
+from service.dca.dust import DcaDustContext, handle_unsellable_remainder
+from service.dca.exchange import DcaExchange
+from service.dca.limit_sell import build_partial_status_from_fallback
+from service.dca.recovery_sizing import build_recovery_sizing_policy
 from service.delisting_protection import DelistingProtectionService
-from service.exchange import Exchange
 from service.exchange_capabilities import (
     ExchangePostSubmissionFailure,
     ExchangeSubmissionIndeterminate,
 )
-from service.exchange_limit_sell import build_partial_status_from_fallback
 from service.exchange_types import (
     ExchangeOrderPayload,
     PartialSellStatus,
@@ -28,10 +29,6 @@ from service.lifecycle_snapshot import (
     snapshots_match,
 )
 from service.monitoring import MonitoringService
-from service.order_close_context import (
-    build_unsellable_remainder_context,
-    build_unsellable_status_snapshot,
-)
 from service.order_intents import (
     build_manual_buy_order_intent,
     build_manual_sell_order_intent,
@@ -46,7 +43,6 @@ from service.order_payloads import (
     build_closed_trade_payloads,
     build_manual_buy_open_trade_payload,
     build_manual_buy_trade_payload,
-    trade_datetime_from_ms,
 )
 from service.order_persistence import (
     persist_buy_trade,
@@ -54,7 +50,6 @@ from service.order_persistence import (
     persist_manual_buy_add,
     persist_partial_sell_execution,
     persist_stopped_trade,
-    persist_unsellable_remainder,
 )
 from service.order_requests import normalize_order_symbol, parse_manual_buy_add_request
 from service.placement_intents import (
@@ -97,7 +92,7 @@ class Orders:
         self.utils = helper.Utils()
         self.capital_budget = CapitalBudgetService()
         self.delisting_protection = DelistingProtectionService.shared()
-        self.exchange = Exchange()
+        self.exchange = DcaExchange()
         self.monitoring = MonitoringService()
         self.placement_workflow = PlacementWorkflow()
         self.placement_intents = self.placement_workflow.intents
@@ -1537,71 +1532,20 @@ class Orders:
         placement_operation_id: str | None = None,
         placement_operation_ids: list[str] | None = None,
     ) -> None:
-        """Persist partial close and mark remaining amount as unsellable."""
-        snapshot = build_unsellable_status_snapshot(order_status)
-        if not snapshot.symbol:
-            return
-
-        closed_at = self.__resolve_partial_sell_closed_at(order_status)
-
-        open_trade_rows = await self.trades.get_open_trades_by_symbol(snapshot.symbol)
-        open_trade = open_trade_rows[0] if open_trade_rows else None
-        so_count = await self.__resolve_so_count(snapshot.symbol)
-        open_timestamp = (
-            await self.__resolve_open_timestamp(snapshot.symbol)
-            if snapshot.partial_amount > 0
-            else None
-        )
-        context = build_unsellable_remainder_context(
-            snapshot,
-            open_trade=open_trade,
-            so_count=so_count,
-            open_timestamp_ms=open_timestamp,
-            closed_at=closed_at,
-            unsellable_since=closed_at.isoformat(),
-        )
-
-        await persist_unsellable_remainder(
-            snapshot.symbol,
-            context.unsellable_payload,
-            partial_amount=context.partial_amount,
-            partial_proceeds=context.partial_proceeds,
-            sell_executions=snapshot.partial_executions,
-            closed_trade_payload=context.closed_trade_payload,
+        """Delegate DCA dust policy while retaining the current service owners."""
+        await handle_unsellable_remainder(
+            order_status,
+            config,
+            dependencies=DcaDustContext(
+                trades=self.trades,
+                monitoring=self.monitoring,
+                logger=logging,
+                resolve_so_count=self.__resolve_so_count,
+                resolve_open_timestamp=self.__resolve_open_timestamp,
+            ),
             placement_operation_id=placement_operation_id,
             placement_operation_ids=placement_operation_ids,
         )
-        await self.trades.invalidate_trade_caches()
-
-        if not context.already_notified:
-            await self.monitoring.notify_trade(
-                "trade.unsellable_notional",
-                context.monitor_payload,
-                config,
-            )
-        logging.warning(
-            "Marked %s remainder as unsellable (reason=%s, remaining=%s, min_notional=%s, estimated_notional=%s).",
-            context.symbol,
-            context.reason,
-            context.remaining_amount,
-            context.min_notional,
-            context.estimated_notional,
-        )
-
-    @staticmethod
-    def __resolve_partial_sell_closed_at(
-        order_status: PartialSellStatus,
-    ) -> datetime:
-        """Return the best-effort close timestamp for a partial sell status."""
-        for execution in order_status.get("executions", []) or []:
-            raw_timestamp = execution.get("timestamp")
-            if raw_timestamp in (None, ""):
-                continue
-            try:
-                return trade_datetime_from_ms(float(raw_timestamp))
-            except (TypeError, ValueError):
-                continue
-        return datetime.now(timezone.utc)
 
     async def __calculate_closed_trade_stats(
         self, order_status: SoldCheckStatus

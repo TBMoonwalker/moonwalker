@@ -13,11 +13,11 @@ from litestar.connection import Request
 from litestar.exceptions import SerializationException, WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
 from litestar.params import FromQuery
-from service import accumulation_runtime
-from service.accumulation_catalog import list_accumulation_strategies
-from service.accumulation_runtime import AccumulationRuntime
-from service.accumulation_state import AccumulationConflictError
-from service.accumulation_status import (
+from service.accumulation import runtime as accumulation_runtime
+from service.accumulation.catalog import list_accumulation_strategies
+from service.accumulation.runtime import AccumulationRuntime
+from service.accumulation.state import AccumulationConflictError
+from service.accumulation.status import (
     accumulation_stream_snapshot,
     get_accumulation_status,
     list_accumulation_status,
@@ -256,7 +256,7 @@ async def replay_strategy(request: Request[Any, Any, Any]) -> Any:
     """Run an isolated, bounded historical comparison without account actions."""
     if _runtime() is None:
         return _unavailable()
-    from service.accumulation_replay import run_accumulation_replay
+    from service.accumulation.replay import run_accumulation_replay
     from service.strategy_runtime import load_accumulation_strategy_version
 
     try:

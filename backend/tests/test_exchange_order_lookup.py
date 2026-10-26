@@ -100,11 +100,11 @@ def _exchange_with_lookup(
     service = Exchange()
     client = _LookupExchange(result)
     service.exchange = client
-    monkeypatch.setattr(service, "_Exchange__ensure_exchange", _noop_async)
-    monkeypatch.setattr(service, "_Exchange__ensure_markets_loaded", _noop_async)
+    monkeypatch.setattr(service, "_ensure_exchange", _noop_async)
+    monkeypatch.setattr(service, "_ensure_markets_loaded", _noop_async)
     monkeypatch.setattr(
         service,
-        "_Exchange__resolve_symbol_with_refresh",
+        "_resolve_symbol_with_refresh",
         _resolved_symbol,
     )
     return service, client
@@ -116,11 +116,11 @@ def _exchange_with_client(
 ) -> Exchange:
     service = Exchange()
     service.exchange = client
-    monkeypatch.setattr(service, "_Exchange__ensure_exchange", _noop_async)
-    monkeypatch.setattr(service, "_Exchange__ensure_markets_loaded", _noop_async)
+    monkeypatch.setattr(service, "_ensure_exchange", _noop_async)
+    monkeypatch.setattr(service, "_ensure_markets_loaded", _noop_async)
     monkeypatch.setattr(
         service,
-        "_Exchange__resolve_symbol_with_refresh",
+        "_resolve_symbol_with_refresh",
         _resolved_symbol,
     )
     return service
@@ -360,7 +360,7 @@ def test_fallback_status_coerces_missing_cost_to_zero() -> None:
 
 @pytest.mark.parametrize("side", ["buy", "sell"])
 def test_shared_report_keeps_partial_execution_distinct_from_request(side):
-    from service.accumulation_fill import AccumulationFill
+    from service.accumulation.fill import AccumulationFill
     from service.exchange_types import ExchangeOrderReport
 
     order = {

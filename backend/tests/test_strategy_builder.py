@@ -660,8 +660,8 @@ def test_validation_requires_explicit_comparison_value_ports() -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("strategy_db")
 async def test_shared_accumulation_versions_keep_exact_pins_and_common_catalog():
-    from service.accumulation_catalog import list_accumulation_strategies
-    from service.accumulation_strategy import BUILTIN_ACCUMULATION_SLUG
+    from service.accumulation.catalog import list_accumulation_strategies
+    from service.accumulation.strategy import BUILTIN_ACCUMULATION_SLUG
     from service.strategy_runtime import load_accumulation_strategy_version
 
     await seed_builtin_strategies()

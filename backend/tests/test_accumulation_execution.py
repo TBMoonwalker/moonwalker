@@ -11,25 +11,25 @@ import ccxt.async_support as ccxt
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_accounting import persist_accumulation_order
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_evaluation import evaluate_accumulation
-from service.accumulation_exchange import (
+from service.accumulation.accounting import persist_accumulation_order
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.evaluation import evaluate_accumulation
+from service.accumulation.exchange import (
     AccumulationExchangeAdapter,
     accumulation_account_scope,
     preflight_accumulation_precision,
 )
-from service.accumulation_execution import AccumulationBuyExecutor
-from service.accumulation_lifecycle import (
+from service.accumulation.execution import AccumulationBuyExecutor
+from service.accumulation.lifecycle import (
     AccumulationLifecycleService,
     AccumulationValidationRequest,
 )
-from service.accumulation_portfolio import AccumulationOffer, prepare_accumulation_buy
-from service.accumulation_recovery import AccumulationPlacementRecovery
-from service.accumulation_runtime import AccumulationRuntime, build_accumulation_runtime
-from service.accumulation_sales import AccumulationCommandExecutor
-from service.accumulation_state import load_accumulation_context
-from service.accumulation_strategy import (
+from service.accumulation.portfolio import AccumulationOffer, prepare_accumulation_buy
+from service.accumulation.recovery import AccumulationPlacementRecovery
+from service.accumulation.runtime import AccumulationRuntime, build_accumulation_runtime
+from service.accumulation.sales import AccumulationCommandExecutor
+from service.accumulation.state import load_accumulation_context
+from service.accumulation.strategy import (
     AccumulationObservations,
     AccumulationParameters,
     build_accumulation_strategy_document,
@@ -157,28 +157,28 @@ async def env(tmp_path, monkeypatch):
     barrier = TradingMaintenanceBarrier()
     coordinator = LifecycleMutationCoordinator(barrier)
     for name in (
-        "accumulation_evaluation",
-        "accumulation_portfolio",
-        "accumulation_accounting",
-        "accumulation_execution",
-        "accumulation_lifecycle",
-        "accumulation_sales",
-        "accumulation_runtime",
-        "accumulation_account_rebind",
-        "accumulation_repair",
-        "accumulation_dust",
+        "accumulation.evaluation",
+        "accumulation.portfolio",
+        "accumulation.accounting",
+        "accumulation.execution",
+        "accumulation.lifecycle",
+        "accumulation.sales",
+        "accumulation.runtime",
+        "accumulation.account_rebind",
+        "accumulation.repair",
+        "accumulation.dust",
     ):
         monkeypatch.setattr(
             f"service.{name}.lifecycle_mutation_coordinator", coordinator
         )
     monkeypatch.setattr(
-        "service.accumulation_execution.trading_maintenance_barrier", barrier
+        "service.accumulation.execution.trading_maintenance_barrier", barrier
     )
     monkeypatch.setattr(
-        "service.accumulation_sales.trading_maintenance_barrier", barrier
+        "service.accumulation.sales.trading_maintenance_barrier", barrier
     )
     monkeypatch.setattr(
-        "service.accumulation_runtime.trading_maintenance_barrier", barrier
+        "service.accumulation.runtime.trading_maintenance_barrier", barrier
     )
     monkeypatch.setattr(CapitalBudgetService, "_lock", asyncio.Lock())
     monkeypatch.setattr(CapitalBudgetService, "_leases", {})
@@ -188,8 +188,8 @@ async def env(tmp_path, monkeypatch):
     client = Client(clock)
     exchange = Exchange()
     exchange.exchange = client
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", AsyncMock())
-    monkeypatch.setattr(exchange, "_Exchange__ensure_markets_loaded", AsyncMock())
+    monkeypatch.setattr(exchange, "_ensure_exchange", AsyncMock())
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", AsyncMock())
     monkeypatch.setattr(
         exchange,
         "fetch_market_metadata",
@@ -1055,7 +1055,7 @@ async def test_manual_sale_uncertainty_recovers_without_resubmission(
         }
     else:
         monkeypatch.setattr(
-            "service.accumulation_sales.persist_accumulation_order",
+            "service.accumulation.sales.persist_accumulation_order",
             AsyncMock(side_effect=OperationalError("rollback")),
         )
     if failure == "cancelled":
@@ -1443,7 +1443,7 @@ async def test_partial_fill_of_explicit_retry_requires_another_explicit_command(
 
 def test_production_runtime_gate_does_not_read_config_or_open_exchange(monkeypatch):
     monkeypatch.setattr(
-        "service.accumulation_runtime.ACCUMULATION_RUNTIME_AVAILABLE", False
+        "service.accumulation.runtime.ACCUMULATION_RUNTIME_AVAILABLE", False
     )
 
     def prohibited():
@@ -1558,7 +1558,7 @@ async def test_wallet_rebinding_evidence_uses_new_credentials_without_adopting_i
 async def test_settled_holding_can_rebind_after_restart_with_a_rotated_key(
     env, monkeypatch
 ):
-    from service.accumulation_status import get_accumulation_status
+    from service.accumulation.status import get_accumulation_status
 
     adapter, client, clock, config, *_ = env
     operation_id = await prepared(env)
@@ -2070,7 +2070,7 @@ async def test_runtime_retry_timer_only_requeues_terminal_exchange_zero_fill(
 
 async def _entry_service(env, monkeypatch, *, signal="csv_signal"):
     from service import signal_runtime
-    from service.accumulation_entry import AccumulationEntryService
+    from service.accumulation.entry import AccumulationEntryService
 
     adapter, _, _, config, *_ = env
     version = await model.StrategyVersion.create(
@@ -2275,7 +2275,7 @@ async def test_asap_entry_rejects_unsupported_setup_before_staging(
     ],
 )
 def test_accumulation_csv_rejects_invalid_declarations(row):
-    from service.accumulation_import import parse_accumulation_csv
+    from service.accumulation.imports import parse_accumulation_csv
 
     with pytest.raises(ValueError):
         parse_accumulation_csv(row, "USDC", now_ms=NOW)
@@ -2311,7 +2311,7 @@ async def test_csv_external_order_does_not_adopt_or_cancel(env, monkeypatch):
 async def test_csv_restart_does_not_reimport_or_enable_staged_inventory(
     env, monkeypatch
 ):
-    from service.accumulation_entry import AccumulationEntryService
+    from service.accumulation.entry import AccumulationEntryService
 
     service, _ = await _entry_service(env, monkeypatch)
     adapter, client, _, _, url, *_ = env
@@ -3001,7 +3001,7 @@ async def test_review_global_pause_blocks_runtime_candidates(env):
 
 @pytest.mark.asyncio
 async def test_review_empty_adopted_registration_can_pause_resume_and_stop(env):
-    from service.accumulation_status import get_accumulation_status
+    from service.accumulation.status import get_accumulation_status
 
     adapter, client, _, _, *_ = env
     activation, _ = await setup_activation(env)
@@ -3032,7 +3032,7 @@ async def test_review_empty_adopted_registration_can_pause_resume_and_stop(env):
 
 @pytest.mark.asyncio
 async def test_review_retired_unplaced_close_retry_executes_only_new_sale(env):
-    from service.accumulation_repair import AccumulationOrderRepair
+    from service.accumulation.repair import AccumulationOrderRepair
 
     adapter, client, _, _, *_ = env
     buy_id = await prepared(env)
@@ -3120,7 +3120,7 @@ async def test_review_lost_binance_ack_recovers_commissions_from_only_its_order_
     )
     monkeypatch.setattr(
         adapter.exchange,
-        "_Exchange__resolve_symbol_with_refresh",
+        "_resolve_symbol_with_refresh",
         AsyncMock(return_value=placement.symbol),
     )
     recovery = AccumulationPlacementRecovery(adapter.exchange, adapter.account_scope)
@@ -3188,7 +3188,7 @@ async def test_accumulation_bybit_eu_reuses_fresh_venue_ceiling_before_quantity_
 
 @pytest.mark.asyncio
 async def test_enabled_build_bootstraps_fresh_dry_run_without_credentials(env):
-    from service.accumulation_config import accumulation_available
+    from service.accumulation.config import accumulation_available
 
     assert accumulation_available()
     runtime = build_accumulation_runtime(
@@ -3260,7 +3260,7 @@ async def test_accumulation_rechecks_delisting_snapshot_at_durable_claim(
     protection.ensure_fresh = AsyncMock()
     monkeypatch.setattr(DelistingProtectionService, "_instance", protection)
     executor = AccumulationBuyExecutor(adapter)
-    from service import accumulation_execution
+    from service.accumulation import execution as accumulation_execution
 
     usable = accumulation_execution.usable_accumulation_quote
 
@@ -3319,11 +3319,11 @@ async def test_demo_accumulation_runtime_buys_through_exchange_and_accounts(env)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["rebind_account", "declare_ownership"])
 async def test_demo_inventory_cannot_be_rebound_into_live_ownership(env, action):
-    from service.accumulation_account_rebind import AccumulationAccountRebind
-    from service.accumulation_ownership_declaration import (
+    from service.accumulation.account_rebind import AccumulationAccountRebind
+    from service.accumulation.ownership_declaration import (
         AccumulationOwnershipDeclaration,
     )
-    from service.accumulation_state import AccumulationConflictError
+    from service.accumulation.state import AccumulationConflictError
 
     adapter, client, _, config, *_ = env
     config["dry_run"] = True
@@ -3810,7 +3810,7 @@ async def test_asap_can_open_bo_from_fresh_binance_balance_with_old_account_upda
 
 
 async def archive_dust(env, activation, operation_id="archive-dust"):
-    from service.accumulation_dust import archive_accumulation_dust
+    from service.accumulation.dust import archive_accumulation_dust
 
     return await archive_accumulation_dust(
         {
@@ -3826,8 +3826,8 @@ async def archive_dust(env, activation, operation_id="archive-dust"):
 
 @pytest.mark.asyncio
 async def test_archive_dust_preserves_exact_inventory_history_and_idempotency(env):
-    from service.accumulation_dust import archive_accumulation_dust
-    from service.accumulation_status import get_accumulation_status
+    from service.accumulation.dust import archive_accumulation_dust
+    from service.accumulation.status import get_accumulation_status
 
     activation, holding = await close_with_remainder(env, "0.00048")
     before = holding.accumulation_remaining_cost
@@ -3879,7 +3879,7 @@ async def test_archive_dust_preserves_exact_inventory_history_and_idempotency(en
 
 @pytest.mark.asyncio
 async def test_archive_rejects_sellable_or_unsettled_inventory_without_changes(env):
-    from service.accumulation_state import AccumulationConflictError
+    from service.accumulation.state import AccumulationConflictError
 
     activation, holding = await close_with_remainder(env, "1")
     with pytest.raises(AccumulationConflictError, match="sellable"):
@@ -3901,7 +3901,7 @@ async def test_archive_rejects_sellable_or_unsettled_inventory_without_changes(e
 async def test_archive_rejects_inventory_race_and_retries_after_atomic_rollback(
     env, monkeypatch
 ):
-    from service.accumulation_state import AccumulationConflictError
+    from service.accumulation.state import AccumulationConflictError
 
     activation, holding = await close_with_remainder(env, "0.00048")
     actual = env[0].sale_inputs
@@ -3938,8 +3938,8 @@ async def test_archive_rejects_inventory_race_and_retries_after_atomic_rollback(
 
 @pytest.mark.asyncio
 async def test_archive_dust_minimum_check_freshness_and_scope(env, monkeypatch):
-    from service.accumulation_dust import archive_accumulation_dust
-    from service.accumulation_state import AccumulationConflictError
+    from service.accumulation.dust import archive_accumulation_dust
+    from service.accumulation.state import AccumulationConflictError
 
     activation, _ = await close_with_remainder(
         env, "0.05"
@@ -3998,7 +3998,7 @@ async def test_archive_backup_round_trip_retains_exact_record_and_empty_registra
 ):
     from types import SimpleNamespace
 
-    from service.accumulation_status import get_accumulation_status
+    from service.accumulation.status import get_accumulation_status
     from service.backup_restore import BackupService
 
     activation, holding = await close_with_remainder(env, "0.00048")
@@ -4030,7 +4030,7 @@ async def test_archive_backup_round_trip_retains_exact_record_and_empty_registra
 
 @pytest.mark.asyncio
 async def test_concurrent_dust_archives_have_one_atomic_winner(env, monkeypatch):
-    from service.accumulation_state import AccumulationConflictError
+    from service.accumulation.state import AccumulationConflictError
 
     activation, _ = await close_with_remainder(env, "0.00048")
     original = env[0].sale_inputs
@@ -4093,8 +4093,8 @@ async def test_existing_database_adds_archive_column_without_losing_unsellable_r
     ],
 )
 async def test_archive_rejects_invalid_ownership_and_settlement_evidence(env, failure):
-    from service.accumulation_dust import archive_accumulation_dust
-    from service.accumulation_state import AccumulationConflictError
+    from service.accumulation.dust import archive_accumulation_dust
+    from service.accumulation.state import AccumulationConflictError
 
     activation, holding = await close_with_remainder(env, "0.00048")
     payload = {
@@ -4128,7 +4128,7 @@ async def test_archive_rejects_invalid_ownership_and_settlement_evidence(env, fa
 
 @pytest.mark.asyncio
 async def test_archived_zero_fees_match_equivalent_checkpoint_decimal_spellings(env):
-    from service.accumulation_status import get_accumulation_status
+    from service.accumulation.status import get_accumulation_status
 
     activation, holding = await close_with_remainder(env, "0.00048")
     checkpoint = await model.AccumulationFillCheckpoint.get(
@@ -4149,7 +4149,7 @@ async def test_archived_zero_fees_match_equivalent_checkpoint_decimal_spellings(
 
 @pytest.mark.asyncio
 async def test_archive_dust_accepts_unplaced_retry_after_settled_sale(env):
-    from service.accumulation_dust import archive_accumulation_dust
+    from service.accumulation.dust import archive_accumulation_dust
 
     activation, holding = await close_with_remainder(env, "0.0000048")
     await retry_remainder(activation)
@@ -4176,7 +4176,7 @@ async def test_archive_dust_accepts_unplaced_retry_after_settled_sale(env):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("remainder", ["0.05", "0.0000048"])
 async def test_runtime_archives_legacy_closing_dust_on_startup(env, remainder):
-    from service.accumulation_status import get_accumulation_status
+    from service.accumulation.status import get_accumulation_status
 
     activation, holding = await close_with_remainder(env, remainder)
     before = holding.accumulation_remaining_cost
@@ -4255,8 +4255,8 @@ async def test_concurrent_automatic_dust_archival_preserves_one_exact_archive(en
 
 @pytest.mark.asyncio
 async def test_unplaced_retry_cannot_archive_predecessor_with_incomplete_fees(env):
-    from service.accumulation_dust import archive_accumulation_dust
-    from service.accumulation_state import AccumulationConflictError
+    from service.accumulation.dust import archive_accumulation_dust
+    from service.accumulation.state import AccumulationConflictError
 
     activation, _ = await close_with_remainder(env, "0.0000048")
     await retry_remainder(activation)
@@ -4395,7 +4395,7 @@ async def test_new_asap_cycle_buys_fresh_base_order_without_old_consumption_or_c
 async def test_verified_dust_transfer_keeps_realized_returns_and_new_holding_performance(
     env, new_holding
 ):
-    from service.accumulation_performance import accumulation_performance
+    from service.accumulation.performance import accumulation_performance
 
     adapter, client, clock, *_ = env
     activation, holding = await close_with_remainder(env, "0.0000048")
@@ -4459,7 +4459,7 @@ async def test_verified_dust_transfer_keeps_realized_returns_and_new_holding_per
     ],
 )
 async def test_dust_transfer_never_restores_profit_from_unverified_evidence(env, fault):
-    from service.accumulation_performance import accumulation_performance
+    from service.accumulation.performance import accumulation_performance
 
     activation, holding = await close_with_remainder(env, "0.0000048")
     await archive_dust(env, activation)
@@ -4498,7 +4498,7 @@ async def test_verified_dust_transfer_restores_dashboard_profit_and_chart_snapsh
 ):
     from types import SimpleNamespace
 
-    from service import accumulation_performance as performance
+    from service.accumulation import performance as performance
     from service.statistic import Statistic
 
     activation, _ = await close_with_remainder(env, "0.0000048")
@@ -4593,7 +4593,7 @@ async def test_fee_aware_csv_returns_survive_buy_close_and_cache_rebuild(
     env, monkeypatch, fee_fields
 ):
     """Declared purchase basis participates in returns without inventing native fills."""
-    from service.accumulation_performance import accumulation_performance
+    from service.accumulation.performance import accumulation_performance
 
     service, _ = await _entry_service(env, monkeypatch)
     adapter, client, clock, *_ = env
@@ -4664,7 +4664,7 @@ async def test_fee_aware_csv_returns_survive_buy_close_and_cache_rebuild(
 async def test_fee_aware_csv_does_not_trust_missing_or_inconsistent_origin(
     env, monkeypatch, fault
 ):
-    from service.accumulation_performance import accumulation_performance
+    from service.accumulation.performance import accumulation_performance
 
     service, _ = await _entry_service(env, monkeypatch)
     env[1].balance["free"]["BTC"] = "5"
@@ -4779,7 +4779,7 @@ async def test_failed_accounting_does_not_log_committed_fill(env, monkeypatch, c
 async def test_csv_purchase_history_keeps_declared_base_and_native_buy_separate(
     env, monkeypatch, fee_columns
 ):
-    from service.accumulation_csv_accounting import declared_purchase_history
+    from service.accumulation.csv_accounting import declared_purchase_history
     from service.trades import Trades
 
     service, _ = await _entry_service(env, monkeypatch)
@@ -4825,12 +4825,12 @@ async def test_csv_history_accepts_large_valid_declaration_without_status_payloa
 ):
     from dataclasses import replace
 
-    import service.accumulation_csv_accounting as csv_accounting
-    from service.accumulation_csv_accounting import (
+    import service.accumulation.csv_accounting as csv_accounting
+    from service.accumulation.csv_accounting import (
         csv_inventory_origins,
         declared_purchase_history,
     )
-    from service.accumulation_import import AccumulationImport
+    from service.accumulation.imports import AccumulationImport
 
     service, _ = await _entry_service(env, monkeypatch)
     env[1].balance["free"]["BTC"] = "5"
@@ -4862,7 +4862,7 @@ async def test_csv_origin_query_requires_exact_adopted_deal_not_substring_receip
 ):
     from uuid import uuid4
 
-    from service.accumulation_csv_accounting import declared_purchase_history
+    from service.accumulation.csv_accounting import declared_purchase_history
 
     service, _ = await _entry_service(env, monkeypatch)
     env[1].balance["free"]["BTC"] = "5"
@@ -5008,7 +5008,7 @@ async def test_runtime_failure_logs_are_sanitized_coalesced_and_recover(caplog):
     from types import SimpleNamespace
     from unittest.mock import Mock
 
-    from service.accumulation_runtime import AccumulationRuntime
+    from service.accumulation.runtime import AccumulationRuntime
 
     adapter = Mock()
     adapter.account_scope = AsyncMock(return_value="account")

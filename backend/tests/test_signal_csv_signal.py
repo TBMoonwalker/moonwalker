@@ -8,6 +8,77 @@ from signals.csv_signal import SignalPlugin
 from tortoise import Tortoise
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["", "\n", "\r\n"])
+async def test_csv_source_loads_one_fee_aware_row_as_inline_text(ending):
+    row = "08/10/2026 17:29:20;BTC/USDC;81300;0.01227109;0.00003075;BTC;net;"
+    plugin = SignalPlugin(asyncio.Queue())
+    try:
+        content = await plugin._load_csv_content(row + ending)
+        entries = plugin.import_service._parse_csv_rows(content, "USDC")
+        assert content == row
+        assert list(entries) == ["BTC/USDC"]
+        assert len(entries["BTC/USDC"]) == 1
+        assert entries["BTC/USDC"][0]["amount"] == pytest.approx(0.01227109)
+        assert entries["BTC/USDC"][0]["base_fee"] == "0.00003075"
+    finally:
+        await plugin.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_csv_source_keeps_multiline_and_legacy_rows_inline():
+    plugin = SignalPlugin(asyncio.Queue())
+    row = "08/10/2026 17:29:20;BTC/USDC;81300;0.01227109"
+    try:
+        for source in (row, "date;symbol;price;amount\n" + row):
+            content = await plugin._load_csv_content(source)
+            entries = plugin.import_service._parse_csv_rows(content, "USDC")
+            assert content == source
+            assert len(entries["BTC/USDC"]) == 1
+    finally:
+        await plugin.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_csv_source_reads_a_file_without_reclassifying_its_contents(tmp_path):
+    source = tmp_path / "one;trade.csv"
+    row = "08/10/2026 17:29:20;BTC/USDC;81300;0.01227109"
+    source.write_text(row, encoding="utf-8-sig")
+    plugin = SignalPlugin(asyncio.Queue())
+    try:
+        assert await plugin._load_csv_content(str(source)) == row
+        with pytest.raises(ValueError, match="CSV source file not found"):
+            await plugin._load_csv_content(str(tmp_path / "missing.csv"))
+    finally:
+        await plugin.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_csv_source_preserves_url_loading_with_semicolons(monkeypatch):
+    import httpx
+
+    row = "08/10/2026 17:29:20;BTC/USDC;81300;0.01227109"
+    url = "https://csv.example/trades;export;spot;latest"
+    requested = []
+
+    def respond(request):
+        requested.append(str(request.url))
+        return httpx.Response(200, text=row)
+
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: client_type(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    plugin = SignalPlugin(asyncio.Queue())
+    try:
+        assert await plugin._load_csv_content(url) == row
+        assert requested == [url]
+    finally:
+        await plugin.shutdown()
+
+
 class _DummyOpenTradesZero:
     @classmethod
     def all(cls):
@@ -268,7 +339,7 @@ async def test_accumulation_csv_bypasses_classic_import_with_existing_holdings(
 ):
     from unittest.mock import AsyncMock
 
-    from service.accumulation_entry import AccumulationEntryResult
+    from service.accumulation.entry import AccumulationEntryResult
 
     queue = asyncio.Queue()
     plugin = SignalPlugin(queue)

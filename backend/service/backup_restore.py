@@ -11,7 +11,7 @@ from uuid import UUID
 
 import helper
 import model
-from service.accumulation_backup import (
+from service.accumulation.backup import (
     ACCUMULATION_TABLE_MODELS,
     export_strategy_dependencies,
     restore_strategy_dependencies,

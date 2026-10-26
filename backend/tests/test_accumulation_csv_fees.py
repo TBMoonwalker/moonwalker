@@ -5,8 +5,8 @@ import json
 from decimal import Decimal
 
 import pytest
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_import import AccumulationImport, parse_accumulation_csv
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.imports import AccumulationImport, parse_accumulation_csv
 from service.csv_signal_import import CSVSignalImportService
 
 HEADER = "date;symbol;price;amount;fee;fee_currency;amount_type;fee_quote_value\n"

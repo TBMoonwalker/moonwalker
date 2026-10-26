@@ -18,7 +18,7 @@ from service.trades import Trades
 from service.trading_controls import TradingControlsService
 
 if TYPE_CHECKING:
-    from service.accumulation_runtime import AccumulationRuntime
+    from service.accumulation.runtime import AccumulationRuntime
 
 ServiceT = TypeVar("ServiceT")
 

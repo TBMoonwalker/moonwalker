@@ -16,7 +16,7 @@ import pandas as pd
 from service.analytics import compute_stats_from_trades
 from service.data_ohlcv import resample_ohlcv_data
 from service.data_timeframes import timeframe_bucket_origin_milliseconds
-from service.dca_math import (
+from service.dca.math import (
     BacktestTradeState,
     calculate_actual_pnl_percent,
     calculate_average_entry_price,
@@ -27,7 +27,7 @@ from service.dca_math import (
     check_take_profit_hit,
     should_place_safety_order,
 )
-from service.dca_recovery_sizing import (
+from service.dca.recovery_sizing import (
     RECOVERY_TARGET_MODE,
     RecoverySizingPolicy,
     build_recovery_sizing_policy,

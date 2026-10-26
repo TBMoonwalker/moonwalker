@@ -10,7 +10,7 @@ from litestar import Litestar
 from litestar.exceptions import WebSocketDisconnect
 from litestar.middleware import DefineMiddleware
 from litestar.testing import TestClient
-from service.accumulation_status_events import AccumulationStatusEvents
+from service.accumulation.status_events import AccumulationStatusEvents
 from service.origin_policy import WebSocketOriginMiddleware
 
 

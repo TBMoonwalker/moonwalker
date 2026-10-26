@@ -2,6 +2,7 @@
 
 import ccxt.async_support as ccxt
 import pytest
+from service.dca.exchange import DcaExchange
 from service.exchange_buy_manager import ExchangeBuyManager
 from service.exchange_capabilities import ExchangePostSubmissionFailure
 from service.exchange_contexts import BuyFinalizationContext
@@ -239,7 +240,8 @@ async def test_invalid_fill_capped_buy_stays_pending(
 @pytest.mark.asyncio
 async def test_finalize_market_buy_applies_demo_fee_and_base_fee_deduction() -> None:
     exchange = _DummyExchange()
-    manager = ExchangeBuyManager(_DummyLogger(), get_exchange=lambda: exchange)
+    manager = DcaExchange()
+    manager.exchange = exchange
 
     async def fake_parse_order_status(
         _order: dict[str, object],
@@ -277,7 +279,8 @@ async def test_finalize_market_buy_applies_demo_fee_and_base_fee_deduction() -> 
 @pytest.mark.asyncio
 async def test_finalize_market_buy_uses_live_fee_when_not_dry_run() -> None:
     exchange = _DummyExchange()
-    manager = ExchangeBuyManager(_DummyLogger(), get_exchange=lambda: exchange)
+    manager = DcaExchange()
+    manager.exchange = exchange
 
     async def fake_parse_order_status(
         _order: dict[str, object],

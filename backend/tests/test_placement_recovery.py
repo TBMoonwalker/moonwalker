@@ -409,3 +409,295 @@ async def test_unknown_recovery_action_fails_closed() -> None:
     intent.action = "unknown"
 
     assert await handler.resume(intent, {}, {}) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("fee_deduction", [False, True])
+async def test_real_dca_buy_finalizer_matches_normal_and_recovered_order(
+    monkeypatch, caplog, dry_run, fee_deduction
+):
+    """Recovery uses the real fee policy without submitting another buy."""
+    import logging
+    from unittest.mock import AsyncMock
+
+    from service.dca.exchange import DcaExchange
+
+    adapter = DcaExchange()
+    adapter.exchange = SimpleNamespace(
+        close=AsyncMock(),
+        fetch_trading_fee=AsyncMock(return_value={"taker": 0.001}),
+        market=lambda _symbol: {"taker": 0.001},
+    )
+    monkeypatch.setattr(adapter, "_ensure_exchange", AsyncMock())
+    monkeypatch.setattr(adapter, "_ensure_markets_loaded", AsyncMock())
+    monkeypatch.setattr(adapter, "_get_price_for_symbol", AsyncMock(return_value="100"))
+    monkeypatch.setattr(adapter, "_get_amount_from_symbol", AsyncMock(return_value="2"))
+    monkeypatch.setattr(adapter, "_preflight_buy_funds", AsyncMock(return_value=True))
+    monkeypatch.setattr(adapter, "_resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_symbol_with_refresh",
+        AsyncMock(side_effect=lambda symbol: symbol),
+    )
+    monkeypatch.setattr(adapter, "_get_precision_for_symbol", AsyncMock(return_value=8))
+    monkeypatch.setattr(
+        adapter,
+        "_is_notional_below_minimum",
+        lambda *_args, **_kwargs: (False, 5.0, 200.0),
+    )
+    parsed = {
+        "symbol": "BTC/USDC",
+        "amount": 2.0,
+        "total_amount": 2.0,
+        "base_fee": 0.1,
+        "price": 100.0,
+        "orderid": "fill-1",
+        "ordersize": 200.0,
+        "timestamp": 1000,
+    }
+    monkeypatch.setattr(adapter, "_parse_order_status", AsyncMock(return_value=parsed))
+    evidence = {"id": "fill-1", "symbol": "BTC/USDC", "status": "closed", "filled": 2.0}
+    submit = AsyncMock(side_effect=lambda order: {**order, **evidence})
+    monkeypatch.setattr(adapter, "_execute_market_buy", submit)
+    private_metadata = "private-plugin-metadata-must-not-be-logged"
+    request = {
+        "symbol": "BTC/USDC",
+        "side": "buy",
+        "ordertype": "market",
+        "ordersize": 200.0,
+        "metadata_json": json.dumps({"note": private_metadata}),
+    }
+    config = {"dry_run": dry_run, "fee_deduction": fee_deduction}
+    caplog.set_level(logging.DEBUG, logger="exchange")
+    normal = await adapter.create_spot_market_buy(dict(request), config)
+    handler, _exchange, _trades, _intents, buys, _sells, _partials = _handler()
+    handler = replace(handler, exchange=adapter)
+    assert await handler.resume(
+        _intent(PlacementAction.BUY, request=request), evidence, config
+    )
+    assert normal is not None
+    for key in (
+        "symbol",
+        "orderid",
+        "amount",
+        "amount_fee",
+        "fees",
+        "precision",
+        "metadata_json",
+    ):
+        assert buys[0][key] == normal[key]
+    assert normal["amount"] == pytest.approx(2.0 if fee_deduction else 1.9)
+    assert submit.await_count == 1
+    assert "Finalized DCA buy" in caplog.text
+    assert private_metadata not in caplog.text
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action", [PlacementAction.SELL, PlacementAction.LIMIT_SELL, PlacementAction.CANCEL]
+)
+@pytest.mark.parametrize("filled", [1.5, 2.0])
+async def test_real_dca_sell_finalizer_matches_normal_and_recovered_order(
+    monkeypatch, action, filled
+):
+    """Rebuilt full/partial sales retain metrics and executions, never resubmit."""
+    from unittest.mock import AsyncMock
+
+    from service.dca.exchange import DcaExchange
+
+    adapter = DcaExchange()
+    submit = AsyncMock(
+        return_value={"id": "sell-1", "status": "closed", "filled": filled}
+    )
+    adapter.exchange = SimpleNamespace(
+        close=AsyncMock(),
+        create_market_sell_order=submit,
+        amount_to_precision=lambda _symbol, amount: str(amount),
+        market=lambda _symbol: {"limits": {"cost": {"min": 5.0}}},
+    )
+    monkeypatch.setattr(adapter, "_ensure_exchange", AsyncMock())
+    monkeypatch.setattr(adapter, "_ensure_markets_loaded", AsyncMock())
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_symbol_with_refresh",
+        AsyncMock(side_effect=lambda symbol: symbol),
+    )
+    monkeypatch.setattr(
+        adapter, "_resolve_sell_amount", AsyncMock(return_value=("BTC/USDC", 2.0))
+    )
+    monkeypatch.setattr(adapter, "_log_remaining_sell_dust", AsyncMock())
+    monkeypatch.setattr(
+        adapter,
+        "_is_notional_below_minimum",
+        lambda *_args, **_kwargs: (False, 5.0, 240.0),
+    )
+    parsed = {
+        "symbol": "BTC/USDC",
+        "side": "sell",
+        "total_amount": filled,
+        "price": 120.0,
+        "ordersize": filled * 120.0,
+        "orderid": "sell-1",
+        "timestamp": 1000,
+        "base_fee": 0.01,
+    }
+    monkeypatch.setattr(adapter, "_parse_order_status", AsyncMock(return_value=parsed))
+    request = {
+        "symbol": "BTC/USDC",
+        "side": "sell",
+        "total_amount": 2.0,
+        "requested_total_amount": 2.0,
+        "total_cost": 200.0,
+        "actual_pnl": 19.5,
+        "current_price": 120.0,
+    }
+    normal = await adapter.create_spot_market_sell(dict(request), {})
+    evidence = {
+        "id": "sell-1",
+        "symbol": "BTC/USDC",
+        "status": "closed",
+        "filled": filled,
+        "amount": 2.0,
+    }
+    handler, _exchange, trades, _intents, _buys, sells, _partials = _handler()
+    trades.trade_data = dict(request)
+    handler = replace(handler, exchange=adapter)
+    result = await handler.resume(_intent(action, request=request), evidence, {})
+    rebuilt = await adapter.build_spot_sell_order_status({**request, **evidence}, {})
+    assert rebuilt == normal
+    assert rebuilt is not None and rebuilt["executions"]
+    if filled == 2.0:
+        assert result and sells[0] == normal
+        assert normal["profit"] == 40.0
+        assert normal["profit_percent"] == 20.0
+    else:
+        # Existing recovery refuses a partial close payload as a completed sale.
+        assert not result and not sells
+        assert normal["partial_filled_amount"] == 1.5
+        assert normal["remaining_amount"] == 0.5
+    assert submit.await_count == 1
+    await adapter.close()
+
+
+# Value: protects=limit completion and partial fallback retain close history totals;
+# fails_when=moved callbacks lose a fill, its fee, or submit the remainder twice;
+# why_new=manager tests replace finalization and recovery tests start after fills;
+# seam=none;
+# no_claim=provider acceptance or database atomicity (mocked exchange evidence;
+# existing SQLite persistence tests cover the storage transaction).
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partial_timeout", [False, True])
+async def test_real_dca_limit_callbacks_preserve_close_history(
+    monkeypatch, partial_timeout
+):
+    """Wire real limit, fallback, finalizer and history projection together."""
+    from unittest.mock import AsyncMock
+
+    from service.dca.exchange import DcaExchange
+    from service.order_payloads import build_closed_trade_payloads
+
+    adapter = DcaExchange()
+    limit_fill = 1.5 if partial_timeout else 2.0
+    limit_evidence = {
+        "id": "limit-1",
+        "symbol": "BTC/USDC",
+        "status": "canceled" if partial_timeout else "closed",
+        "filled": limit_fill,
+        "remaining": 2.0 - limit_fill,
+        "amount": 2.0,
+        "average": 120.0,
+        "price": 120.0,
+    }
+    market_submit = AsyncMock(
+        return_value={"id": "market-1", "status": "closed", "filled": 0.5}
+    )
+    adapter.exchange = SimpleNamespace(
+        close=AsyncMock(),
+        create_market_sell_order=market_submit,
+        fetch_order=AsyncMock(return_value={**limit_evidence, "status": "open"}),
+        amount_to_precision=lambda _symbol, amount: str(amount),
+        price_to_precision=lambda _symbol, price: str(price),
+    )
+    monkeypatch.setattr(adapter, "_ensure_exchange", AsyncMock())
+    monkeypatch.setattr(adapter, "_ensure_markets_loaded", AsyncMock())
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_symbol_with_refresh",
+        AsyncMock(side_effect=lambda symbol: symbol),
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_sell_amount",
+        AsyncMock(side_effect=lambda symbol, amount: (symbol, amount)),
+    )
+    monkeypatch.setattr(adapter, "_log_remaining_sell_dust", AsyncMock())
+    monkeypatch.setattr(
+        adapter, "_is_notional_below_minimum", lambda *_a, **_k: (False, 5.0, 240.0)
+    )
+    place_limit = AsyncMock(return_value={"id": "limit-1", "ordertype": "limit"})
+    monkeypatch.setattr(adapter._limit_order_manager, "execute_limit_sell", place_limit)
+    monkeypatch.setattr(
+        adapter._limit_sell_manager,
+        "wait_for_limit_sell_fill",
+        AsyncMock(return_value=None if partial_timeout else limit_evidence),
+    )
+    cancel = AsyncMock(return_value=limit_evidence)
+    monkeypatch.setattr(adapter._limit_sell_manager, "cancel_order_and_confirm", cancel)
+
+    async def parse_evidence(order, **_kwargs):
+        is_limit = order["id"] == "limit-1"
+        amount = limit_fill if is_limit else 0.5
+        price = 120.0 if is_limit else 124.0
+        return {
+            "symbol": "BTC/USDC",
+            "side": "sell",
+            "total_amount": amount,
+            "price": price,
+            "ordersize": amount * price,
+            "orderid": order["id"],
+            "ordertype": "limit" if is_limit else "market",
+            "timestamp": 2000 if is_limit else 3000,
+            "base_fee": 0.015 if is_limit else 0.005,
+            "metadata_json": json.dumps({"fill": order["id"]}),
+        }
+
+    monkeypatch.setattr(adapter, "_parse_order_status", parse_evidence)
+    result = await adapter.create_spot_sell(
+        {
+            "symbol": "BTC/USDC",
+            "total_amount": 2.0,
+            "total_cost": 200.0,
+            "actual_pnl": 20.0,
+            "current_price": 120.0,
+            "limit_price": 120.0,
+        },
+        {"sell_order_type": "limit", "limit_sell_fallback_to_market": True},
+    )
+    assert result is not None and result["type"] == "sold_check"
+    history = build_closed_trade_payloads(result, so_count=0, open_timestamp_ms=1000)[
+        "payload"
+    ]
+    expected_proceeds = 242.0 if partial_timeout else 240.0
+    assert history["amount"] == 2.0
+    assert history["cost"] == 200.0
+    assert history["profit"] == pytest.approx(expected_proceeds - 200.0)
+    assert history["tp_price"] == pytest.approx(expected_proceeds / 2.0)
+    executions = history["sell_executions"]
+    assert sum(row["ordersize"] for row in executions) == expected_proceeds
+    assert [row["order_id"] for row in executions] == (
+        ["limit-1", "market-1"] if partial_timeout else ["limit-1"]
+    )
+    assert [row["fee"] for row in executions] == (
+        [0.015, 0.005] if partial_timeout else [0.015]
+    )
+    assert [json.loads(row["metadata_json"])["fill"] for row in executions] == (
+        ["limit-1", "market-1"] if partial_timeout else ["limit-1"]
+    )
+    assert place_limit.await_count == 1
+    assert cancel.await_count == int(partial_timeout)
+    assert market_submit.await_count == int(partial_timeout)
+    if partial_timeout:
+        assert float(market_submit.await_args.args[1]) == 0.5
+    await adapter.close()

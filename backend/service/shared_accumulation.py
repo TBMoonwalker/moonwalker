@@ -3,7 +3,7 @@
 from dataclasses import asdict
 from typing import Any
 
-from service.accumulation_strategy import parse_accumulation_strategy_document
+from service.accumulation.strategy import parse_accumulation_strategy_document
 
 
 def legacy_accumulation_graph(
@@ -48,7 +48,7 @@ def legacy_accumulation_graph(
 
 def regime_accumulation_graph() -> dict[str, Any]:
     """An experimental shared downtrend/range filter, never an optimized claim."""
-    from service.accumulation_strategy import build_accumulation_strategy_document
+    from service.accumulation.strategy import build_accumulation_strategy_document
 
     graph = legacy_accumulation_graph(
         build_accumulation_strategy_document(),

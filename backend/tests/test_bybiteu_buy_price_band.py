@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import ccxt.async_support as ccxt
 import pytest
-from service.exchange import Exchange
+from service.dca.exchange import DcaExchange as Exchange
 from service.exchange_buy_manager import ExchangeBuyManager
 
 
@@ -42,15 +42,15 @@ def prepare(monkeypatch, bands=("0.07051",), exchange_id="bybiteu"):
         ]
     )
     exchange.exchange = client
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", AsyncMock())
-    monkeypatch.setattr(exchange, "_Exchange__ensure_markets_loaded", AsyncMock())
+    monkeypatch.setattr(exchange, "_ensure_exchange", AsyncMock())
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", AsyncMock())
     monkeypatch.setattr(
         exchange,
-        "_Exchange__resolve_symbol_with_refresh",
+        "_resolve_symbol_with_refresh",
         AsyncMock(return_value="SEI/USDC"),
     )
     monkeypatch.setattr(
-        exchange, "_Exchange__get_price_for_symbol", AsyncMock(return_value="0.069")
+        exchange, "_get_price_for_symbol", AsyncMock(return_value="0.069")
     )
     balance = AsyncMock(return_value=100.0)
     monkeypatch.setattr(exchange, "get_free_quote_balance", balance)
@@ -58,14 +58,12 @@ def prepare(monkeypatch, bands=("0.07051",), exchange_id="bybiteu"):
         return_value={"id": "accepted", "filled": 72, "status": "closed"}
     )
     manager = ExchangeBuyManager(logging.getLogger("test"), lambda: client)
-    monkeypatch.setattr(
-        exchange, "_Exchange__execute_market_buy", manager.execute_market_buy
-    )
+    monkeypatch.setattr(exchange, "_execute_market_buy", manager.execute_market_buy)
 
     async def finalize(**kwargs):
         return kwargs["order"]
 
-    monkeypatch.setattr(exchange._buy_manager, "finalize_market_buy", finalize)
+    monkeypatch.setattr(exchange, "finalize_market_buy", finalize)
     return exchange, client, balance
 
 
@@ -261,7 +259,7 @@ async def test_retry_rechecks_ask_and_funds_before_second_submission(
     if changed_guard == "ask":
         monkeypatch.setattr(
             exchange,
-            "_Exchange__get_price_for_symbol",
+            "_get_price_for_symbol",
             AsyncMock(side_effect=["0.069", "0.0703"]),
         )
     else:

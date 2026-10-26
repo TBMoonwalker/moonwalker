@@ -225,7 +225,9 @@ export function buildLoadedConfigState(
     const csvSourceRaw = signalSettings?.csv_source
     if (csvSourceRaw) {
         const csvSource = String(csvSourceRaw)
-        const isInlineCsv = csvSource.includes('\n') && csvSource.includes(';')
+        const isInlineCsv = !isUrlValue(csvSource)
+            && csvSource.includes(';')
+            && (csvSource.includes('\n') || csvSource.split(';', 4).length === 4)
         if (isInlineCsv) {
             csvsignalMode = 'inline'
             csvsignalInline = csvSource

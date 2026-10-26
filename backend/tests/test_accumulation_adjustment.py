@@ -8,10 +8,10 @@ from unittest.mock import AsyncMock
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_repair import AccumulationOrderRepair
-from service.accumulation_state import AccumulationConflictError
-from service.accumulation_status import get_accumulation_status
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.repair import AccumulationOrderRepair
+from service.accumulation.state import AccumulationConflictError
+from service.accumulation.status import get_accumulation_status
 from service.lifecycle_mutation import LifecycleMutationCoordinator
 from service.trading_maintenance import TradingMaintenanceBarrier
 from tortoise import Tortoise
@@ -25,7 +25,7 @@ async def adjustment(tmp_path, monkeypatch):
     )
     await Tortoise.generate_schemas()
     monkeypatch.setattr(
-        "service.accumulation_adjustment.lifecycle_mutation_coordinator",
+        "service.accumulation.adjustment.lifecycle_mutation_coordinator",
         LifecycleMutationCoordinator(TradingMaintenanceBarrier()),
     )
     version = await model.StrategyVersion.create(

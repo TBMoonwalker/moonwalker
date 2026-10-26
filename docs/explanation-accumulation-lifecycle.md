@@ -158,13 +158,13 @@ keeps the holding in Closing.
 
 | Boundary | Main implementation |
 | --- | --- |
-| ASAP/CSV registration | [accumulation_entry.py](../backend/service/accumulation_entry.py) |
-| Single-owner orchestration | [accumulation_runtime.py](../backend/service/accumulation_runtime.py) |
-| Pure dip calculations | [accumulation_strategy.py](../backend/service/accumulation_strategy.py) |
+| ASAP/CSV registration | [accumulation/entry.py](../backend/service/accumulation/entry.py) |
+| Single-owner orchestration | [accumulation/runtime.py](../backend/service/accumulation/runtime.py) |
+| Pure dip calculations | [accumulation/strategy.py](../backend/service/accumulation/strategy.py) |
 | Shared regime graph | [shared_accumulation.py](../backend/service/shared_accumulation.py) |
-| Revision-checked proposals | [accumulation_evaluation.py](../backend/service/accumulation_evaluation.py) |
-| Observation integrity | [accumulation_state.py](../backend/service/accumulation_state.py) |
-| Dashboard notifications | [accumulation_status_events.py](../backend/service/accumulation_status_events.py) |
+| Revision-checked proposals | [accumulation/evaluation.py](../backend/service/accumulation/evaluation.py) |
+| Observation integrity | [accumulation/state.py](../backend/service/accumulation/state.py) |
+| Dashboard notifications | [accumulation/status_events.py](../backend/service/accumulation/status_events.py) |
 
 Use [the operating guide](howto-operate-accumulation.md) for actions,
 [the recovery guide](howto-recover-accumulation.md) for blocked states, and

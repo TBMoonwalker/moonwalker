@@ -13,8 +13,8 @@ understand and maintain the system without access to an individual machine.
 | Signal entry | [signal_runtime.py](../backend/service/signal_runtime.py) coordinates admission; the order service remains the central execution boundary. |
 | Trading data | [trading_contracts.py](../backend/service/trading_contracts.py), [exchange_types.py](../backend/service/exchange_types.py), and [persistence_records.py](../backend/service/persistence_records.py) define intent, execution, and persistence contracts. |
 | AI work | [ai_work_queue.py](../backend/service/ai_work_queue.py) bounds background work; provider transport, analytics, and calibration have separate modules behind the AI Trust facade. |
-| Accumulation | [accumulation_runtime.py](../backend/service/accumulation_runtime.py) owns orchestration; shared Strategy Builder graphs feed pure calculations while the execution journal, capital checks and fill accounting enforce purchases. See [lifecycle boundaries](explanation-accumulation-lifecycle.md). |
-| Recovery sizing | [dca_recovery_sizing.py](../backend/service/dca_recovery_sizing.py) contains pure calculations; [dca.py](../backend/service/dca.py) integrates strategy signals, balances, diagnostics, and order execution. |
+| Accumulation | [accumulation/runtime.py](../backend/service/accumulation/runtime.py) owns orchestration; shared Strategy Builder graphs feed pure calculations while the execution journal, capital checks and fill accounting enforce purchases. See [lifecycle boundaries](explanation-accumulation-lifecycle.md). |
+| Recovery sizing | [dca/recovery_sizing.py](../backend/service/dca/recovery_sizing.py) contains pure calculations; [dca/engine.py](../backend/service/dca/engine.py) integrates strategy signals, balances, diagnostics, and order execution. |
 | Browser access policy | [origin_policy.py](../backend/service/origin_policy.py) owns origin checks. Origin checks are not an authentication system. |
 
 For the operator-facing behavior, see [safety-order sizing](dynamic-so.md),
@@ -150,11 +150,52 @@ verify relative links, source-backed claims, and `git diff --check`.
 `PlacementWorkflow.begin` prepares and claims classic orders; accumulation retains
 its transactional activation/capital checks when claiming its orders. Once claimed,
 both modes use `PlacementWorkflow.submit` to journal accepted evidence or uncertain
-outcomes. Exchange buy/sell managers own transport and existing exchange-specific
-bounded handling. `ExchangeOrderReport` in `exchange_types.py` owns exact cumulative
-fill facts; the DCA lookup adapter preserves its existing output fields. Accumulation
-inventory arithmetic and DCA deal/exit accounting remain their respective handlers.
-The common workflow does not choose strategies, acquire capital or authorize sales.
+outcomes. Shared `exchange_*.py` managers own CCXT submission, precision, balance,
+fee evidence and bounded order lookup. `ExchangeOrderReport` in `exchange_types.py`
+owns exact cumulative fill facts. The common workflow does not choose strategies,
+acquire capital or authorize sales.
+
+Mode-owned services live in `service/dca/` and `service/accumulation/`:
+
+- `dca/engine.py` is the Dynamic DCA engine; `from service.dca import Dca` remains
+  the public export. Importing a calculation or exchange adapter does not load
+  that engine.
+- `dca/exchange.py` provides `DcaExchange`, a specialization of the shared
+  `Exchange` transport with the same client owner. It applies DCA fee deduction
+  and legacy buy payload adaptation, sale metrics and close-result shaping.
+  Normal execution and recovered orders use the same finalizers. DCA limit and
+  fallback policy lives in its `limit_orders.py`, `limit_fills.py`,
+  `limit_sell.py`, `sell_execution.py` and `sell_status.py` modules; these reuse
+  shared submission, lookup and cancellation mechanics.
+- `dca/dust.py` owns DCA remainder orchestration. `Orders` delegates its existing
+  dependencies; `order_persistence.py` retains atomic execution/history/archive
+  writes. Cache invalidation and notifications occur after persistence.
+- `accumulation/exchange.py` composes the shared transport for its exact,
+  preflighted orders. `runtime.py`, `accounting.py` and `dust.py` retain its
+  activation, inventory/basis and archive lifecycle. Its fee adapters reuse the
+  shared order report and authenticated hydration, preserving domain errors and
+  checkpoint formats.
+
+Both modes reuse the existing minimum-notional parser. Unknown limits, precision
+errors, owned inventory and dust authorization retain their mode-specific rules.
+The shared layer never substitutes DCA deal accounting for accumulation inventory
+accounting. Clients, caches, locks, retry limits and database identities keep their
+existing owners. Buy finalizer logs contain selected facts rather than arbitrary
+order metadata.
+
+```text
+signals / operator / recovery
+             |
+     mode authorization and accounting
+       /                          \
+ dca/exchange                 accumulation/exchange
+       \                          /
+       PlacementWorkflow + shared exchange transport
+              exact execution/fee evidence
+       /                          \
+ DCA deal persistence         accumulation inventory
+ dca/dust -> atomic archive   accumulation/dust -> exact lifecycle archive
+```
 
 Demo mode uses exchange demo accounts and therefore journals orders like live mode.
 Recovery must validate the persisted account/environment scope before private

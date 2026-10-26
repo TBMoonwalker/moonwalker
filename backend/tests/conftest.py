@@ -68,4 +68,4 @@ def classic_lifecycle_route(monkeypatch):
         return LifecycleRoutingDecision(LifecycleRoute.CLASSIC_DCA, "classic_dca")
 
     monkeypatch.setattr("service.orders.load_lifecycle_route", load_classic_route)
-    monkeypatch.setattr("service.dca.load_lifecycle_route", load_classic_route)
+    monkeypatch.setattr("service.dca.engine.load_lifecycle_route", load_classic_route)
