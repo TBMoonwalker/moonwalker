@@ -254,7 +254,7 @@ async def test_entry_detail_redacts_raw_requests_and_bounds_history(
                 {
                     "source": "csv",
                     "imported_inventory": imported.to_dict(),
-                    "secret": "must-not-leak",
+                    "secret": "test-secret-must-not-leak",
                 }
             ),
             previous_state="validating",
@@ -272,7 +272,10 @@ async def test_entry_detail_redacts_raw_requests_and_bounds_history(
     assert result["entry"]["operation_id"] == "request-24"
     assert result["entry"]["declaration"]["acquisition_cost"] == "6.0000000000000000001"
     assert not result["entry"]["declaration"]["historical_fees_known"]
-    assert "must-not-leak" not in response.text and "private-scope" not in response.text
+    assert (
+        "test-secret-must-not-leak" not in response.text
+        and "private-scope" not in response.text
+    )
     await model.AccumulationLifecycleOperation.filter(operation_id="request-24").update(
         request_json="{invalid"
     )

@@ -8,6 +8,9 @@ from service.accumulation_strategy import (
     AccumulationMarket,
     AccumulationObservations,
     AccumulationParameters,
+    accumulation_correction_price,
+    accumulation_decline_price,
+    accumulation_recovery_price,
 )
 
 
@@ -22,11 +25,6 @@ def accumulation_wait_condition(
     with localcontext() as context:
         context.prec = 50
         price = Decimal(market.close)
-        spacing_atr = (
-            max(Decimal(market.atr), Decimal(guard.signal_atr))
-            if guard
-            else Decimal(market.atr)
-        )
 
         def level(kind: str, direction: str, target: Decimal) -> dict[str, str]:
             return {
@@ -47,26 +45,18 @@ def accumulation_wait_condition(
                 levels.append(level("depth", "at_or_below", target))
         elif reason == "WAIT_REARM" and guard is not None:
             if market.close_ms > guard.signal_close_ms:
-                further = (
-                    Decimal(guard.signal_price)
-                    - Decimal(parameters.spacing_atr) * spacing_atr
-                )
+                further = accumulation_decline_price(market, guard, parameters)
                 if state.recovery_ready:
                     assert state.high_close is not None
                     assert state.atr_at_high is not None
-                    correction = Decimal(state.high_close) - Decimal(
-                        parameters.spacing_atr
-                    ) * Decimal(state.atr_at_high)
+                    correction = accumulation_correction_price(state, parameters)
                     target = max(further, correction)
                     if target > 0:
                         levels.append(level("correction", "at_or_below", target))
                 else:
                     if further > 0:
                         levels.append(level("further_decline", "at_or_below", further))
-                    recovery = (
-                        Decimal(guard.signal_price)
-                        + Decimal(parameters.recovery_atr) * spacing_atr
-                    )
+                    recovery = accumulation_recovery_price(market, guard, parameters)
                     levels.append(
                         level("recovery_then_correction", "at_or_above", recovery)
                     )
@@ -90,18 +80,14 @@ def accumulation_wait_condition(
                 - Decimal(parameters.entry_atr) * Decimal(market.atr),
             )
             if guard is not None:
-                rearm = (
-                    Decimal(guard.signal_price)
-                    - Decimal(parameters.spacing_atr) * spacing_atr
-                )
+                rearm = accumulation_decline_price(market, guard, parameters)
                 if state.recovery_ready:
                     assert (
                         state.high_close is not None and state.atr_at_high is not None
                     )
                     rearm = max(
                         rearm,
-                        Decimal(state.high_close)
-                        - Decimal(parameters.spacing_atr) * Decimal(state.atr_at_high),
+                        accumulation_correction_price(state, parameters),
                     )
                 target = min(target, rearm)
             if target > 0:

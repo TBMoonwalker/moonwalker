@@ -132,3 +132,66 @@ def test_baseline_preview_respects_depth_and_rejects_nonpositive_boundaries():
     assert "indicative" not in accumulation_wait_condition(
         invalid, state, None, PARAMETERS, "WAIT_BASELINE"
     )
+
+
+@pytest.mark.parametrize(
+    ("current_atr", "frozen_atr", "decline", "recovery"),
+    [("1", "4", "96", "104"), ("8", "2", "92", "108"), ("2", "2", "98", "102")],
+)
+@pytest.mark.parametrize("recovered", [False, True])
+def test_explanation_and_execution_agree_at_exact_rearm_boundaries(
+    current_atr, frozen_atr, decline, recovery, recovered
+):
+    """A boundary is inclusive, while a recovery rise never becomes a buy."""
+    guard = AccumulationGuard(str(uuid4()), HOUR, "100", frozen_atr, 1, 1)
+    state = AccumulationObservations(
+        2 * HOUR, 1, high_close="110", atr_at_high="2", recovery_ready=recovered
+    )
+    target = Decimal("108" if recovered else decline)
+    epsilon = Decimal("0.000000000000000001")
+    market = AccumulationMarket(
+        2 * HOUR, str(target + epsilon), "120", "150", current_atr, "10"
+    )
+    wait = accumulation_wait_condition(market, state, guard, PARAMETERS, "WAIT_REARM")
+    assert Decimal(wait["levels"][0]["target_price"]) == target
+    if not recovered:
+        assert Decimal(wait["levels"][1]["target_price"]) == Decimal(recovery)
+    for offset in [-epsilon, Decimal(0), epsilon]:
+        reason = accumulation_signal_reason(
+            replace(market, close=str(target + offset)), state, guard, PARAMETERS
+        )
+        expected = (
+            "WAIT_REARM"
+            if offset > 0
+            else "BUY_FRESH_CORRECTION"
+            if recovered
+            else "BUY_FURTHER_DECLINE"
+        )
+        assert reason == expected
+    same_candle = replace(market, close_ms=HOUR, close=str(target - epsilon))
+    assert (
+        accumulation_signal_reason(same_candle, state, guard, PARAMETERS)
+        == "WAIT_REARM"
+    )
+    assert not accumulation_wait_condition(
+        same_candle, state, guard, PARAMETERS, "WAIT_REARM"
+    )["levels"]
+
+
+@pytest.mark.parametrize(
+    "price, ready", [("107.999999999999999999", False), ("108", True)]
+)
+def test_recovery_observation_matches_explained_boundary(price, ready):
+    from service.accumulation_strategy import advance_accumulation_observations
+
+    guard = AccumulationGuard(str(uuid4()), HOUR, "100", "2", 1, 1)
+    state = AccumulationObservations(HOUR, 1)
+    market = AccumulationMarket(2 * HOUR, price, "100", "150", "8", "5")
+    wait = accumulation_wait_condition(market, state, guard, PARAMETERS, "WAIT_REARM")
+    assert wait["levels"][1]["target_price"] == "108"
+    observed = advance_accumulation_observations(state, market, guard, PARAMETERS)
+    assert observed.recovery_ready is ready
+    assert (
+        accumulation_signal_reason(market, observed, guard, PARAMETERS)
+        == "WAIT_DECLINE"
+    )

@@ -243,9 +243,9 @@ async def _historical_state(conn: Any) -> tuple[list[dict[str, Any]], str]:
                     deal["latest"] = order
                     deal["inventory"] = _inventory(row.inventory_json)
         for symbol, holding in holdings.items():
-            key = (symbol, holding.deal_id or "missing-holding")
+            holding_identity = (symbol, holding.deal_id or "missing-holding")
             deal = deals.setdefault(
-                key,
+                holding_identity,
                 {
                     "acquired": Decimal(0),
                     "principal": Decimal(0),

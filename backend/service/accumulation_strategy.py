@@ -377,6 +377,45 @@ class AccumulationObservations:
         return cls(**value)
 
 
+def accumulation_decline_price(
+    market: AccumulationMarket,
+    guard: AccumulationGuard,
+    parameters: AccumulationParameters,
+) -> Decimal:
+    """Return the next decline boundary using the larger current or frozen ATR."""
+    with localcontext() as context:
+        context.prec = 50
+        return _decimal(guard.signal_price) - _decimal(parameters.spacing_atr) * max(
+            _decimal(guard.signal_atr), _decimal(market.atr)
+        )
+
+
+def accumulation_recovery_price(
+    market: AccumulationMarket,
+    guard: AccumulationGuard,
+    parameters: AccumulationParameters,
+) -> Decimal:
+    """Return the recovery boundary, which does not itself authorize a buy."""
+    with localcontext() as context:
+        context.prec = 50
+        return _decimal(guard.signal_price) + _decimal(parameters.recovery_atr) * max(
+            _decimal(guard.signal_atr), _decimal(market.atr)
+        )
+
+
+def accumulation_correction_price(
+    state: AccumulationObservations, parameters: AccumulationParameters
+) -> Decimal:
+    """Return the correction boundary using only the ATR frozen at the high."""
+    if state.high_close is None or state.atr_at_high is None:
+        raise AccumulationStateError("Incomplete recovery high.")
+    with localcontext() as context:
+        context.prec = 50
+        return _decimal(state.high_close) - _decimal(parameters.spacing_atr) * _decimal(
+            state.atr_at_high
+        )
+
+
 def advance_accumulation_observations(
     state: AccumulationObservations,
     market: AccumulationMarket,
@@ -408,9 +447,7 @@ def advance_accumulation_observations(
         state = replace(state, high_close=market.close, atr_at_high=market.atr)
     with localcontext() as context:
         context.prec = 50
-        threshold = _decimal(guard.signal_price) + _decimal(
-            parameters.recovery_atr
-        ) * max(_decimal(guard.signal_atr), _decimal(market.atr))
+        threshold = accumulation_recovery_price(market, guard, parameters)
         return replace(
             state,
             recovery_ready=state.recovery_ready
@@ -437,13 +474,13 @@ def accumulation_signal_reason(
         return "WAIT_REARM"
     with localcontext() as context:
         context.prec = 50
-        if _decimal(market.close) <= _decimal(guard.signal_price) - _decimal(
-            parameters.spacing_atr
-        ) * max(_decimal(guard.signal_atr), _decimal(market.atr)):
+        if _decimal(market.close) <= accumulation_decline_price(
+            market, guard, parameters
+        ):
             return "BUY_FURTHER_DECLINE"
-        if state.recovery_ready and _decimal(market.close) <= _decimal(
-            state.high_close
-        ) - _decimal(parameters.spacing_atr) * _decimal(state.atr_at_high):
+        if state.recovery_ready and _decimal(
+            market.close
+        ) <= accumulation_correction_price(state, parameters):
             return "BUY_FRESH_CORRECTION"
     return "WAIT_REARM"
 
