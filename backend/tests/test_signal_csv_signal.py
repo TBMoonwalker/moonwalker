@@ -339,7 +339,7 @@ async def test_accumulation_csv_bypasses_classic_import_with_existing_holdings(
 ):
     from unittest.mock import AsyncMock
 
-    from service.accumulation_entry import AccumulationEntryResult
+    from service.accumulation.entry import AccumulationEntryResult
 
     queue = asyncio.Queue()
     plugin = SignalPlugin(queue)

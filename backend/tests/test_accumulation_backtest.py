@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from controller import backtest as controller
-from service import accumulation_backtest as adapter
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_strategy import AccumulationParameters
+from service.accumulation import backtest as adapter
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.strategy import AccumulationParameters
 from service.backtest import BacktestValidationError, OhlcvCandle
 from service.strategy_runtime import AccumulationStrategyVersion
 
@@ -127,7 +127,7 @@ async def test_normal_backtest_endpoint_dispatches_accumulation(monkeypatch):
 async def test_backtest_applies_shared_graph_to_subsequent_buys(history):
     from dataclasses import replace
 
-    from service.accumulation_strategy import (
+    from service.accumulation.strategy import (
         build_accumulation_strategy_document,
         parse_accumulation_strategy_document,
     )

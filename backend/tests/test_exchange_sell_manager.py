@@ -1,8 +1,8 @@
 """Tests for exchange sell manager."""
 
 import pytest
+from service.dca.sell_execution import DcaSellManager as ExchangeSellManager
 from service.exchange_contexts import MarketSellExecutionContext, SellRoutingContext
-from service.exchange_sell_manager import ExchangeSellManager
 
 
 class _DummyLogger:

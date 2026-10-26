@@ -4,9 +4,9 @@ from dataclasses import asdict
 from decimal import Decimal
 
 import pytest
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_replay import replay_accumulation
-from service.accumulation_strategy import (
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.replay import replay_accumulation
+from service.accumulation.strategy import (
     AccumulationCandle,
     AccumulationParameters,
     accumulation_requested_quote,
@@ -129,8 +129,8 @@ def test_replay_rejects_unbounded_or_invalid_inputs(field, value):
 
 
 def test_only_one_historical_comparison_owns_cpu_even_if_its_http_client_disappears():
-    from service.accumulation_replay import _REPLAY_SLOT, run_accumulation_replay
-    from service.accumulation_state import AccumulationConflictError
+    from service.accumulation.replay import _REPLAY_SLOT, run_accumulation_replay
+    from service.accumulation.state import AccumulationConflictError
 
     parameters, payload = replay_fixture()
     assert _REPLAY_SLOT.acquire(blocking=False)

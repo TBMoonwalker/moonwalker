@@ -8,7 +8,7 @@ from typing import Any
 
 import helper
 import model
-from service.accumulation_import import (
+from service.accumulation.imports import (
     _declaration,
     normalize_csv_symbol,
     parse_accumulation_csv,

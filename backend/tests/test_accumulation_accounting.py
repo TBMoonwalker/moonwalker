@@ -11,17 +11,17 @@ from unittest.mock import AsyncMock, Mock
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_accounting import persist_accumulation_order
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_fill import (
+from service.accumulation.accounting import persist_accumulation_order
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.fill import (
     AccumulationFill,
     AccumulationInventory,
     apply_fill_delta,
 )
-from service.accumulation_lifecycle import AccumulationLifecycleService
-from service.accumulation_performance import accumulation_performance
-from service.accumulation_recovery import AccumulationPlacementRecovery
-from service.accumulation_state import AccumulationConflictError
+from service.accumulation.lifecycle import AccumulationLifecycleService
+from service.accumulation.performance import accumulation_performance
+from service.accumulation.recovery import AccumulationPlacementRecovery
+from service.accumulation.state import AccumulationConflictError
 from service.exchange_capabilities import (
     ExchangeOrderLookupResult,
     ExchangeOrderLookupStatus,
@@ -41,10 +41,10 @@ async def accounting_db(tmp_path, monkeypatch):
     await Tortoise.generate_schemas()
     coordinator = LifecycleMutationCoordinator(TradingMaintenanceBarrier())
     for module in (
-        "accumulation_accounting",
-        "accumulation_lifecycle",
-        "accumulation_repair",
-        "accumulation_account_rebind",
+        "accumulation.accounting",
+        "accumulation.lifecycle",
+        "accumulation.repair",
+        "accumulation.account_rebind",
     ):
         monkeypatch.setattr(
             f"service.{module}.lifecycle_mutation_coordinator", coordinator
@@ -110,7 +110,7 @@ def _order(*, filled="10", cost="100", status="closed", fees=None, side="buy"):
 
 
 async def _rebind_fixture():
-    from service.accumulation_exchange import AccumulationWalletEvidence
+    from service.accumulation.exchange import AccumulationWalletEvidence
     from service.exchange_capabilities import build_client_order_id
 
     activation, _, placement = await _buy()
@@ -151,7 +151,7 @@ async def _rebind_fixture():
 async def test_rebind_proves_original_orders_and_inventory_without_changing_the_ledger(
     accounting_db,
 ):
-    from service.accumulation_account_rebind import AccumulationAccountRebind
+    from service.accumulation.account_rebind import AccumulationAccountRebind
 
     activation, placement, adapter, payload, *_ = await _rebind_fixture()
     before = await model.OpenTrades.all().values()
@@ -208,7 +208,7 @@ async def test_rebind_never_adopts_different_account_or_stale_evidence(
 ):
     from dataclasses import replace as update
 
-    from service.accumulation_account_rebind import AccumulationAccountRebind
+    from service.accumulation.account_rebind import AccumulationAccountRebind
 
     activation, placement, adapter, payload, config, clock = await _rebind_fixture()
     evidence = dict(adapter.exchange.lookup_spot_order.return_value.order)
@@ -263,7 +263,7 @@ async def test_rebind_never_adopts_different_account_or_stale_evidence(
     "blocked", ["csv", "missing_client", "pending_order", "incomplete_fees", "venue"]
 )
 async def test_rebind_requires_settled_native_same_venue_proof(accounting_db, blocked):
-    from service.accumulation_account_rebind import AccumulationAccountRebind
+    from service.accumulation.account_rebind import AccumulationAccountRebind
 
     activation, placement, adapter, payload, config, *_ = await _rebind_fixture()
     if blocked == "csv":
@@ -296,7 +296,7 @@ async def test_rebind_requires_settled_native_same_venue_proof(accounting_db, bl
 async def test_rebind_unknown_lookup_is_explicitly_retryable_without_enabling_buys(
     accounting_db,
 ):
-    from service.accumulation_account_rebind import AccumulationAccountRebind
+    from service.accumulation.account_rebind import AccumulationAccountRebind
 
     activation, _, adapter, payload, *_ = await _rebind_fixture()
     found = adapter.exchange.lookup_spot_order.return_value
@@ -323,7 +323,7 @@ async def test_rebind_unknown_lookup_is_explicitly_retryable_without_enabling_bu
 async def test_rebind_scope_commit_failure_keeps_original_binding_and_retry_journal(
     accounting_db, monkeypatch
 ):
-    from service.accumulation_account_rebind import AccumulationAccountRebind
+    from service.accumulation.account_rebind import AccumulationAccountRebind
 
     activation, _, adapter, payload, *_ = await _rebind_fixture()
     original = model.AccumulationActivation.save
@@ -345,7 +345,7 @@ async def test_rebind_scope_commit_failure_keeps_original_binding_and_retry_jour
 
 @pytest.mark.asyncio
 async def test_two_dashboards_cannot_rebind_the_same_revision_twice(accounting_db):
-    from service.accumulation_account_rebind import AccumulationAccountRebind
+    from service.accumulation.account_rebind import AccumulationAccountRebind
 
     activation, _, adapter, payload, *_ = await _rebind_fixture()
     results = await asyncio.gather(
@@ -391,8 +391,8 @@ async def _complete(operation_id="buy-1"):
 async def test_rebind_checks_first_and_last_order_and_preserves_close_semantics(
     accounting_db, mode
 ):
-    from service.accumulation_account_rebind import AccumulationAccountRebind
-    from service.accumulation_exchange import AccumulationWalletEvidence
+    from service.accumulation.account_rebind import AccumulationAccountRebind
+    from service.accumulation.exchange import AccumulationWalletEvidence
 
     activation, buy, adapter, payload, *_ = await _rebind_fixture()
     first_evidence = adapter.exchange.lookup_spot_order.return_value.order
@@ -488,7 +488,7 @@ async def _quarantine(activation, placement):
 async def test_explicit_repair_applies_only_terminal_buy_delta_and_preserves_pause(
     accounting_db,
 ):
-    from service.accumulation_repair import AccumulationOrderRepair
+    from service.accumulation.repair import AccumulationOrderRepair
 
     activation, opportunity, placement = await _buy()
     await _persist(_order(filled="3", cost="30", status="open"))
@@ -520,7 +520,7 @@ async def test_explicit_repair_applies_only_terminal_buy_delta_and_preserves_pau
 async def test_repair_keeps_unknown_open_or_incomplete_orders_quarantined(
     accounting_db, evidence
 ):
-    from service.accumulation_repair import AccumulationOrderRepair
+    from service.accumulation.repair import AccumulationOrderRepair
 
     activation, opportunity, placement = await _buy()
     request = await _quarantine(activation, placement)
@@ -555,7 +555,7 @@ async def test_repair_keeps_unknown_open_or_incomplete_orders_quarantined(
 async def test_repaired_sale_never_replays_and_close_dust_requires_explicit_retry(
     accounting_db, action, filled, state
 ):
-    from service.accumulation_repair import AccumulationOrderRepair
+    from service.accumulation.repair import AccumulationOrderRepair
 
     activation, _, _ = await _buy()
     await _persist(_order())
@@ -601,7 +601,7 @@ async def test_repaired_sale_never_replays_and_close_dust_requires_explicit_retr
 async def test_repair_rechecks_revision_after_lookup_and_rolls_back_bad_evidence(
     accounting_db,
 ):
-    from service.accumulation_repair import AccumulationOrderRepair
+    from service.accumulation.repair import AccumulationOrderRepair
 
     activation, _, placement = await _buy()
     request = await _quarantine(activation, placement)
@@ -884,7 +884,7 @@ async def test_failed_checkpoint_rolls_back_inventory_ledger_and_consumption(
     activation, opportunity, placement = await _buy()
     notification = Mock()
     monkeypatch.setattr(
-        "service.accumulation_accounting.accumulation_input_notifications.publish",
+        "service.accumulation.accounting.accumulation_input_notifications.publish",
         notification,
     )
     monkeypatch.setattr(
@@ -914,7 +914,7 @@ async def test_committed_fill_emits_only_a_shared_input_hint(
     await _buy()
     notification = Mock()
     monkeypatch.setattr(
-        "service.accumulation_accounting.accumulation_input_notifications.publish",
+        "service.accumulation.accounting.accumulation_input_notifications.publish",
         notification,
     )
     await _persist(_order())
@@ -1133,7 +1133,7 @@ async def test_full_close_partial_fill_keeps_closing_then_archives_exact_totals(
     await Tortoise.close_connections()
     await Tortoise.init(db_url=accounting_db, modules={"models": ["model"]})
     assert (await model.AccumulationActivation.get(id=activation.id)).state == "stopped"
-    from service.accumulation_status import get_accumulation_status
+    from service.accumulation.status import get_accumulation_status
 
     status = await get_accumulation_status("BTC/USDC", wait_reasons={})
     assert status["holding"] is None
@@ -1424,7 +1424,7 @@ def test_normalizer_rejects_incomplete_or_invalid_evidence(changes):
 async def test_native_missing_ids_can_be_repaired_under_rotated_credentials_only_with_signed_client_proof(
     accounting_db, wrong_client
 ):
-    from service.accumulation_repair import AccumulationOrderRepair
+    from service.accumulation.repair import AccumulationOrderRepair
     from service.exchange_capabilities import build_client_order_id
 
     activation, _, placement = await _buy()
@@ -1468,7 +1468,7 @@ async def test_native_missing_ids_can_be_repaired_under_rotated_credentials_only
 async def test_checkpoint_summary_batches_flags_and_exact_latest_order(
     accounting_db, monkeypatch, registrations
 ):
-    from service.accumulation_performance import _checkpoint_summaries
+    from service.accumulation.performance import _checkpoint_summaries
 
     owner, _, _ = await _buy()
     owners = [owner]

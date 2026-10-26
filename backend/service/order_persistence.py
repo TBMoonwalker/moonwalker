@@ -18,7 +18,7 @@ from service.ai_trust import (
     schedule_outcome_attribution,
 )
 from service.database import run_sqlite_write_with_retry
-from service.dca_recovery_sizing import (
+from service.dca.recovery_sizing import (
     LEGACY_SIZING_MODE,
     RecoverySizingPolicy,
     normalize_recovery_sizing_mode,

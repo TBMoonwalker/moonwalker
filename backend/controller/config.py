@@ -12,7 +12,7 @@ from litestar.exceptions import SerializationException
 from litestar.handlers import get, post, put
 from litestar.params import FromPath, FromQuery
 from model import AppConfig, OpenTrades
-from service.accumulation_config import accumulation_available, configuration_mode_guard
+from service.accumulation.config import accumulation_available, configuration_mode_guard
 from service.config import (
     Config,
     build_removed_config_key_message,

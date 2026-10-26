@@ -25,8 +25,8 @@ from service.backtest import (
     estimate_candle_count,
     validate_backtest_range,
 )
-from service.dca_math import BacktestTradeState
-from service.dca_recovery_sizing import RECOVERY_TARGET_MODE, RecoverySizingPolicy
+from service.dca.math import BacktestTradeState
+from service.dca.recovery_sizing import RECOVERY_TARGET_MODE, RecoverySizingPolicy
 from service.exchange import Exchange
 from service.strategy_builder import BUILTIN_STRATEGY_BY_SLUG, build_builtin_ir
 from service.strategy_runtime import EvaluationContext
@@ -939,11 +939,9 @@ async def test_batched_history_paces_pages_and_dedupes(
     async def fake_sleep(seconds: float) -> None:
         sleeps.append(seconds)
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_resolve_symbol", lambda symbol: symbol)
     monkeypatch.setattr("service.exchange.asyncio.sleep", fake_sleep)
 
     candles = await exchange.get_history_for_symbol_batched(

@@ -8,14 +8,14 @@ from dataclasses import replace
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_contracts import (
+from service.accumulation.contracts import (
     AccumulationIdentity,
     AccumulationStateError,
     canonical_decimal,
     decode_observations,
     encode_observations,
 )
-from service.accumulation_state import (
+from service.accumulation.state import (
     AccumulationConflictError,
     load_accumulation_context,
     save_accumulation_observations,

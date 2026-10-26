@@ -7,9 +7,10 @@ from unittest.mock import AsyncMock
 import model
 import pytest
 import pytest_asyncio
-from service import accumulation_config, accumulation_runtime
-from service.accumulation_lifecycle import AccumulationLifecycleService
-from service.accumulation_strategy import build_accumulation_strategy_document
+from service.accumulation import config as accumulation_config
+from service.accumulation import runtime as accumulation_runtime
+from service.accumulation.lifecycle import AccumulationLifecycleService
+from service.accumulation.strategy import build_accumulation_strategy_document
 from service.config import Config
 from service.config_migrations import canonicalize_trade_mode_rows
 from service.csv_signal_import import CSVSignalImportService

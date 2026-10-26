@@ -310,3 +310,34 @@ async def test_accumulation_preflighted_orders_use_demo_client_without_live_fall
         assert len(clients) == 1 and clients[0].calls == ["buy", "sell"]
     finally:
         await exchange.close()
+
+
+def test_mode_packages_keep_lazy_engine_export_and_shared_transport_boundary():
+    """Public Dca export works without importing the engine for an adapter."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = """
+import sys
+from service.dca.exchange import DcaExchange
+from service.exchange import Exchange
+from service.accumulation.exchange import AccumulationExchangeAdapter
+assert 'service.dca.engine' not in sys.modules
+assert not hasattr(Exchange, 'finalize_market_buy')
+assert not hasattr(Exchange, 'build_spot_sell_order_status')
+assert hasattr(Exchange, 'submit_preflighted_spot_buy')
+assert hasattr(Exchange, 'submit_preflighted_spot_sell')
+from service.dca import Dca
+from service.dca.engine import Dca as Engine
+assert Dca is Engine
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr

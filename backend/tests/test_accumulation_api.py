@@ -11,10 +11,10 @@ from controller import accumulation as controller
 from httpx import ASGITransport, AsyncClient
 from litestar import Litestar
 from litestar.middleware import DefineMiddleware
-from service.accumulation_commands import AccumulationCommandResult
-from service.accumulation_import import parse_accumulation_csv
-from service.accumulation_state import AccumulationConflictError
-from service.accumulation_strategy import build_accumulation_strategy_document
+from service.accumulation.commands import AccumulationCommandResult
+from service.accumulation.imports import parse_accumulation_csv
+from service.accumulation.state import AccumulationConflictError
+from service.accumulation.strategy import build_accumulation_strategy_document
 from service.origin_policy import TrustedLanHttpMiddleware
 from tortoise import Tortoise
 
@@ -420,7 +420,7 @@ async def test_portfolio_totals_are_exact_complete_across_pages_and_quote_scoped
 async def test_stopped_order_history_retains_exact_cumulative_evidence_without_secrets(
     api_client, runtime, status_db
 ):
-    from service.accumulation_fill import AccumulationInventory
+    from service.accumulation.fill import AccumulationInventory
 
     activation = await model.AccumulationActivation.create(
         symbol="BTC/USDC", state="stopped", account_scope="private-scope"
@@ -552,7 +552,7 @@ async def test_repair_http_requires_explicit_body_and_reports_remaining_quaranti
     "value", [None, "NaN", "-1", "1e500", True, {}, "", "0.000000000000000001"]
 )
 def test_reporting_amount_never_invents_unknown_cost(value):
-    from service.accumulation_reporting import _amount
+    from service.accumulation.reporting import _amount
 
     assert _amount(value) == (value if value == "0.000000000000000001" else None)
 
@@ -640,7 +640,7 @@ async def test_fresh_setup_has_builtin_accumulation_without_configuration_or_bui
 async def test_global_builtin_seed_exposes_starter_before_accumulation_setup(
     api_client, runtime, status_db
 ):
-    from service.accumulation_strategy import BUILTIN_ACCUMULATION_SLUG
+    from service.accumulation.strategy import BUILTIN_ACCUMULATION_SLUG
     from service.strategy_persistence import seed_builtin_strategies
 
     await seed_builtin_strategies()
@@ -661,7 +661,7 @@ async def test_concurrent_setup_clients_seed_one_immutable_starter(
 ):
     import asyncio
 
-    from service import accumulation_catalog
+    from service.accumulation import catalog as accumulation_catalog
 
     monkeypatch.setattr(
         "service.strategy_persistence._STRATEGY_SEED_LOCK", asyncio.Lock()
@@ -731,7 +731,7 @@ async def test_wait_levels_are_only_projected_for_current_matching_evidence(
         ],
     }
     monkeypatch.setattr(
-        "service.accumulation_status.time.time_ns", lambda: 3600001000000
+        "service.accumulation.status.time.time_ns", lambda: 3600001000000
     )
     if invalid in {"revision", "strategy_version_id"}:
         evidence[invalid] += 1
@@ -755,7 +755,7 @@ async def test_runtime_status_notifications_are_deduplicated_and_include_lifecyc
 ):
     import asyncio
 
-    from service.accumulation_runtime import AccumulationRuntime
+    from service.accumulation.runtime import AccumulationRuntime
 
     owner = AccumulationRuntime(
         SimpleNamespace(
@@ -802,7 +802,7 @@ async def test_disconnecting_stream_snapshot_does_not_strand_sqlite(
 ):
     import asyncio
 
-    from service.accumulation_status import accumulation_stream_snapshot
+    from service.accumulation.status import accumulation_stream_snapshot
     from tortoise.backends.sqlite.client import SqliteTransactionWrapper
     from tortoise.connection import connections
 
@@ -860,7 +860,7 @@ async def test_disconnecting_stream_snapshot_does_not_strand_sqlite(
 async def test_retired_dip_presets_leave_catalogs_without_losing_pinned_history(
     api_client, runtime, status_db
 ):
-    from service.accumulation_strategy import BUILTIN_ACCUMULATION_SLUG, CATALOG_PREFIX
+    from service.accumulation.strategy import BUILTIN_ACCUMULATION_SLUG, CATALOG_PREFIX
     from service.strategy_persistence import (
         get_strategy_detail,
         list_strategy_summaries,
@@ -916,7 +916,7 @@ async def test_matching_dashboard_clients_share_database_projection(
 ):
     import asyncio
 
-    from service.accumulation_runtime import AccumulationRuntime
+    from service.accumulation.runtime import AccumulationRuntime
 
     runtime = AccumulationRuntime(
         SimpleNamespace(

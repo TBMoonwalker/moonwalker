@@ -4,8 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from service.accumulation_fill import AccumulationFill
-from service.accumulation_order_fees import hydrate_accumulation_order
+from service.accumulation.fill import AccumulationFill
+from service.accumulation.order_fees import hydrate_accumulation_order
 
 
 def order():

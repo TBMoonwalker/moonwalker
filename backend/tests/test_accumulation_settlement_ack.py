@@ -7,10 +7,10 @@ from types import SimpleNamespace
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_accounting import _inventory
-from service.accumulation_repair import AccumulationOrderRepair
-from service.accumulation_state import AccumulationConflictError
-from service.accumulation_status import get_accumulation_status
+from service.accumulation.accounting import _inventory
+from service.accumulation.repair import AccumulationOrderRepair
+from service.accumulation.state import AccumulationConflictError
+from service.accumulation.status import get_accumulation_status
 from service.lifecycle_mutation import LifecycleMutationCoordinator
 from service.trading_maintenance import TradingMaintenanceBarrier
 from tortoise import Tortoise
@@ -23,7 +23,7 @@ async def settlement_db(tmp_path, monkeypatch):
     )
     await Tortoise.generate_schemas()
     monkeypatch.setattr(
-        "service.accumulation_settlement_ack.lifecycle_mutation_coordinator",
+        "service.accumulation.settlement_ack.lifecycle_mutation_coordinator",
         LifecycleMutationCoordinator(TradingMaintenanceBarrier()),
     )
     yield

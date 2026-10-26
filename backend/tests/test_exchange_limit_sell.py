@@ -1,6 +1,6 @@
 """Tests for limit sell helper utilities."""
 
-from service.exchange_limit_sell import (
+from service.dca.limit_sell import (
     build_market_fallback_status,
     build_partial_status_from_fallback,
     get_limit_sell_timeout_seconds,

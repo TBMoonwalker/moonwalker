@@ -510,7 +510,7 @@ class Config:
         Returns:
             True if the operation succeeded
         """
-        from service.accumulation_config import configuration_mode_boundary
+        from service.accumulation.config import configuration_mode_boundary
 
         async with configuration_mode_boundary(
             self.snapshot(), {key: value}
@@ -529,7 +529,7 @@ class Config:
     ) -> bool:
         """Persist one config key. The caller must hold the write lock."""
         action = self.__build_update_action(key, value)
-        from service.accumulation_config import validate_accumulation_configuration
+        from service.accumulation.config import validate_accumulation_configuration
 
         await validate_accumulation_configuration(
             self.snapshot(), [action], mode_change_admitted=mode_change_admitted
@@ -578,7 +578,7 @@ class Config:
         Returns:
             True if the operation succeeded
         """
-        from service.accumulation_config import configuration_mode_boundary
+        from service.accumulation.config import configuration_mode_boundary
 
         async with configuration_mode_boundary(self.snapshot(), updates) as admitted:
             lock = await self._acquire_write_lock()
@@ -602,7 +602,7 @@ class Config:
             self.__assert_supported_key(key)
             actions.append(self.__build_update_action(key, raw_value))
 
-        from service.accumulation_config import validate_accumulation_configuration
+        from service.accumulation.config import validate_accumulation_configuration
 
         await validate_accumulation_configuration(
             self.snapshot(), actions, mode_change_admitted=mode_change_admitted

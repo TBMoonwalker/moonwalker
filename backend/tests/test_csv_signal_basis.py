@@ -13,8 +13,8 @@ from service.config import Config
 from service.csv_signal_import import CSVSignalImportService
 from service.database import Database
 from service.dca import Dca
-from service.dca_math import calculate_average_entry_price
-from service.dca_recovery_sizing import (
+from service.dca.math import calculate_average_entry_price
+from service.dca.recovery_sizing import (
     RECOVERY_TARGET_MODE,
     RecoverySizingPolicy,
     calculate_projected_average_price,

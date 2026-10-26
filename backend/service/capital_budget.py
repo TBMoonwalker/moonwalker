@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import helper
 import model
-from service.accumulation_contracts import AccumulationStateError, canonical_decimal
+from service.accumulation.contracts import AccumulationStateError, canonical_decimal
 from service.capital_budget_logic import (
     CapitalBudgetCheck,
     build_capital_budget_settings,

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from service.config import resolve_timeframe
-from service.dca_recovery_sizing import resolve_recovery_atr_timeframe
+from service.dca.recovery_sizing import resolve_recovery_atr_timeframe
 
 __all__ = [
     "DcaRuntimeConfigView",

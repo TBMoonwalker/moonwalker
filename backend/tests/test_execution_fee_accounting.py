@@ -53,9 +53,9 @@ def test_zero_fee_and_multiple_fee_currencies_preserve_cash_flow():
 def test_normalized_sell_accounting_survives_final_execution_payload(use_lookup):
     from datetime import UTC, datetime
 
+    from service.dca.sell_status import finalize_sell_order_status
     from service.exchange_helpers import aggregate_matched_trades
     from service.exchange_order_lookup import build_parsed_order_status
-    from service.exchange_sell_status import finalize_sell_order_status
     from service.order_payloads import build_final_sell_executions
 
     fill = {
@@ -93,15 +93,14 @@ def test_normalized_sell_accounting_survives_final_execution_payload(use_lookup)
 
 @pytest.mark.asyncio
 async def test_buy_finalization_preserves_signal_and_accounts_base_fee_once():
-    from unittest.mock import MagicMock
-
-    from service.exchange_buy_manager import ExchangeBuyManager
+    from service.dca.exchange import DcaExchange
     from service.exchange_contexts import BuyFinalizationContext
 
     exchange = SimpleNamespace(
         fetch_trading_fee=AsyncMock(return_value={"taker": 0.001})
     )
-    manager = ExchangeBuyManager(MagicMock(), get_exchange=lambda: exchange)
+    manager = DcaExchange()
+    manager.exchange = exchange
     for dry_run in (True, False):
         for fee_deduction in (True, False):
             accounting = execution_accounting(
@@ -156,9 +155,7 @@ async def test_ccxt_base_fees_reach_inventory_and_metadata(
     lookup_available, multiple_fees
 ):
     """Fees-only fills and order fallbacks must reduce purchased inventory."""
-    from unittest.mock import MagicMock
-
-    from service.exchange_buy_manager import ExchangeBuyManager
+    from service.dca.exchange import DcaExchange
     from service.exchange_contexts import BuyFinalizationContext
     from service.exchange_helpers import aggregate_matched_trades
     from service.exchange_order_lookup import build_parsed_order_status
@@ -182,7 +179,8 @@ async def test_ccxt_base_fees_reach_inventory_and_metadata(
     parsed = build_parsed_order_status(fill, trade)
     assert parsed["base_fee"] == pytest.approx(0.001)
     assert parsed["amount_fee"] == pytest.approx(0.001)
-    manager = ExchangeBuyManager(MagicMock(), get_exchange=lambda: SimpleNamespace())
+    manager = DcaExchange()
+    manager.exchange = SimpleNamespace()
     result = await manager.finalize_market_buy(
         order={
             "symbol": "BTC/USDC",

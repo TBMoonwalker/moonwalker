@@ -2,9 +2,9 @@
 
 import ccxt.async_support as ccxt
 import pytest
+from service.dca.limit_orders import DcaLimitOrderManager as ExchangeLimitOrderManager
 from service.exchange_capabilities import ExchangePostSubmissionFailure
 from service.exchange_contexts import LimitSellPlacementContext
-from service.exchange_limit_order_manager import ExchangeLimitOrderManager
 
 
 class _DummyLogger:

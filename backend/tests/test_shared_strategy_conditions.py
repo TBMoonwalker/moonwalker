@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import talib
-from service.accumulation_strategy import (
+from service.accumulation.strategy import (
     AccumulationCandle,
     AccumulationParameters,
     build_accumulation_strategy_document,

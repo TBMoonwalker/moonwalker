@@ -11,7 +11,7 @@ from typing import Any
 
 import helper
 import model
-from service.accumulation_strategy import BUILTIN_ACCUMULATION_SLUG, CATALOG_PREFIX
+from service.accumulation.strategy import BUILTIN_ACCUMULATION_SLUG, CATALOG_PREFIX
 from service.strategy_catalog import (
     BUILTIN_STRATEGIES,
     BUILTIN_STRATEGY_BY_SLUG,
@@ -714,7 +714,7 @@ def validate_strategy_ir(ir: dict[str, Any]) -> dict[str, Any]:
 
     if isinstance(ir, dict) and "accumulation" in ir:
         try:
-            from service.accumulation_strategy import (
+            from service.accumulation.strategy import (
                 parse_accumulation_strategy_document,
             )
 

@@ -21,7 +21,7 @@ from litestar.config.compression import CompressionConfig
 from litestar.config.cors import CORSConfig
 from litestar.middleware import DefineMiddleware
 from litestar.types import ASGIApp, Receive, Scope, Send
-from service.accumulation_runtime import AccumulationRuntime, build_accumulation_runtime
+from service.accumulation.runtime import AccumulationRuntime, build_accumulation_runtime
 from service.ai_provider import ai_provider_client
 from service.ai_trust import recover_pending_outcome_attributions
 from service.ai_work_queue import ai_work_queue

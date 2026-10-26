@@ -1,7 +1,7 @@
 """Regression tests for recovery-target DCA math."""
 
 import pytest
-from service.dca_recovery_sizing import (
+from service.dca.recovery_sizing import (
     DEFAULT_RECOVERY_MAX_DEAL_QUOTE,
     RECOVERY_TARGET_MODE,
     RecoverySizingPolicy,

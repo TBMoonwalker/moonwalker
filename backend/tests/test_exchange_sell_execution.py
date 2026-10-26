@@ -1,5 +1,5 @@
 import pytest
-from service.exchange import Exchange
+from service.dca.exchange import DcaExchange as Exchange
 from service.exchange_capabilities import ExchangePostSubmissionFailure
 
 
@@ -253,7 +253,7 @@ async def test_create_spot_sell_returns_partial_when_tp_guard_blocks_fallback(
 
     monkeypatch.setattr(exchange, "create_spot_limit_sell", fake_limit_sell)
     monkeypatch.setattr(exchange, "create_spot_market_sell", fake_market_sell)
-    monkeypatch.setattr(exchange, "_Exchange__can_fallback_to_market_sell", fake_guard)
+    monkeypatch.setattr(exchange, "_can_fallback_to_market_sell", fake_guard)
 
     result = await exchange.create_spot_sell(
         {"symbol": "ERA/USDC"},
@@ -327,11 +327,11 @@ async def test_limit_sell_tp_guard_uses_live_price_for_market_fallback(
 
     monkeypatch.setattr(
         exchange,
-        "_Exchange__get_price_for_symbol",
+        "_get_price_for_symbol",
         fake_get_price_for_symbol,
     )
 
-    allowed = await exchange._Exchange__can_fallback_to_market_sell(
+    allowed = await exchange._can_fallback_to_market_sell(
         {
             "symbol": "LPT/USDC",
             "current_price": 2.836,
@@ -361,17 +361,11 @@ async def test_create_spot_market_sell_skips_below_notional(monkeypatch) -> None
     async def fake_get_price_for_symbol(_symbol) -> str:
         return "7.13"
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
-    monkeypatch.setattr(
-        exchange, "_Exchange__resolve_sell_amount", fake_resolve_sell_amount
-    )
-    monkeypatch.setattr(
-        exchange, "_Exchange__get_price_for_symbol", fake_get_price_for_symbol
-    )
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(exchange, "_resolve_sell_amount", fake_resolve_sell_amount)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price_for_symbol)
 
     result = await exchange.create_spot_market_sell(
         {
@@ -400,11 +394,11 @@ async def test_market_fallback_guard_uses_live_price_lookup(monkeypatch) -> None
 
     monkeypatch.setattr(
         exchange,
-        "_Exchange__get_price_for_symbol",
+        "_get_price_for_symbol",
         fake_get_price_for_symbol,
     )
 
-    allowed = await exchange._Exchange__can_fallback_to_market_sell(
+    allowed = await exchange._can_fallback_to_market_sell(
         {
             "symbol": "SAHARA/USDC",
             "current_price": 0.02582,
@@ -437,9 +431,7 @@ async def test_build_spot_sell_order_status_returns_unsellable_partial_for_preci
             "ordersize": 11.035,
         }
 
-    monkeypatch.setattr(
-        exchange, "_Exchange__parse_order_status", fake_parse_order_status
-    )
+    monkeypatch.setattr(exchange, "_parse_order_status", fake_parse_order_status)
 
     status = await exchange.build_spot_sell_order_status(
         {

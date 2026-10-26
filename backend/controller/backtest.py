@@ -6,9 +6,9 @@ from typing import Any
 import helper
 from controller.responses import json_response
 from litestar.handlers import post
-from service.accumulation_backtest import run_accumulation_backtest
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_state import AccumulationConflictError
+from service.accumulation.backtest import run_accumulation_backtest
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.state import AccumulationConflictError
 from service.backtest import Backtest, BacktestValidationError
 from service.config import Config
 

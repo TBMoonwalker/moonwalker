@@ -43,6 +43,10 @@ You can also use an HTTP(S) URL:
 {"csv_source":"https://example.com/trades.csv"}
 ```
 
+In the dashboard, you can also paste CSV text or upload a CSV file. A single
+purchase row is accepted with or without a header or a final newline, including
+the optional fee columns below.
+
 CSV format:
 
 ```csv

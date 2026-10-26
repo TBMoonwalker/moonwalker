@@ -7,7 +7,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from service.accumulation_contracts import AccumulationIdentity
+from service.accumulation.contracts import AccumulationIdentity
 from service.order_requests import normalize_order_symbol
 from service.spot_campaign_types import TradeLifecycleMode, parse_lifecycle_mode
 

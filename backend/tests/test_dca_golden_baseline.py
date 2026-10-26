@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from service.dca_decision import (
+from service.dca.decision import (
     build_dca_evaluation_context,
     evaluate_recovery_trigger_decision,
     evaluate_static_dca_decision,
 )
-from service.dca_recovery_sizing import (
+from service.dca.recovery_sizing import (
     RecoverySizingPolicy,
     calculate_recovery_sizing,
 )

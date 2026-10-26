@@ -201,7 +201,7 @@ async def test_unreadable_ownership_skips_ticker_without_falling_back_to_dca(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "service.dca.load_lifecycle_route",
+        "service.dca.engine.load_lifecycle_route",
         AsyncMock(side_effect=OperationalError("database unavailable")),
     )
     dca = Dca()

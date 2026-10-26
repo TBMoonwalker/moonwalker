@@ -1,7 +1,6 @@
-"""Market buy execution and finalization helpers."""
+"""Shared market and price-capped buy submission mechanics."""
 
 import asyncio
-import json
 import math
 from typing import Any, cast
 
@@ -11,12 +10,11 @@ from service.exchange_capabilities import (
     ExchangeSubmissionIndeterminate,
     build_client_order_params,
 )
-from service.exchange_contexts import BuyFinalizationContext
-from service.exchange_types import ExchangeOrderPayload, ParsedOrderStatus
+from service.exchange_types import ExchangeOrderPayload
 
 
 class ExchangeBuyManager:
-    """Own market buy placement and filled-order normalization."""
+    """Submit buys and retain bounded exchange execution evidence."""
 
     def __init__(self, logger: Any, get_exchange: Any):
         self._logger = logger
@@ -299,126 +297,3 @@ class ExchangeBuyManager:
                 if attempt < 2:
                     await asyncio.sleep(0.2)
         raise ValueError("Acknowledged IOC still has no terminal fill evidence")
-
-    async def finalize_market_buy(
-        self,
-        *,
-        order: ExchangeOrderPayload,
-        config: dict[str, Any],
-        context: BuyFinalizationContext,
-    ) -> ExchangeOrderPayload | None:
-        """Enrich a filled buy with normalized trade metadata."""
-        exchange = self._get_exchange()
-        if exchange is None:
-            return None
-
-        self._logger.debug(
-            "Normalizing buy symbol=%s order_id=%s",
-            order.get("symbol"),
-            order.get("id"),
-        )
-
-        order_status: ParsedOrderStatus = await context.parse_order_status(order)
-        if "timestamp" in order_status:
-            order["timestamp"] = order_status["timestamp"]
-        if order_status.get("metadata_json"):
-            raw_metadata = order.get("metadata_json")
-            try:
-                metadata = json.loads(raw_metadata) if raw_metadata else {}
-            except (ValueError, TypeError):
-                metadata = {}
-            if not isinstance(metadata, dict):
-                metadata = {}
-            accounting_metadata = json.loads(order_status["metadata_json"])
-            metadata.update(accounting_metadata)
-            # Base-denominated fees must actually reduce inventory to be net.
-            if config.get("fee_deduction", False) and order_status.get("base_fee"):
-                metadata["feedback_accounting"]["external_buy_fees"] += float(
-                    order_status["base_fee"]
-                ) * float(order_status.get("price") or 0)
-            order["metadata_json"] = json.dumps(metadata, sort_keys=True)
-        if "amount" in order_status:
-            order["amount"] = order_status["amount"]
-        if "total_amount" in order_status:
-            order["total_amount"] = order_status["total_amount"]
-        elif "amount" in order_status:
-            order["total_amount"] = float(order_status["amount"])
-        if "price" in order_status:
-            order["price"] = order_status["price"]
-        if "orderid" in order_status:
-            order["orderid"] = order_status["orderid"]
-        if "symbol" in order_status:
-            order["symbol"] = order_status["symbol"]
-        if "side" in order_status:
-            order["side"] = order_status["side"]
-        if "amount_fee" in order_status:
-            order["amount_fee"] = order_status["amount_fee"]
-        if "base_fee" in order_status:
-            order["base_fee"] = order_status["base_fee"]
-        if order_status.get("ordersize") is not None:
-            order["ordersize"] = order_status["ordersize"]
-        if not order.get("amount") or float(order["amount"]) <= 0:
-            self._logger.error(
-                "Buy order for %s returned zero amount. Skipping trade creation.",
-                order.get("symbol"),
-            )
-            return None
-
-        status_symbol = str(order_status.get("symbol") or order.get("symbol") or "")
-        if not status_symbol:
-            self._logger.error(
-                "Cannot finalize buy: symbol is missing from order data."
-            )
-            return None
-
-        order["precision"] = await context.get_precision_for_symbol(status_symbol)
-        resolved_symbol = await context.resolve_symbol(status_symbol)
-        if resolved_symbol is None:
-            self._logger.error(
-                "Cannot finalize buy for %s: symbol not found.",
-                status_symbol,
-            )
-            return None
-
-        order["amount"] = float(order_status.get("amount") or order["amount"])
-        order["amount_fee"] = 0.0
-        order["fees"] = 0.0
-
-        if config.get("dry_run", True):
-            try:
-                order["fees"] = context.get_demo_taker_fee_for_symbol(status_symbol)
-            except (ValueError, TypeError, ccxt.BaseError) as exc:
-                self._logger.warning(
-                    "Demo mode fee lookup for %s failed (%s). "
-                    "Using taker fee 0.0 as fallback.",
-                    status_symbol,
-                    exc,
-                )
-                order["fees"] = 0.0
-        else:
-            try:
-                fees = await exchange.fetch_trading_fee(symbol=status_symbol)
-                order["fees"] = float(fees.get("taker", 0.0))
-            except (ccxt.BaseError, TypeError, ValueError) as exc:
-                self._logger.warning(
-                    "Fetching fee rate for pair %s failed (%s). Using 0.0 fallback.",
-                    order["symbol"],
-                    exc,
-                )
-                order["fees"] = 0.0
-
-        if not config.get("fee_deduction", False):
-            order["amount_fee"] = float(order_status.get("base_fee") or 0.0)
-            net_amount = max(0.0, float(order["amount"]) - order["amount_fee"])
-            order["amount"] = float(net_amount)
-
-            self._logger.debug(
-                "Fee Deduction not active. Real amount %s, deducted amount %s, "
-                "base fee %s",
-                order_status["amount"],
-                order["amount"],
-                order["amount_fee"],
-            )
-
-        self._logger.debug(order)
-        return order

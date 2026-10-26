@@ -7,7 +7,7 @@ import types
 from typing import Any
 
 import pytest
-import service.dca as dca_module
+import service.dca.engine as dca_module
 import service.orders as orders_module
 from service.dca import Dca
 from service.lifecycle_mutation import LifecycleMutationCoordinator

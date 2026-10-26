@@ -7,7 +7,7 @@ from typing import Any
 
 import helper
 import model
-from service.accumulation_entry import AccumulationEntryService
+from service.accumulation.entry import AccumulationEntryService
 from service.config import resolve_history_lookback_days, resolve_timeframe
 from service.csv_signal_import import CSVSignalImportService
 from service.data import Data

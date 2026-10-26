@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from service.accumulation_notifications import AccumulationInputNotifications
-from service.accumulation_runtime import AccumulationRuntime
+from service.accumulation.notifications import AccumulationInputNotifications
+from service.accumulation.runtime import AccumulationRuntime
 from service.exchange_balance_manager import ExchangeBalanceManager
 from service.watcher import Watcher
 
@@ -123,7 +123,7 @@ async def test_worker_owns_subscription_and_cleans_up_on_cancel_or_failure(
 ):
     notifications = AccumulationInputNotifications()
     monkeypatch.setattr(
-        "service.accumulation_runtime.accumulation_input_notifications", notifications
+        "service.accumulation.runtime.accumulation_input_notifications", notifications
     )
     runtime, _ = runtime_fixture()
     entered = asyncio.Event()
@@ -153,7 +153,7 @@ async def test_worker_owns_subscription_and_cleans_up_on_cancel_or_failure(
 async def test_repair_only_session_never_attaches_an_input_listener(monkeypatch):
     notifications = AccumulationInputNotifications()
     monkeypatch.setattr(
-        "service.accumulation_runtime.accumulation_input_notifications", notifications
+        "service.accumulation.runtime.accumulation_input_notifications", notifications
     )
     runtime, _ = runtime_fixture()
     runtime._started, runtime._repair_only = False, True

@@ -6,7 +6,7 @@ import inspect
 from typing import Any, Protocol, cast
 
 import helper
-from service.accumulation_entry import AccumulationEntryService
+from service.accumulation.entry import AccumulationEntryService
 from service.config import Config
 from service.config_views import SignalPluginConfigView
 

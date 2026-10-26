@@ -1,5 +1,5 @@
 import pytest
-from service.exchange import Exchange
+from service.dca.exchange import DcaExchange as Exchange
 
 
 @pytest.mark.asyncio
@@ -38,13 +38,11 @@ async def test_minimum_buy_notional_accounts_for_amount_precision(
     async def fake_resolve(symbol):
         return symbol
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
     monkeypatch.setattr(
         exchange,
-        "_Exchange__resolve_symbol_with_refresh",
+        "_resolve_symbol_with_refresh",
         fake_resolve,
     )
 
@@ -90,15 +88,13 @@ async def test_create_spot_market_buy_skips_when_quote_balance_is_zero(
         execute_calls["count"] += 1
         return None
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
-    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
-    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(exchange, "_get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price)
     monkeypatch.setattr(exchange, "get_free_quote_balance", fake_get_free_quote_balance)
-    monkeypatch.setattr(exchange, "_Exchange__execute_market_buy", fake_execute)
+    monkeypatch.setattr(exchange, "_execute_market_buy", fake_execute)
 
     result = await exchange.create_spot_market_buy(
         {"ordersize": 100.0, "symbol": "BTC/USDT"},
@@ -144,15 +140,13 @@ async def test_create_spot_market_buy_skips_when_balance_check_unavailable(
         execute_calls["count"] += 1
         return None
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
-    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
-    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(exchange, "_get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price)
     monkeypatch.setattr(exchange, "get_free_quote_balance", fake_get_free_quote_balance)
-    monkeypatch.setattr(exchange, "_Exchange__execute_market_buy", fake_execute)
+    monkeypatch.setattr(exchange, "_execute_market_buy", fake_execute)
 
     result = await exchange.create_spot_market_buy(
         {"ordersize": 100.0, "symbol": "BTC/USDT"},
@@ -172,9 +166,7 @@ async def test_create_spot_market_buy_rejects_precision_below_minimum(
     monkeypatch,
 ) -> None:
     exchange = Exchange()
-    monkeypatch.setattr(
-        exchange, "_Exchange__get_capped_buy_price", lambda _symbol, price: price
-    )
+    monkeypatch.setattr(exchange, "_get_capped_buy_price", lambda _symbol, price: price)
     execute_calls = {"count": 0}
 
     async def fake_ensure_exchange(_config) -> None:
@@ -206,18 +198,16 @@ async def test_create_spot_market_buy_rejects_precision_below_minimum(
         execute_calls["count"] += 1
         return None
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
-    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price)
     monkeypatch.setattr(
         exchange,
-        "_Exchange__is_notional_below_minimum",
+        "_is_notional_below_minimum",
         fake_notional_check,
     )
-    monkeypatch.setattr(exchange, "_Exchange__execute_market_buy", fake_execute)
+    monkeypatch.setattr(exchange, "_execute_market_buy", fake_execute)
 
     result = await exchange.create_spot_market_buy(
         {
@@ -268,15 +258,13 @@ async def test_create_spot_market_buy_runs_when_quote_balance_is_sufficient(
         execute_calls["count"] += 1
         return None
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
-    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
-    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(exchange, "_get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price)
     monkeypatch.setattr(exchange, "get_free_quote_balance", fake_get_free_quote_balance)
-    monkeypatch.setattr(exchange, "_Exchange__execute_market_buy", fake_execute)
+    monkeypatch.setattr(exchange, "_execute_market_buy", fake_execute)
 
     result = await exchange.create_spot_market_buy(
         {"ordersize": 100.0, "symbol": "BTC/USDT"},
@@ -308,12 +296,10 @@ async def test_create_spot_market_buy_records_invalid_price_or_amount_reason(
     async def fake_get_price(_symbol, **_kwargs) -> str:
         return "100000.0"
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
-    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price)
 
     result = await exchange.create_spot_market_buy(
         {"ordersize": 5.0, "symbol": "BTC/USDT"},
@@ -332,9 +318,7 @@ async def test_recovery_buy_rejects_rebounded_executable_price(
     monkeypatch,
 ) -> None:
     exchange = Exchange()
-    monkeypatch.setattr(
-        exchange, "_Exchange__get_capped_buy_price", lambda _symbol, price: price
-    )
+    monkeypatch.setattr(exchange, "_get_capped_buy_price", lambda _symbol, price: price)
     amount_calls = 0
     execute_calls = 0
 
@@ -357,13 +341,11 @@ async def test_recovery_buy_rejects_rebounded_executable_price(
         execute_calls += 1
         return None
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
-    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
-    monkeypatch.setattr(exchange, "_Exchange__execute_market_buy", fake_execute)
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "_get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_execute_market_buy", fake_execute)
 
     result = await exchange.create_spot_market_buy(
         {
@@ -389,9 +371,7 @@ async def test_unfilled_capped_buy_records_execution_guard_reason(
     monkeypatch,
 ) -> None:
     exchange = Exchange()
-    monkeypatch.setattr(
-        exchange, "_Exchange__get_capped_buy_price", lambda _symbol, price: price
-    )
+    monkeypatch.setattr(exchange, "_get_capped_buy_price", lambda _symbol, price: price)
 
     async def fake_ensure_exchange(_config) -> None:
         return None
@@ -414,15 +394,13 @@ async def test_unfilled_capped_buy_records_execution_guard_reason(
     async def fake_execute(_order) -> None:
         return None
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
-    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
-    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "_get_amount_from_symbol", fake_get_amount)
     monkeypatch.setattr(exchange, "get_free_quote_balance", fake_get_free_quote_balance)
-    monkeypatch.setattr(exchange, "_Exchange__execute_market_buy", fake_execute)
+    monkeypatch.setattr(exchange, "_execute_market_buy", fake_execute)
 
     result = await exchange.create_spot_market_buy(
         {
@@ -471,11 +449,11 @@ async def test_price_lookup_refreshes_markets_when_symbol_is_missing(
     )
     monkeypatch.setattr(
         exchange,
-        "_Exchange__resolve_symbol",
+        "_resolve_symbol",
         lambda symbol: symbol if state["resolved"] else None,
     )
 
-    price = await exchange._Exchange__get_price_for_symbol("SAHARA/USDC")
+    price = await exchange._get_price_for_symbol("SAHARA/USDC")
 
     assert price == "42.5"
     assert state["refresh_calls"] == 1
@@ -496,11 +474,11 @@ async def test_buy_price_lookup_prefers_executable_ask(monkeypatch) -> None:
     exchange.exchange.fetch_ticker = fake_fetch_ticker
     monkeypatch.setattr(
         exchange,
-        "_Exchange__resolve_symbol_with_refresh",
+        "_resolve_symbol_with_refresh",
         fake_resolve,
     )
 
-    price = await exchange._Exchange__get_price_for_symbol(
+    price = await exchange._get_price_for_symbol(
         "SAHARA/USDC",
         prefer_ask=True,
     )
@@ -561,14 +539,12 @@ async def test_recovery_buy_sizes_and_checks_at_submitted_price_tick(
     async def fake_finalize(*, order, **_kwargs):
         return order
 
-    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
-    monkeypatch.setattr(
-        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
-    )
-    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price)
     monkeypatch.setattr(exchange, "get_free_quote_balance", fake_balance)
     monkeypatch.setattr(client, "create_order", fake_create_order)
-    monkeypatch.setattr(exchange._buy_manager, "finalize_market_buy", fake_finalize)
+    monkeypatch.setattr(exchange, "finalize_market_buy", fake_finalize)
 
     minimum = await exchange.get_minimum_buy_notional(
         {}, "GMT/USDC", is_market_order=False, amount_sizing_price=ceiling

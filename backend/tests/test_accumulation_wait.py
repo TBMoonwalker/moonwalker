@@ -5,14 +5,14 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from service.accumulation_strategy import (
+from service.accumulation.strategy import (
     AccumulationGuard,
     AccumulationMarket,
     AccumulationObservations,
     AccumulationParameters,
     accumulation_signal_reason,
 )
-from service.accumulation_wait import accumulation_wait_condition
+from service.accumulation.wait import accumulation_wait_condition
 
 PARAMETERS = AccumulationParameters()
 HOUR = 3_600_000
@@ -182,7 +182,7 @@ def test_explanation_and_execution_agree_at_exact_rearm_boundaries(
     "price, ready", [("107.999999999999999999", False), ("108", True)]
 )
 def test_recovery_observation_matches_explained_boundary(price, ready):
-    from service.accumulation_strategy import advance_accumulation_observations
+    from service.accumulation.strategy import advance_accumulation_observations
 
     guard = AccumulationGuard(str(uuid4()), HOUR, "100", "2", 1, 1)
     state = AccumulationObservations(HOUR, 1)

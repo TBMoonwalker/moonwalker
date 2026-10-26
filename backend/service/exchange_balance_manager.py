@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 import ccxt.async_support as ccxt
-from service.accumulation_notifications import accumulation_input_notifications
+from service.accumulation.notifications import accumulation_input_notifications
 from service.exchange_helpers import extract_free_amount
 
 

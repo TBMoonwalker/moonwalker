@@ -10,13 +10,13 @@ from uuid import uuid4
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_contracts import AccumulationStateError
-from service.accumulation_evaluation import evaluate_accumulation
-from service.accumulation_state import (
+from service.accumulation.contracts import AccumulationStateError
+from service.accumulation.evaluation import evaluate_accumulation
+from service.accumulation.state import (
     AccumulationConflictError,
     load_accumulation_context,
 )
-from service.accumulation_strategy import (
+from service.accumulation.strategy import (
     AccumulationCandle,
     AccumulationGuard,
     AccumulationMarket,
@@ -241,7 +241,7 @@ async def evaluation_db(tmp_path, monkeypatch):
     await Tortoise.init(db_url=url, modules={"models": ["model"]})
     await Tortoise.generate_schemas()
     monkeypatch.setattr(
-        "service.accumulation_evaluation.lifecycle_mutation_coordinator",
+        "service.accumulation.evaluation.lifecycle_mutation_coordinator",
         LifecycleMutationCoordinator(TradingMaintenanceBarrier()),
     )
     yield url
@@ -559,7 +559,7 @@ async def test_peak_migration_preserves_pre_evaluator_opportunities_without_gues
 
 
 def test_follow_up_sizing_uses_new_decline_not_old_peak_discount():
-    from service.accumulation_strategy import accumulation_step_severity
+    from service.accumulation.strategy import accumulation_step_severity
 
     guard = _guard()
     # Deep below an old peak, but only one more ATR below the previous purchase.
@@ -575,7 +575,7 @@ def test_follow_up_sizing_uses_new_decline_not_old_peak_discount():
 
 
 def test_first_csv_dip_and_recovery_do_not_inherit_peak_maximum_size():
-    from service.accumulation_strategy import accumulation_step_severity
+    from service.accumulation.strategy import accumulation_step_severity
 
     for guard, previous, close in [(None, "100", "99"), (_guard(), "106", "101")]:
         depth = accumulation_step_severity(close, previous, "2", guard, PARAMETERS)
@@ -585,7 +585,7 @@ def test_first_csv_dip_and_recovery_do_not_inherit_peak_maximum_size():
 
 
 def test_exchange_timeframe_resolves_graph_warmup_without_rewriting_saved_graph():
-    from service.accumulation_strategy import effective_accumulation_parameters
+    from service.accumulation.strategy import effective_accumulation_parameters
     from service.shared_accumulation import regime_accumulation_graph
 
     graph = regime_accumulation_graph()

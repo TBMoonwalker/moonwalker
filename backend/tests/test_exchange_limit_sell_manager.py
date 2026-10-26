@@ -1,9 +1,9 @@
 """Tests for exchange limit sell manager."""
 
 import pytest
+from service.dca.limit_fills import DcaLimitSellManager as ExchangeLimitSellManager
 from service.exchange_capabilities import ExchangeSubmissionIndeterminate
 from service.exchange_contexts import LimitSellFillContext
-from service.exchange_limit_sell_manager import ExchangeLimitSellManager
 
 
 class _DummyLogger:
