@@ -2,6 +2,16 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.4.1.0] - 2026-10-26
+
+### Fixed
+- Stop a DCA trade at its latest tracked market price instead of deleting its
+  trade history. The remaining coins are valued at the current price as a
+  valuation-only ledger entry with no sell order or fee; earlier partial-sale
+  proceeds still count toward profit and the full execution history is preserved.
+  A fill that lands while the take-profit order is being canceled is included,
+  and a missing or invalid price keeps the open trade.
+
 ## [5.4.0.0] - 2026-10-26
 
 ### Changed
