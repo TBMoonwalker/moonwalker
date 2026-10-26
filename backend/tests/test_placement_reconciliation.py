@@ -260,8 +260,8 @@ async def test_scope_change_blocks_lookup_and_saved_result_replay(
             "exchange": "binance",
             "market": "spot",
             "dry_run": False,
-            "key": "original-account",
-            "secret": "private-scope-sentinel",
+            "key": "test-key-original-account",
+            "secret": "test-secret-scope-sentinel",
         }
         prepared = await service.prepare(
             {"operation_id": "scoped-buy", "symbol": "BTC/USDC", "amount": 1},
@@ -298,7 +298,7 @@ async def test_scope_change_blocks_lookup_and_saved_result_replay(
         assert row.reason_code == "reconciliation_account_scope_unverified"
         assert row.request_json == original_json and row.client_order_id == client_id
         assert exchange.calls == []
-        assert "private-scope-sentinel" not in row.request_json
+        assert "test-secret-scope-sentinel" not in row.request_json
     finally:
         await Tortoise.close_connections()
 

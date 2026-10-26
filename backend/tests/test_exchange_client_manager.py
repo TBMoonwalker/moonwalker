@@ -276,7 +276,7 @@ async def test_accumulation_preflighted_orders_use_demo_client_without_live_fall
         "market": "spot",
         "dry_run": True,
         "key": "demo-key",
-        "secret": "demo-secret",
+        "secret": "test-secret-demo",
     }
     try:
         if not supported:

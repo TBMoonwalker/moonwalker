@@ -404,7 +404,7 @@ async def test_sell_transport_logs_only_safe_fields_without_retry(caplog, failur
 
     import ccxt.async_support as ccxt
 
-    secret = "private-exchange-payload-sentinel"
+    secret = "test-secret-exchange-payload-sentinel"
     client = AsyncMock()
     if failure:
         client.create_market_sell_order.side_effect = ccxt.RequestTimeout(secret)

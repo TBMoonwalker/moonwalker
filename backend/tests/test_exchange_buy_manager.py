@@ -324,7 +324,7 @@ async def test_journaled_buy_logs_submission_without_raw_payload_or_resubmission
     exchange = _DummyExchange()
     logger = logging.getLogger("test.journaled_buy")
     caplog.set_level(logging.INFO, logger=logger.name)
-    secret = "credential-that-must-not-appear"
+    secret = "test-secret-must-not-appear"
     exchange.create_order = AsyncMock(
         side_effect=ccxt.RequestTimeout(secret) if failure else None,
         return_value={"id": "buy-1", "info": {"secret": secret}},

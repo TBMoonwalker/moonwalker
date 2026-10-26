@@ -414,7 +414,7 @@ async def test_exchange_demo_requires_a_scoped_durable_intent(tmp_path) -> None:
                 "exchange": "binance",
                 "dry_run": True,
                 "key": "demo-key",
-                "secret": "private-scope-sentinel",
+                "secret": "test-secret-scope-sentinel",
             },
             action=PlacementAction.BUY,
             side="buy",
@@ -427,7 +427,7 @@ async def test_exchange_demo_requires_a_scoped_durable_intent(tmp_path) -> None:
         assert stored.state == "prepared"
         assert "credential-demo-v1:" in stored.request_json
         assert "demo-key" not in stored.request_json
-        assert "private-scope-sentinel" not in stored.request_json
+        assert "test-secret-scope-sentinel" not in stored.request_json
     finally:
         await Tortoise.close_connections()
 
