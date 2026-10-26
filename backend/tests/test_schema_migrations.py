@@ -249,7 +249,7 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             ).fetchall()
         }
 
-    assert len(ledger_rows) == 14
+    assert len(ledger_rows) == 15
     assert "2026-10-21-013-accumulation-return-totals" in {
         version for version, _ in ledger_rows
     }

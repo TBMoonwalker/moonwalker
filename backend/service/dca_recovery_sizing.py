@@ -338,6 +338,8 @@ def calculate_projected_average_price(
     fill_price: float,
     quote_amount: float,
     fee_ratio: float,
+    *,
+    entry_cost: float | None = None,
 ) -> float:
     """Return the fee-adjusted average after a hypothetical quote buy."""
     if total_amount <= 0 or fill_price <= 0:
@@ -346,8 +348,13 @@ def calculate_projected_average_price(
     projected_amount = total_amount + (normalized_quote / fill_price)
     if projected_amount <= 0:
         return 0.0
-    projected_cost = max(0.0, total_cost) + normalized_quote
-    return projected_cost * (1 + max(0.0, fee_ratio)) / projected_amount
+    existing_cost = (
+        entry_cost
+        if entry_cost is not None
+        else max(0.0, total_cost) * (1 + max(0.0, fee_ratio))
+    )
+    projected_cost = existing_cost + normalized_quote * (1 + max(0.0, fee_ratio))
+    return projected_cost / projected_amount
 
 
 def calculate_recovery_sizing(
@@ -361,6 +368,7 @@ def calculate_recovery_sizing(
     policy: RecoverySizingPolicy,
     minimum_order_quote: float = 0.0,
     maximum_available_quote: float | None = None,
+    entry_cost: float | None = None,
 ) -> RecoverySizingResult:
     """Calculate a budget-aware quote order for a target TP recovery distance."""
     if total_cost <= 0 or total_amount <= 0 or fill_price <= 0:
@@ -370,7 +378,10 @@ def calculate_recovery_sizing(
 
     normalized_fee = max(0.0, fee_ratio)
     normalized_tp = max(0.0, take_profit_percent)
-    current_average = total_cost * (1 + normalized_fee) / total_amount
+    existing_cost = (
+        entry_cost if entry_cost is not None else total_cost * (1 + normalized_fee)
+    )
+    current_average = existing_cost / total_amount
     current_tp = current_average * (1 + (normalized_tp / 100.0))
     current_recovery = ((current_tp / fill_price) - 1) * 100
     target_recovery = calculate_recovery_target_percent(atr_percent, policy)
@@ -403,7 +414,7 @@ def calculate_recovery_sizing(
     target_tp = fill_price * (1 + (target_recovery / 100.0))
     target_average = target_tp / (1 + (normalized_tp / 100.0))
     denominator = (target_average / fill_price) - (1 + normalized_fee)
-    numerator = (total_cost * (1 + normalized_fee)) - (target_average * total_amount)
+    numerator = existing_cost - (target_average * total_amount)
     requested_quote = numerator / denominator if denominator > 0 else 0.0
     requested_quote = max(0.0, requested_quote)
     if requested_quote <= 0:
@@ -429,6 +440,7 @@ def calculate_recovery_sizing(
         fill_price,
         final_quote,
         normalized_fee,
+        entry_cost=entry_cost,
     )
     projected_tp = projected_average * (1 + (normalized_tp / 100.0))
     projected_recovery = ((projected_tp / fill_price) - 1) * 100

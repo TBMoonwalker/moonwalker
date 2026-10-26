@@ -72,6 +72,13 @@ third-currency fees with returns unavailable; Dynamic DCA rejects them until the
 quote value is supplied. No historical exchange rate is guessed.
 
 Dynamic DCA rules:
+- Declared acquisition fees are counted once in the entry basis used for P&L,
+  TP/SL and recovery sizing. A 100 USDC purchase with a 1 USDC fee has a
+  101 USDC basis. Later exchange buys retain their own legacy fee estimate;
+  that estimate is not reapplied to imported acquisition costs.
+- Backups preserve whether a purchase cost already includes fees. Older CSV
+  rows from the standard plugin's generated identifiers retain the same basis
+  after an upgrade or restore; quantities and recorded costs are not rewritten.
 - Oldest row per symbol is imported as base order.
 - Following rows are imported as safety orders.
 - Import is blocked when open trades already exist.

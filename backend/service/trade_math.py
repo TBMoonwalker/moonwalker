@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from datetime import datetime
+from typing import Any
 
 DATE_FORMATS = (
     "%Y-%m-%d %H:%M:%S",
@@ -14,6 +17,26 @@ DATE_FORMATS = (
     "%m/%d/%Y %H:%M:%S",
     "%m/%d/%Y",
 )
+
+
+def has_fee_inclusive_cost(order: Mapping[str, Any]) -> bool:
+    """Honor explicit provenance, with a bounded pre-flag CSV backup fallback.
+
+    Only old rows from the CSV plugin's generated namespace inherit its stored
+    acquisition basis. An explicit False always retains legacy fee estimation.
+    """
+    declared = order.get("cost_includes_fees")
+    if declared is not None:
+        return declared is True
+    symbol = str(order.get("symbol") or "").replace("/", "")
+    return bool(
+        order.get("bot") == "csv_signal"
+        and symbol
+        and re.fullmatch(
+            rf"csv-signal-{re.escape(symbol)}-[0-9]+-[0-9]+",
+            str(order.get("orderid") or ""),
+        )
+    )
 
 
 def calculate_order_size(price: float, amount: float) -> float:

@@ -109,6 +109,7 @@ class CSVSignalImportService:
                         timestamp=str(entry["timestamp"]),
                         ordersize=ordersize,
                         fee=float(entry.get("fee_rate", 0)),
+                        cost_includes_fees=True,
                         precision=entry["precision"],
                         amount=amount,
                         amount_fee=float(entry.get("base_fee", 0)),

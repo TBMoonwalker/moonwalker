@@ -138,6 +138,8 @@ def calculate_average_entry_price(
     total_cost: float,
     fee: float,
     total_amount: float,
+    *,
+    entry_cost: float | None = None,
 ) -> float:
     """Calculate weighted average entry price including fees.
 
@@ -145,13 +147,15 @@ def calculate_average_entry_price(
         total_cost: Total cost in quote currency.
         fee: Fee ratio.
         total_amount: Total base asset amount.
+        entry_cost: Effective cost with acquisition fees already accounted for.
 
     Returns:
         Average entry price per unit of base asset.
     """
     if total_amount <= 0:
         return 0.0
-    return (total_cost + total_cost * fee) / total_amount
+    cost = entry_cost if entry_cost is not None else total_cost + total_cost * fee
+    return cost / total_amount
 
 
 def calculate_trade_profit_pct(

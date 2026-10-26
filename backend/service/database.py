@@ -903,8 +903,28 @@ class Database:
                     description="Add exact inventory evidence to unsellable accumulation dust.",
                     apply=self._ensure_trade_ledger_columns,
                 ),
+                MigrationDefinition(
+                    version="2026-10-26-016-trade-cost-provenance",
+                    phase="schema",
+                    description="Distinguish fee-inclusive acquisition costs from legacy fee estimates.",
+                    apply=self._ensure_trade_cost_provenance,
+                ),
             )
         )
+
+    async def _ensure_trade_cost_provenance(self) -> None:
+        """Add provenance without rewriting quantities, costs or historical fees."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query("PRAGMA table_info('trades')")
+        statements = _plan_additive_column_statements(
+            "trades",
+            {row["name"] for row in columns},
+            (("cost_includes_fees", "INT NULL"),),
+        )
+        if statements:
+            await connection.execute_script("\n".join(statements))
 
     async def _ensure_accumulation_initial_entry_schema(self) -> None:
         """Mark only newly prepared ASAP entries; historical buys stay unchanged."""

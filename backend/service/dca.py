@@ -668,6 +668,7 @@ class Dca:
                 fill_price=current_price,
                 take_profit_percent=self.__runtime_config().take_profit,
                 fee_ratio=float(trades.get("fee") or 0.0),
+                entry_cost=trades.get("entry_cost"),
                 atr_percent=atr_percent,
                 policy=policy,
             )
@@ -721,6 +722,7 @@ class Dca:
             fill_price=current_price,
             take_profit_percent=runtime_config.take_profit,
             fee_ratio=float(trades.get("fee") or 0.0),
+            entry_cost=trades.get("entry_cost"),
             atr_percent=float(trigger_details.get("atr_percent") or 0.0),
             policy=policy,
             minimum_order_quote=float(minimum_order_quote or 0.0),
@@ -767,6 +769,7 @@ class Dca:
             trades["total_cost"],
             trades["fee"],
             trades["total_amount"],
+            entry_cost=trades.get("entry_cost"),
         )
 
         # Calculate TP/SL
