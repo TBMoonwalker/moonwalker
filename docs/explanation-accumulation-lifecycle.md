@@ -147,8 +147,8 @@ keeps the holding in Closing.
 - Dynamic sizing spends more usable capital at deeper ATR discounts, but a long
   decline can consume available funds. There is no strategy cash reserve or
   fixed purchase-count limit.
-- Shared-budget ranking prioritizes hourly peak/ATR severity; lower-ranked
-  symbols can wait indefinitely. This is not equal allocation.
+- Shared-budget ranking prioritizes peak/ATR severity on the exchange base
+  timeframe; lower-ranked symbols can wait indefinitely. This is not equal allocation.
 - Evidence-based recovery prevents duplicate orders and invented profit, but
   requires operator attention when an exchange cannot supply complete evidence.
 - Immutable strategy pins preserve a holding's reviewed behavior, but saving a

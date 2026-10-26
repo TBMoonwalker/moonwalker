@@ -206,8 +206,8 @@ reserve. Amount and price precision can reduce execution, but cannot top up a
 small request to an exchange minimum or enlarge it to fit a budget.
 
 Multiple symbols share the existing capital pool. A five-second collection round
-ranks candidates by the same fixed hourly peak/ATR severity, then creation time
-and symbol. Lower-ranked symbols can starve; this is not equal allocation.
+ranks candidates by the same peak/ATR severity on the exchange base timeframe,
+then creation time and symbol. Lower-ranked symbols can starve; this is not equal allocation.
 Admission refreshes account, quote, exchange holds and shared capital before each
 selection. Ordinary DCA leases and unresolved placements count against the same
 pool. Accumulation receives no future DCA safety-order reserve.

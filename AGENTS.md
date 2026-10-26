@@ -78,6 +78,7 @@ This script:
 
 Moonwalker is a cryptocurrency trading bot that connects to exchanges (like Binance) and executes trades based on signals from various plugins. It supports:
 - Dynamic DCA (Dollar Cost Averaging) deals
+- Accumulation with strategy-driven spot purchases and explicit operator sales
 - Multiple signal plugins (ASAP, SymSignals, CSV Signal)
 - Various trading strategies (EMA cross, Bbands cross, Ichimoku, etc.)
 - Autopilot mode for automatic portfolio management
@@ -148,6 +149,7 @@ The backend is a Python application using Litestar with the following structure:
     - `config.py` - Singleton configuration manager backed by DB (`AppConfig`), hot-reload via Redis pub/sub
     - `exchange.py` - Async CCXT wrapper: buy/sell lifecycle, precision, balance, retry logic
     - `dca.py` - Core DCA engine: processes tickers, evaluates TP/SO triggers, places orders
+    - `accumulation_runtime.py` - Lifespan-owned accumulation orchestration, entry recovery, strategy evaluation and operator commands
     - `watcher.py` - Real-time OHLCV/trade streaming via CCXT Pro WebSockets with auto-reconnect
     - `trades.py` - Trade persistence layer: CRUD for open/closed trades, aggregation
     - `orders.py` - Order execution and management
@@ -177,7 +179,8 @@ The backend is a Python application using Litestar with the following structure:
    - Each strategy is a module with indicator calculation logic
 
 5. **Models** (`backend/model/`)
-   - 9 Tortoise ORM models: `AppConfig`, `AthCache`, `Autopilot`, `Trades`, `OpenTrades`, `ClosedTrades`, `Tickers`, `Listings`, `UpnlHistory`
+   - Tortoise ORM models include `AppConfig`, `AthCache`, `Autopilot`, `Trades`, `OpenTrades`, `ClosedTrades`, `Tickers`, `Listings`, `UpnlHistory`
+   - `accumulation.py` adds activation, strategy observations, opportunities, attempts, lifecycle operations, fill checkpoints and derived return caches
    - Database: SQLite (configurable via `MOONWALKER_DB_URL`)
 
 6. **Helper** (`backend/helper/`)
@@ -202,8 +205,8 @@ In QA mode, flag any code that doesn't match DESIGN.md.
 ## Development Setup
 
 ### Prerequisites
-- Python > 3.10.x
-- Node.js (for frontend)
+- Python 3.14.x (verified patch in `.python-version`)
+- Node.js 24.x and npm 11.x (verified Node patch in `.nvmrc`)
 - TA-Lib (install separately - see https://ta-lib.org/install/)
 
 ### Installation
