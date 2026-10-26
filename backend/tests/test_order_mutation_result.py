@@ -245,6 +245,7 @@ def test_mutation_result_applied_property_rejects_unresolved_states() -> None:
         ("receive_buy_signal_result", "manual_buy"),
     ],
 )
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_typed_order_result_reports_missing_trade(
     method_name: str,
     expected_action: str,
@@ -267,6 +268,7 @@ async def test_typed_order_result_reports_missing_trade(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_completed_manual_buy_retry_deduplicates_before_rebuilding_order() -> (
     None
 ):
@@ -304,6 +306,7 @@ async def test_completed_manual_buy_retry_deduplicates_before_rebuilding_order()
         ),
     ],
 )
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_manual_sell_retry_recovers_intent_after_trade_closes(
     state: PlacementIntentState,
     expected_status: OrderMutationStatus,
@@ -338,6 +341,7 @@ async def test_manual_sell_retry_recovers_intent_after_trade_closes(
         ("receive_stop_signal_result", "manual_stop"),
     ],
 )
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_typed_order_result_fails_closed_when_trade_state_is_unavailable(
     method_name: str,
     expected_action: str,
@@ -365,6 +369,7 @@ async def test_typed_order_result_fails_closed_when_trade_state_is_unavailable(
         ("receive_buy_signal_result", "receive_buy_order", "manual_buy"),
     ],
 )
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_typed_order_result_reports_applied_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     method_name: str,
@@ -397,6 +402,7 @@ async def test_typed_order_result_reports_applied_dispatch(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_manual_sell_actions_get_distinct_default_operation_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -427,6 +433,7 @@ async def test_manual_sell_actions_get_distinct_default_operation_ids(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_typed_stop_result_covers_invalid_missing_applied_and_stale(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

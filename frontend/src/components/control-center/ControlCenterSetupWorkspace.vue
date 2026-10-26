@@ -22,10 +22,10 @@ interface SetupTaskStatus {
 
 const props = defineProps<{
     activeTarget: ControlCenterTarget
-    bindBackupFileInput: (element: Element | null) => void
+    bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
     bindTargetElement: (
         target: ControlCenterTarget,
-    ) => (element: Element | null) => void
+    ) => (element: Element | import('vue').ComponentPublicInstance | null) => void
     getSetupTaskStatus: (target: ControlCenterTarget) => SetupTaskStatus
     getSetupTaskSummary: (target: ControlCenterTarget) => string
     hasSelectedBackupPayload: boolean
@@ -103,7 +103,7 @@ const emit = defineEmits<{
         <div :class="{ 'setup-layout': readinessComplete }">
             <ControlCenterSectionNavigation
                 v-if="readinessComplete"
-                aria-label="Setup sections"
+                :ariaLabel="'Setup sections'"
                 heading="Setup sections"
                 select-label="Choose setup section"
                 :sections="setupSections"

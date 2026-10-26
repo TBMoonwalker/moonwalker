@@ -483,6 +483,7 @@ class Database:
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
             ),
             "unsellabletrades": (
+                ("accumulation_inventory_json", "TEXT NULL"),
                 ("deal_id", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
             ),
@@ -860,8 +861,148 @@ class Database:
                     description="Add immutable strategy identity to trade executions.",
                     apply=self._ensure_strategy_history_schema,
                 ),
+                MigrationDefinition(
+                    version="2026-10-17-009-accumulation-foundation",
+                    phase="schema",
+                    description="Add accumulation identities and exact inventory totals.",
+                    apply=self._ensure_accumulation_schema,
+                ),
+                MigrationDefinition(
+                    version="2026-10-17-010-accumulation-lifecycle",
+                    phase="schema",
+                    description="Add durable accumulation operator command journal.",
+                    apply=self._ensure_accumulation_lifecycle_schema,
+                ),
+                MigrationDefinition(
+                    version="2026-10-17-011-accumulation-accounting",
+                    phase="schema",
+                    description="Add cumulative accumulation fill checkpoints.",
+                    apply=self._ensure_accumulation_accounting_schema,
+                ),
+                MigrationDefinition(
+                    version="2026-10-18-012-accumulation-signal-peak",
+                    phase="schema",
+                    description="Freeze accumulation signal peak for sizing retries.",
+                    apply=self._ensure_accumulation_strategy_schema,
+                ),
+                MigrationDefinition(
+                    version="2026-10-21-013-accumulation-return-totals",
+                    phase="schema",
+                    description="Add rebuildable exact return totals and indexed evidence coverage.",
+                    apply=self._ensure_accumulation_return_schema,
+                ),
+                MigrationDefinition(
+                    version="2026-10-22-014-accumulation-initial-entry",
+                    phase="schema",
+                    description="Identify ASAP base orders independently of strategy signals.",
+                    apply=self._ensure_accumulation_initial_entry_schema,
+                ),
+                MigrationDefinition(
+                    version="2026-10-23-015-accumulation-dust-archive",
+                    phase="schema",
+                    description="Add exact inventory evidence to unsellable accumulation dust.",
+                    apply=self._ensure_trade_ledger_columns,
+                ),
+                MigrationDefinition(
+                    version="2026-10-26-016-trade-cost-provenance",
+                    phase="schema",
+                    description="Distinguish fee-inclusive acquisition costs from legacy fee estimates.",
+                    apply=self._ensure_trade_cost_provenance,
+                ),
             )
         )
+
+    async def _ensure_trade_cost_provenance(self) -> None:
+        """Add provenance without rewriting quantities, costs or historical fees."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query("PRAGMA table_info('trades')")
+        statements = _plan_additive_column_statements(
+            "trades",
+            {row["name"] for row in columns},
+            (("cost_includes_fees", "INT NULL"),),
+        )
+        if statements:
+            await connection.execute_script("\n".join(statements))
+
+    async def _ensure_accumulation_initial_entry_schema(self) -> None:
+        """Mark only newly prepared ASAP entries; historical buys stay unchanged."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query(
+            "PRAGMA table_info('accumulation_opportunities')"
+        )
+        statements = _plan_additive_column_statements(
+            "accumulation_opportunities",
+            {row["name"] for row in columns},
+            (("is_initial_entry", "INT NOT NULL DEFAULT 0"),),
+        )
+        if statements:
+            await connection.execute_script("\n".join(statements))
+
+    async def _ensure_accumulation_return_schema(self) -> None:
+        """Verify derived tables and index bounded routine coverage checks."""
+        await model.AccumulationReturnTotals.all().limit(1).values("activation_id")
+        await model.AccumulationReturnDay.all().limit(1).values("id")
+        if self.db_url.startswith("sqlite://"):
+            await Tortoise.get_connection("default").execute_script(
+                "CREATE INDEX IF NOT EXISTS idx_accumulation_fee_coverage ON accumulation_fill_checkpoints (activation_id, fees_complete, terminal); CREATE INDEX IF NOT EXISTS idx_accumulation_terminal_coverage ON accumulation_fill_checkpoints (activation_id, terminal); CREATE INDEX IF NOT EXISTS idx_accumulation_latest_inventory ON accumulation_fill_checkpoints (activation_id, updated_at DESC, id DESC);"
+            )
+
+    async def _ensure_accumulation_lifecycle_schema(self) -> None:
+        """Verify the command journal created by safe ORM schema generation."""
+        await model.AccumulationLifecycleOperation.all().limit(1).values("id")
+
+    async def _ensure_accumulation_accounting_schema(self) -> None:
+        """Verify exact fill checkpoints created by safe ORM schema generation."""
+        await model.AccumulationFillCheckpoint.all().limit(1).values("id")
+
+    async def _ensure_accumulation_strategy_schema(self) -> None:
+        """Leave pre-evaluator opportunities without an invented signal peak."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query(
+            "PRAGMA table_info('accumulation_opportunities')"
+        )
+        statements = _plan_additive_column_statements(
+            "accumulation_opportunities",
+            {row["name"] for row in columns},
+            (("signal_peak", "TEXT NULL"),),
+        )
+        if statements:
+            await connection.execute_script("\n".join(statements))
+
+    async def _ensure_accumulation_schema(self) -> None:
+        """Expand legacy holdings without converting or estimating their balances.
+
+        New accumulation tables and constraints are created by safe ORM schema
+        generation before this migration. Existing holdings retain their mode;
+        NULL exact totals deliberately distinguish legacy/unknown accounting.
+        """
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query("PRAGMA table_info('opentrades')")
+        statements = _plan_additive_column_statements(
+            "opentrades",
+            {row["name"] for row in columns},
+            tuple(
+                (name, "TEXT NULL")
+                for name in (
+                    "accumulation_net_quantity",
+                    "accumulation_remaining_cost",
+                    "accumulation_contributed_quote",
+                    "accumulation_disposal_proceeds",
+                    "accumulation_fees_json",
+                    "accumulation_basis_provenance",
+                )
+            ),
+        )
+        if statements:
+            await connection.execute_script("\n".join(statements))
 
     async def _ensure_strategy_history_schema(self) -> None:
         """Add strategy identity columns and their lookup index."""

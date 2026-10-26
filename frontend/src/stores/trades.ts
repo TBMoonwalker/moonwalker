@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { archivedDust } from '../helpers/archivedDust'
 
 export type OpenTradeRow = {
   id: number
@@ -72,6 +73,7 @@ export type ClosedTradeRow = {
 }
 
 export type UnsellableTradeRow = {
+  accumulation_inventory_json?: string | null
   id: number
   symbol: string
   deal_id?: string | null
@@ -275,15 +277,16 @@ export const useTradesStore = defineStore('trades', {
     },
     setUnsellableTrades(raw: any[]) {
       this.unsellableTrades = raw.map((val: any) => {
-        const amountPrecision = isFloat(val.amount)
+        const dust = archivedDust(val.accumulation_inventory_json)
+        const amountPrecision = !dust && isFloat(val.amount)
           ? val.amount.toString().split('.')[1].length
           : 0
         return {
           ...val,
-          cost: formatDecimal(Number(val.cost), 2),
+          cost: dust ? dust.remaining_cost ?? 'Unknown' : formatDecimal(Number(val.cost), 2),
           profit: formatDecimal(Number(val.profit), 2),
           profit_percent: formatDecimal(Number(val.profit_percent), 2),
-          amount: Number(val.amount).toFixed(amountPrecision),
+          amount: dust?.quantity ?? Number(val.amount).toFixed(amountPrecision),
           current_price: formatDecimal(Number(val.current_price), 2, 8),
           avg_price: formatDecimal(Number(val.avg_price), 2, 8),
           key: val.id,

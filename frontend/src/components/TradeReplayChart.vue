@@ -55,6 +55,7 @@ import {
     LineSeries,
     createChart,
     createSeriesMarkers,
+    type UTCTimestamp,
 } from 'lightweight-charts'
 
 import { fetchJson } from '../api/client'
@@ -74,6 +75,7 @@ import {
     getIndicatorPanes,
     getPriceIndicatorSeries,
     renderIndicatorSeries,
+    synchronizeTimeScales,
     withDistinctIndicatorColors,
     type IndicatorPane,
 } from '../helpers/tradingViewIndicators'
@@ -95,8 +97,8 @@ type TradeReplayMarker = {
 }
 
 type NormalizedTradeReplayMarker = {
-    time: number
-    position: TradeReplayMarker['position']
+    time: UTCTimestamp
+    position: 'aboveBar' | 'belowBar' | 'inBar'
     color: string
     shape: TradeReplayMarker['shape']
     text: string
@@ -148,7 +150,7 @@ const ohlcvStore = useOhlcvStore()
 const indicatorChartRefs = new Map<string, HTMLElement>()
 let chart: ReturnType<typeof createChart> | null = null
 let indicatorCharts: Array<ReturnType<typeof createChart>> = []
-let isSynchronizingTimeScale = false
+let stopTimeScaleSynchronization: (() => void) | null = null
 
 const displayIndicators = computed<BacktestIndicatorSeries[]>(() =>
     withDistinctIndicatorColors(replayIndicators.value),
@@ -238,6 +240,8 @@ function chartOptions() {
 }
 
 function removeCharts(): void {
+    stopTimeScaleSynchronization?.()
+    stopTimeScaleSynchronization = null
     if (chart) {
         chart.remove()
         chart = null
@@ -248,22 +252,6 @@ function removeCharts(): void {
     indicatorCharts = []
 }
 
-function synchronizeTimeScales(charts: Array<ReturnType<typeof createChart>>): void {
-    for (const sourceChart of charts) {
-        sourceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-            if (!range || isSynchronizingTimeScale) {
-                return
-            }
-            isSynchronizingTimeScale = true
-            for (const targetChart of charts) {
-                if (targetChart !== sourceChart) {
-                    targetChart.timeScale().setVisibleRange(range)
-                }
-            }
-            isSynchronizingTimeScale = false
-        })
-    }
-}
 
 async function loadReplayIndicators(
     timeframe: TimeframeChoice,
@@ -478,10 +466,11 @@ async function initChart(): Promise<void> {
 
         const localOffsetSeconds = getLocalOffsetSeconds()
         const localTickerData = tickerData.map((entry) => ({
-            ...entry,
-            time: Number(entry.time) + localOffsetSeconds,
+            open: entry.open, high: entry.high, low: entry.low, close: entry.close,
+            time: (Number(entry.time) + localOffsetSeconds) as UTCTimestamp,
         }))
         await nextAnimationFrame()
+        if (chart !== activeChart) return
         candlestickSeries.setData(localTickerData)
 
         for (const series of priceIndicators.value) {
@@ -506,7 +495,7 @@ async function initChart(): Promise<void> {
         }
 
         const candleMarkerData = props.markers
-            .map((marker) => {
+            .map((marker): NormalizedTradeReplayMarker | null => {
                 const markerTime = normalizeMarkerTime(
                     marker.timestamp,
                     timeframe.seconds,
@@ -515,12 +504,12 @@ async function initChart(): Promise<void> {
                 if (markerTime === null) {
                     return null
                 }
-                if (toFiniteNumber(marker.price) !== null) {
+                if (toFiniteNumber(marker.price) !== null || !['aboveBar', 'belowBar', 'inBar'].includes(marker.position)) {
                     return null
                 }
                 return {
-                    time: markerTime,
-                    position: marker.position,
+                    time: markerTime as UTCTimestamp,
+                    position: marker.position as NormalizedTradeReplayMarker['position'],
                     color: marker.color,
                     shape: marker.shape,
                     text: marker.text,
@@ -539,7 +528,7 @@ async function initChart(): Promise<void> {
                     return null
                 }
                 return {
-                    time: markerTime,
+                    time: markerTime as UTCTimestamp,
                     position: 'inBar' as const,
                     color: marker.color,
                     shape: marker.shape,
@@ -632,7 +621,8 @@ async function initChart(): Promise<void> {
         }
 
         await nextAnimationFrame()
-        synchronizeTimeScales([activeChart, ...indicatorCharts])
+        if (chart !== activeChart) return
+        stopTimeScaleSynchronization = synchronizeTimeScales([activeChart, ...indicatorCharts])
         activeChart.timeScale().fitContent()
     } catch (error) {
         loadError.value = error instanceof Error

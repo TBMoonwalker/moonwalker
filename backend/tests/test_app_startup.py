@@ -1,7 +1,10 @@
 import asyncio
+from unittest.mock import Mock
 
 import app as app_module
 import pytest
+from service.ai_work_queue import AiWorkQueue
+from service.background_work_queue import BoundedWorkQueue
 
 
 class _FullFakeLogger:
@@ -228,14 +231,31 @@ async def test_startup_logs_when_frontend_not_staged(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("with_accumulation", [False, True])
 async def test_lifespan_supervises_named_critical_and_optional_tasks(
     monkeypatch: pytest.MonkeyPatch,
+    with_accumulation: bool,
 ) -> None:
     fake_database = _FakeDatabase()
     fake_market_cap_service = _FakeMarketCapRankService()
+    monkeypatch.setattr(app_module, "ai_work_queue", AiWorkQueue())
+    monkeypatch.setattr(
+        app_module,
+        "replay_repair_queue",
+        BoundedWorkQueue(
+            name="replay-repair-test",
+            task_prefix="replay-repair",
+            logger=app_module.logging,
+            capacity=128,
+            worker_count=1,
+        ),
+    )
+    accumulation = _FakeAccumulationRuntime() if with_accumulation else None
+    monkeypatch.setattr(
+        app_module, "build_accumulation_runtime", lambda _provider: accumulation
+    )
     monkeypatch.setattr(app_module, "runtime_state", app_module.RuntimeState())
     monkeypatch.setattr(app_module, "start_redis", lambda: object())
-    monkeypatch.setattr(app_module, "stop_redis", lambda _proc: None)
     monkeypatch.setattr(app_module, "redis_client", _FakeRedisClient())
     monkeypatch.setattr(
         app_module,
@@ -294,16 +314,21 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
     async with app_module.runtime_lifespan(None):
         await asyncio.sleep(0)
 
-        assert len(app_module.runtime_state.background_tasks) == 5
+        assert len(app_module.runtime_state.background_tasks) == (
+            6 if with_accumulation else 5
+        )
         assert {
             task.get_name() for task in app_module.runtime_state.background_tasks
-        } == {
-            "moonwalker:symbol-intake",
-            "moonwalker:ticker-watcher",
-            "moonwalker:housekeeping",
-            "moonwalker:replay-candle-backfill",
-            "moonwalker:configuration-listener",
-        }
+        } == (
+            {
+                "moonwalker:symbol-intake",
+                "moonwalker:ticker-watcher",
+                "moonwalker:housekeeping",
+                "moonwalker:replay-candle-backfill",
+                "moonwalker:configuration-listener",
+            }
+            | ({"moonwalker:accumulation"} if with_accumulation else set())
+        )
         assert fake_database.run_calls[:2] == [
             "instance",
             "reconcile_placement_intents",
@@ -312,7 +337,15 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
         assert "_listen" in fake_database.run_calls
         assert not hasattr(app_module.runtime_state, "sidestep_campaign_service")
         assert fake_market_cap_service.start_calls == 1
+        if accumulation is not None:
+            assert accumulation.startup_calls == 1
+            assert accumulation.running
+            assert (
+                app_module.runtime_state.placement_orders.accumulation_recovery
+                == accumulation.recovery.reconcile
+            )
         assert app_module.runtime_state.controller_services is not None
+        assert app_module.runtime_state.controller_services.accumulation is accumulation
         assert (
             app_module.runtime_state.controller_services.orders
             is app_module.runtime_state.placement_orders
@@ -320,6 +353,9 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
 
     assert fake_market_cap_service.shutdown_calls == 1
     assert app_module.runtime_state.controller_services is None
+    if accumulation is not None:
+        assert accumulation.closed and not accumulation.running
+        assert app_module.runtime_state.accumulation_runtime is None
 
 
 @pytest.mark.asyncio
@@ -477,10 +513,11 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
             events.append("redis:close")
 
     state = app_module.RuntimeState()
+    shared_redis_process = Mock()
 
     async def ordered_startup() -> None:
         events.append("startup")
-        state.redis_proc = object()
+        state.redis_proc = shared_redis_process
         state.watcher_queue = asyncio.Queue()
         state.database = OrderedDatabase()
         state.config_service = OrderedConfig()
@@ -497,9 +534,6 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
     async def stop_statistics_fanout() -> None:
         events.append("statistics-fanout:stop")
 
-    def stop_redis_process(_process) -> None:
-        events.append("redis-process:stop")
-
     monkeypatch.setattr(app_module, "runtime_state", state)
     monkeypatch.setattr(app_module, "startup", ordered_startup)
     monkeypatch.setattr(app_module, "ai_work_queue", OrderedQueue("ai-queue"))
@@ -510,7 +544,6 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
     )
     monkeypatch.setattr(app_module, "ai_provider_client", OrderedProvider())
     monkeypatch.setattr(app_module, "redis_client", OrderedRedis())
-    monkeypatch.setattr(app_module, "stop_redis", stop_redis_process)
     monkeypatch.setattr(
         app_module,
         "recover_pending_outcome_attributions",
@@ -551,11 +584,13 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
         "database:shutdown",
         "provider:close",
         "redis:close",
-        "redis-process:stop",
     ]
     assert [event for event in events if event in ordered_shutdown_events] == (
         ordered_shutdown_events
     )
+    shared_redis_process.terminate.assert_not_called()
+    shared_redis_process.kill.assert_not_called()
+    shared_redis_process.wait.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -669,3 +704,35 @@ async def test_shutdown_attempts_later_resources_after_early_failure(
     assert state.signal_plugin is None
     assert state.placement_orders is None
     assert state.database is None
+
+
+class _FakeAccumulationRuntime:
+    entry = object()
+
+    def __init__(self):
+        self.recovery = self
+        self.startup_calls = 0
+        self.running = False
+        self.closed = False
+        self.stopping = False
+
+    async def reconcile(self, *_args):
+        return "completed"
+
+    async def startup(self):
+        self.startup_calls += 1
+        return True
+
+    async def run(self):
+        self.running = True
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.running = False
+
+    def request_stop(self):
+        self.stopping = True
+
+    async def shutdown(self):
+        assert self.stopping and not self.running
+        self.closed = True

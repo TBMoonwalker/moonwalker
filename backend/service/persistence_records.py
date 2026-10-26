@@ -11,6 +11,7 @@ class TradePersistenceRecord(TypedDict):
     timestamp: str | int
     ordersize: float
     fee: float
+    cost_includes_fees: NotRequired[bool | None]
     precision: int | None
     amount: float
     amount_fee: float

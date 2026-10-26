@@ -40,10 +40,31 @@ For interpreting the Statistics calibration diagnostics, see
 [AI Trust local calibration](ai-trust.md).
 
 ## Trade Modes
-`trade_mode` is the canonical operator-facing lifecycle control. The only
-supported value is:
+`trade_mode` is the canonical operator-facing lifecycle control:
 
 - `dynamic_dca`: Standard DCA lifecycle with dynamic safety-order behavior.
+- `accumulation`: Strategy-driven accumulation with manual exits. The server
+  reports availability through read-only `accumulation_available`.
+
+Accumulation uses an exact positive integer
+`accumulation_strategy_version_id`, selected from compatible saved versions.
+Create variants in Strategy Builder. This initial pin applies to new registrations;
+existing registrations require an explicit reviewed change under
+**Configuration → Trade modes → Change strategy for an existing registration**.
+A draft may omit the pin, but demo and live execution require it. Accumulation
+dry run uses the exchange's CCXT demo trading environment and demo credentials;
+unsupported venues fail closed without falling back to live trading. Demo and
+live account ownership and recovery records remain separate. Management must remain enabled,
+with spot markets, fixed ASAP symbols or CSV imports, and Autopilot disabled.
+
+Changing trade modes drains active order work and requires no open holdings,
+non-stopped accumulation registrations or unresolved placements. A live instance
+must first be globally paused. These conditions are checked again when saving.
+Pending accumulation commands and reserved opportunities must also settle. After
+switching to Dynamic DCA, stopped, empty registrations retain their history while
+allowing new DCA trades for those symbols.
+Follow the [accumulation operating guide](howto-operate-accumulation.md) for setup
+and manual exits, or the [accumulation reference](accumulation.md) for exact rules.
 
 Moonwalker now exposes and accepts `trade_mode` as the only supported
 operator-facing lifecycle field. Older stored rows and backup payloads that
@@ -75,7 +96,7 @@ are not exposed in the UI and must be set via the API.
 | `secret` | `string` | Exchange API secret. | `your-secret` |
 | `exchange_hostname` | `string` | Optional ccxt hostname override for exchange domains (advanced). | `bybit.eu` |
 | `market` | `string` | Market type. | `spot` |
-| `timeframe` | `string` | Ticker timeframe for watcher. | `1m` |
+| `timeframe` | `string` | Watcher interval and accumulation base candle interval for live evaluation, warmup, ranking and Backtest. Changes rebuild accumulation observations before further strategy buys. | `1m` |
 | `currency` | `string` | Quote currency for pairs. | `USDT` |
 | `dry_run` | `bool` | Enable CCXT demo trading mode (if supported by exchange). | `true` |
 | `watcher_ohlcv` | `bool` | Use OHLCV watcher mode. | `false` |
@@ -87,12 +108,14 @@ are not exposed in the UI and must be set via the API.
 | `sandbox` | `bool` | Enable exchange sandbox mode (advanced). | `false` |
 | `order_check_range` | `int` | Seconds for post-order trade lookup (advanced). | `5` |
 | `dca` | `bool` | Enable DCA. | `true` |
-| `trade_mode` | `string` | Canonical trade mode for operator-facing config. The only supported value is `dynamic_dca`. | `dynamic_dca` |
+| `trade_mode` | `string` | Entry lifecycle: `dynamic_dca`, or `accumulation`. | `dynamic_dca` |
+| `accumulation_strategy_version_id` | `int` or `null` | Exact compatible initial strategy version; required for demo and live accumulation execution. | `17` |
+| `accumulation_available` | `bool` | Read-only source release capability, returned by `/config/all`. | `false` |
 | `dca_strategy` | `string` | Strategy for dynamic DCA. | `ema_swing` |
 | `tp_strategy` | `string` | Strategy for take-profit checks (advanced). | `ema_down` |
 | `trailing_tp` | `float` | Trailing TP deviation (percent). | `0.5` |
 | `max_bots` | `int` | Max concurrent bots. | `3` |
-| `bo` | `float` | Base order size. | `10` |
+| `bo` | `float` | Base order size; the immediate initial buy amount for ASAP accumulation. Subsequent accumulation buys use strategy sizing. | `10` |
 | `sell_order_type` | `string` | Sell execution type for TP/exit orders. Supported values are `market` and `limit`. | `market` |
 | `limit_sell_timeout_sec` | `int` | Timeout in seconds before an unfilled limit sell is treated as timed out. | `60` |
 | `limit_sell_fallback_to_market` | `bool` | Allow a timed-out limit sell to fall back to a market sell when guards still permit it. | `true` |

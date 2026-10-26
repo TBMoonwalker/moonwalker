@@ -52,7 +52,13 @@ def canonicalize_trade_mode_rows(
         )
     for row in canonical_rows:
         if str(row.get("key")) == "trade_mode":
-            row["value"] = "dynamic_dca"
+            value = row.get("value")
+            if value == "accumulation":
+                row["value"] = value
+            elif value in {None, "", "dynamic_dca", "classic_dca", "sidestep"}:
+                row["value"] = "dynamic_dca"
+            else:
+                raise ValueError("Unknown trade mode in backup.")
             row["value_type"] = "str"
     return canonical_rows
 
@@ -73,7 +79,26 @@ async def run_config_migrations() -> None:
             )
             backup_rows = sorted(rows, key=lambda row: str(row["key"]))
             legacy_rows = [row for row in rows if row["key"] in LEGACY_TRADE_MODE_KEYS]
-            canonical_value = resolve_legacy_trade_mode(legacy_rows or rows)
+            explicit = next(
+                (row.get("value") for row in rows if row["key"] == "trade_mode"), None
+            )
+            if explicit not in {
+                None,
+                "",
+                "dynamic_dca",
+                "classic_dca",
+                "sidestep",
+                "accumulation",
+            }:
+                raise ValueError("Unknown trade mode in persisted configuration.")
+            canonical_value = (
+                "accumulation"
+                if any(
+                    row["key"] == "trade_mode" and row["value"] == "accumulation"
+                    for row in rows
+                )
+                else resolve_legacy_trade_mode(legacy_rows or rows)
+            )
             existing_mode = next(
                 (row for row in rows if row["key"] == "trade_mode"),
                 None,

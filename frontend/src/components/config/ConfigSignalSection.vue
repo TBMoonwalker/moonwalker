@@ -14,7 +14,7 @@
                 <n-select
                     v-model:value="signal.signal"
                     placeholder="Select"
-                    :options="signal.plugins"
+                    :options="tradeMode === 'accumulation' ? signal.plugins.filter(option => ['asap', 'csv_signal'].includes(String(option.value))) : signal.plugins"
                     @update:value="onSignalSettingsSelect"
                     @blur="onSignalSettingsSelect"
                 />
@@ -51,7 +51,7 @@
 
             <template v-if="signal.signal === 'asap'">
                 <n-form-item label="Use URL input" path="asap_use_url" label-placement="left">
-                    <n-switch v-model:value="signal.asap_use_url" />
+                    <n-switch v-model:value="signal.asap_use_url" :disabled="tradeMode === 'accumulation' && !signal.asap_use_url" />
                 </n-form-item>
                 <n-form-item
                     v-if="signal.asap_use_url"
@@ -95,6 +95,7 @@
             </template>
 
             <template v-if="signal.signal === 'csv_signal'">
+                <n-text depth="3">CSV: date;symbol;price;amount, optionally followed by fee;fee_currency;amount_type;fee_quote_value. Amount defaults to net owned coins; use gross for amounts before base-coin fees. Third-currency fees need their quote value for returns.</n-text>
                 <n-form-item label="CSV input mode" path="csv_signal_mode">
                     <n-radio-group v-model:value="signal.csvsignal_mode">
                         <n-space>
@@ -122,7 +123,7 @@
                                 minRows: 6,
                                 maxRows: 16,
                             }"
-                            placeholder="date;symbol;price;amount&#10;18/08/2025 19:32:00;BTC/USDC;117644.41;0.00099153"
+                            placeholder="date;symbol;price;amount;fee;fee_currency&#10;18/08/2025 19:32:00;BTC/USDC;117644.41;0.00099153;0.000001;BTC"
                         />
                     </n-form-item>
                     <n-form-item label="CSV file upload">
@@ -209,7 +210,8 @@
                 </n-form-item>
             </template>
 
-            <template v-if="signal.signal !== 'csv_signal'">
+            <n-alert v-if="tradeMode === 'accumulation'" type="info" :bordered="false">Accumulation uses fixed ASAP symbols or CSV inventory. Its pinned strategy controls buys; signal graph strategies do not apply.</n-alert>
+            <template v-if="tradeMode !== 'accumulation' && signal.signal !== 'csv_signal'">
                 <n-form-item
                     label="Signal initial buy strategy"
                     path="selectValue"
@@ -240,6 +242,7 @@ import type {
 } from '../../config-editor/types'
 
 defineProps<{
+    tradeMode?: string | null
     asapMissingFieldsLabel: string
     isAsapExchangeReady: boolean
     onAsapUrlInput: (value: string) => void

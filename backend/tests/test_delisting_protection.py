@@ -458,6 +458,7 @@ async def test_unavailable_schedule_warns_open_trades_and_notifies_once() -> Non
         (True, False, "campaign-1"),
     ),
 )
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_central_order_guard_blocks_every_buy_role(
     monkeypatch: pytest.MonkeyPatch,
     baseorder: bool,

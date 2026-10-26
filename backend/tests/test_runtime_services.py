@@ -6,6 +6,7 @@ from service.runtime_services import (
     activate_runtime_services,
     build_runtime_services,
     deactivate_runtime_services,
+    get_active_accumulation_runtime,
     get_runtime_services,
     reset_runtime_services_for_testing,
 )
@@ -22,6 +23,16 @@ def test_runtime_services_share_lifecycle_collaborators() -> None:
     assert services.trading_controls._orders is services.orders
     assert services.trading_controls._trades is services.trades
     assert services.trade_replay_indicators.trades is services.trades
+    assert services.accumulation is None
+
+
+def test_accumulation_resolver_never_constructs_compatibility_graph(monkeypatch):
+    reset_runtime_services_for_testing()
+    monkeypatch.setattr(
+        "service.runtime_services.build_runtime_services",
+        lambda: pytest.fail("no lifespan"),
+    )
+    assert get_active_accumulation_runtime() is None
 
 
 def test_runtime_service_proxy_prefers_active_lifespan_graph() -> None:

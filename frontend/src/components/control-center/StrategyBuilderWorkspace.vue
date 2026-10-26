@@ -53,6 +53,7 @@ const {
     selectStrategy,
     setDecisionNode,
     strategies,
+    updateAccumulationSettings,
     updateIndicatorSelection,
     updateNodeParam,
     updateNodeParamValue,
@@ -179,6 +180,7 @@ const {
                         @validate="validateDraft"
                         @set-decision="setDecisionNode"
                         @connect-decision="connectSelectedToDecision"
+                        @update-accumulation="updateAccumulationSettings"
                         @update-indicator="updateIndicatorSelection"
                         @update-param="updateNodeParam"
                         @update-param-value="updateNodeParamValue"
@@ -282,16 +284,16 @@ const {
 }
 
 @media (max-width: 900px) {
-    .mobile-review-note {
-        display: block;
-    }
-
     .strategy-layout {
         grid-template-areas:
             "library"
             "workbench";
         grid-template-columns: 1fr;
     }
+}
+
+@media (max-width: 600px) {
+    .mobile-review-note { display: block; }
 }
 
 @media (max-width: 560px) {

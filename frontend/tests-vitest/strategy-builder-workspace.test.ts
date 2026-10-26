@@ -28,6 +28,10 @@ const reteHostRenderGraph = vi.hoisted(() =>
 )
 
 vi.mock('../src/api/strategyBuilder', () => apiMocks)
+vi.mock('../src/api/accumulation', () => ({
+    fetchAccumulationStrategies: () => Promise.reject({ status: 503 }),
+    accumulationErrorStatus: (error: { status: number }) => error.status,
+}))
 
 vi.mock('../src/composables/useStrategyRete', async () => {
     const { ref } = await import('vue')
@@ -182,6 +186,31 @@ describe('StrategyBuilderWorkspace', () => {
         apiMocks.duplicateStrategy.mockResolvedValue(detail(custom))
         apiMocks.validateStrategy.mockResolvedValue(detail(custom).validation)
         apiMocks.isStrategyConflict.mockReturnValue(false)
+    })
+
+    it('stores accumulation settings in the common graph draft and exposes shared indicators', async () => {
+        const mounted = mountWorkspaceState()
+        await flushPromises()
+        mounted.state.updateAccumulationSettings('enabled', true)
+        expect(mounted.state.selectedDetail.value?.ir.accumulation).toBeUndefined()
+        await mounted.state.selectStrategy(custom.slug)
+        mounted.state.updateAccumulationSettings('enabled', true)
+        mounted.state.updateAccumulationSettings('spacing_atr', '2')
+        mounted.state.updateAccumulationSettings('peak_length', '200')
+        expect(mounted.state.selectedDetail.value?.ir.accumulation).toMatchObject({
+            spacing_atr: '2', peak_length: 200, timeframe: '1h',
+        })
+        mounted.state.selectedNodeId.value = 'ema'
+        mounted.state.updateIndicatorSelection('ema_slope')
+        expect(mounted.state.selectedNode.value?.params).toMatchObject({
+            indicator: 'ema_slope', atr_length: 14, slope_period: 6,
+        })
+        mounted.state.updateIndicatorSelection('ema_distance_atr')
+        mounted.state.updateIndicatorSelection('adx')
+        expect(mounted.state.selectedNode.value?.params?.atr_length).toBeUndefined()
+        mounted.state.updateAccumulationSettings('enabled', false)
+        expect(mounted.state.selectedDetail.value?.ir.accumulation).toBeUndefined()
+        mounted.state.updateAccumulationSettings('spacing_atr', '3')
     })
 
     it('renders the split library, canvas, and inspector surfaces', async () => {
@@ -435,7 +464,7 @@ describe('StrategyBuilderWorkspace', () => {
         const staleInvalid: StrategyValidation = {
             ...valid,
             status: 'invalid',
-            blocking_errors: ['stale response'],
+            blocking_errors: [{ group: 'strategy', message: 'stale response' }],
         }
 
         resolveSecond(valid)
@@ -536,7 +565,7 @@ describe('StrategyBuilderWorkspace', () => {
             const staleInvalid: StrategyValidation = {
                 ...detail(custom).validation,
                 status: 'invalid',
-                blocking_errors: ['stale during debounce'],
+                blocking_errors: [{ group: 'strategy', message: 'stale during debounce' }],
             }
             resolveValidation(staleInvalid)
             await activeValidation

@@ -18,8 +18,8 @@ test('backtest icon-only controls expose action-specific names', () => {
     )
     assert.equal(
         (backtestViewSource.match(/v-accessible-stepper=/g) || []).length,
-        6,
-        'expected all six numeric inputs to label their paired stepper buttons',
+        9,
+        'expected all nine numeric inputs to label their paired stepper buttons',
     )
     assert.ok(
         backtestViewSource.includes(

@@ -63,6 +63,7 @@ class _DummyTx:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_manual_buy_add_appends_safety_order(monkeypatch) -> None:
     _DummyTradesModel.created_payload = None
     _DummyOpenTradesModel.updated_symbol = None
@@ -159,6 +160,7 @@ async def test_receive_manual_buy_add_appends_safety_order(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_manual_buy_add_requires_open_trade(monkeypatch) -> None:
     orders = Orders()
 
@@ -182,6 +184,7 @@ async def test_receive_manual_buy_add_requires_open_trade(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_manual_buy_add_rejects_older_date(monkeypatch) -> None:
     orders = Orders()
 
@@ -211,6 +214,7 @@ async def test_receive_manual_buy_add_rejects_older_date(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_manual_buy_add_rejects_paused_mission(monkeypatch) -> None:
     orders = Orders()
 

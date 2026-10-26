@@ -233,7 +233,8 @@ class DcaRuntimeConfigView:
                 default=0,
                 falsey_fallback=0,
             ),
-            dynamic_dca=True,
+            dynamic_dca=config.get("trade_mode", "dynamic_dca")
+            in {None, "", "dynamic_dca"},
             safety_order_volume_scale=_float_config_value(
                 config,
                 "os",

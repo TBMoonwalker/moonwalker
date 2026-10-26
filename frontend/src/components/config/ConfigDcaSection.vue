@@ -11,7 +11,7 @@
             }"
         >
             <n-form-item label="Enabled" path="enabled" label-placement="left">
-                <n-checkbox v-model:checked="dca.enabled" />
+                <n-checkbox v-model:checked="dca.enabled" :disabled="isAccumulationMode && dca.enabled" />
             </n-form-item>
 
             <template v-if="dca.enabled">
@@ -30,6 +30,17 @@
                         </n-radio-button>
                     </n-radio-group>
                 </n-form-item>
+                <n-alert v-if="isAccumulationMode" type="info" :bordered="false" class="trade-mode-guard-note">
+                    ASAP opens each holding with the configured base order, just as in Dynamic DCA. The accumulation strategy sizes subsequent buys from available budget. CSV imports adopt coins already owned. Sales are manual; take profit and stop loss do not apply. Dry run trades against the exchange demo account when supported, using demo credentials and funds.
+                </n-alert>
+                <n-form-item v-if="isAccumulationMode" label="Initial accumulation strategy version" path="accumulation_strategy_version_id" :label-props="{ for: 'config-accumulation-strategy' }">
+                    <n-select filterable v-model:value="dca.accumulation_strategy_version_id" :options="accumulationStrategies" :fallback-option="(value: string | number) => ({ value, label: 'Saved version — load the catalog to inspect' })" :loading="accumulationLoading" :disabled="!dca.accumulation_available" :input-props="{ id: 'config-accumulation-strategy' }" placeholder="Select an exact compatible saved version" />
+                </n-form-item>
+                <template v-if="isAccumulationMode">
+                    <p v-if="accumulationError" role="alert">{{ accumulationError }}</p>
+                    <n-button v-if="accumulationCursor !== null" :disabled="accumulationLoading" @click="loadAccumulationStrategies(true)">Load more strategies</n-button>
+                    <p>The initial version applies to new registrations. Existing registrations keep their saved version; change it below. You can save an incomplete dry-run draft before creating a strategy.</p>
+                </template>
                 <n-alert
                     v-if="tradeModeSwitchNotice"
                     class="trade-mode-guard-note"
@@ -51,26 +62,26 @@
                 </n-form-item>
             </template>
 
-            <n-form-item label="Take profit percentage" path="tp">
+            <n-form-item v-if="!isAccumulationMode" label="Take profit percentage" path="tp">
                 <n-input-number v-model:value="dca.tp" placeholder="TP" />
             </n-form-item>
-            <n-form-item label="Trailing Take profit percentage" path="ttp">
+            <n-form-item v-if="!isAccumulationMode" label="Trailing Take profit percentage" path="ttp">
                 <n-input-number v-model:value="dca.trailing_tp" placeholder="TTP" />
             </n-form-item>
-            <n-form-item label="Max bots running" path="max_bots">
+            <n-form-item :label="isAccumulationMode ? 'Max managed symbols' : 'Max bots running'" path="max_bots">
                 <n-input-number v-model:value="dca.max_bots" placeholder="Bot count" />
             </n-form-item>
-            <n-form-item label="Base order amount" path="bo">
+            <n-form-item v-if="!isAccumulationMode || signalName === 'asap'" label="Base order amount" path="bo">
                 <n-input-number v-model:value="dca.bo" placeholder="BO" />
             </n-form-item>
-            <n-form-item label="Sell order type" path="sell_order_type">
+            <n-form-item v-if="!isAccumulationMode" label="Sell order type" path="sell_order_type">
                 <n-select
                     v-model:value="dca.sell_order_type"
                     placeholder="Select"
                     :options="sellOrderTypeOptions"
                 />
             </n-form-item>
-            <template v-if="dca.sell_order_type === 'limit'">
+            <template v-if="!isAccumulationMode && dca.sell_order_type === 'limit'">
                 <n-form-item
                     label="Limit sell timeout (seconds)"
                     path="limit_sell_timeout_sec"
@@ -116,7 +127,7 @@
                     />
                 </n-form-item>
             </template>
-            <template v-if="showAdvancedGeneral">
+            <template v-if="!isAccumulationMode && showAdvancedGeneral">
                 <n-form-item
                     label="TP spike confirmation"
                     path="tp_spike_confirm_enabled"
@@ -163,7 +174,7 @@
             >
                 <n-input-number v-model:value="dca.sos" placeholder="SOS" />
             </n-form-item>
-            <n-form-item label="Stop loss percentage" path="sl">
+            <n-form-item v-if="!isAccumulationMode" label="Stop loss percentage" path="sl">
                 <n-input-number v-model:value="dca.sl" placeholder="SL" />
             </n-form-item>
             <n-form-item
@@ -180,21 +191,30 @@
                 />
             </n-form-item>
         </n-form>
+        <details v-if="dca.enabled && isAccumulationMode && dca.accumulation_available" id="accumulation-strategy-assignments" :open="showAssignments" @toggle="toggleAssignments">
+            <summary>Change strategy for an existing registration</summary>
+            <AccumulationStrategyAssignment v-if="showAssignments" />
+        </details>
     </n-card>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import AccumulationStrategyAssignment from './AccumulationStrategyAssignment.vue'
+import { useAccumulationStrategies } from '../../composables/useAccumulationStrategies'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
 import type { DcaModel, StringSelectOption } from '../../config-editor/types'
 import type { TradeModeSwitchGuardState } from '../../helpers/configLoad'
 import {
     TRADE_MODE_DYNAMIC_DCA,
+    TRADE_MODE_ACCUMULATION,
     isDynamicTradeMode,
 } from '../../helpers/tradeLifecycle'
 
 const props = defineProps<{
      dca: DcaModel
+     signalName?: string | null
      rules: FormRules
     sellOrderTypeOptions: StringSelectOption[]
     showAdvancedGeneral: boolean
@@ -203,9 +223,28 @@ const props = defineProps<{
 }>()
 
 const formRef = ref<FormInst | null>(null)
+const route = useRoute()
+const showAssignments = ref(typeof route?.query.symbol === 'string')
+watch(() => route?.query.symbol, symbol => { if (typeof symbol === 'string') showAssignments.value = true })
+function toggleAssignments(event: Event) { showAssignments.value = (event.target as HTMLDetailsElement).open }
 const tradeModeOptions: StringSelectOption[] = [
     { label: 'Dynamic DCA', value: TRADE_MODE_DYNAMIC_DCA },
+    { label: 'Accumulation', value: TRADE_MODE_ACCUMULATION },
 ]
+const isAccumulationMode = computed(() => props.dca.trade_mode === TRADE_MODE_ACCUMULATION)
+const { versions: accumulationVersions, cursor: accumulationCursor,
+    loading: accumulationLoading, error: accumulationError,
+    load: loadStrategyPage } = useAccumulationStrategies(
+        () => 'Could not load compatible accumulation strategies.',
+    )
+const accumulationStrategies = computed(() => accumulationVersions.value.map(version => ({
+    label: `${version.name} · v${version.version}`,
+    value: version.id,
+})))
+async function loadAccumulationStrategies(more = false) {
+    if (props.dca.accumulation_available) await loadStrategyPage(more)
+}
+watch(() => props.dca.accumulation_available, available => { if (available) void loadAccumulationStrategies() }, { immediate: true })
 const isDynamicDcaMode = computed(
     () => isDynamicTradeMode(props.dca.trade_mode),
 )
@@ -256,6 +295,7 @@ const tpLimitPrearmConflictWarningText = computed(() => {
 })
 
 function isTradeModeOptionDisabled(value: string): boolean {
+    if (value === TRADE_MODE_ACCUMULATION && !props.dca.accumulation_available) return true
     return Boolean(
         props.tradeModeSwitchGuard?.blocked &&
             props.tradeModeSwitchGuard.current_trade_mode &&
@@ -291,5 +331,5 @@ defineExpose({
 .trade-mode-guard-note {
     margin-bottom: 18px;
 }
+summary { cursor: pointer; padding-block: 12px; min-height: 44px; color: var(--mw-color-text-primary); }
 </style>
-

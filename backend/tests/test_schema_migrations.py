@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from model import SchemaMigration
+from model import SchemaMigration, UnsellableTrades
 from service.database import Database
 from service.schema_migrations import (
     EXPAND_ONLY_COMPATIBILITY,
@@ -199,6 +199,15 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             "SELECT symbol, amount, cost, deal_id, execution_history_complete "
             "FROM opentrades WHERE symbol = 'BTC/USDC'"
         ).fetchone()
+        accumulation_defaults = connection.execute(
+            "SELECT lifecycle_mode, accumulation_net_quantity, "
+            "accumulation_remaining_cost, accumulation_contributed_quote "
+            "FROM opentrades WHERE symbol = 'BTC/USDC'"
+        ).fetchone()
+        accumulation_tables = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name LIKE 'accumulation_%'"
+        ).fetchall()
         trade = connection.execute(
             "SELECT symbol, orderid, deal_id FROM trades WHERE symbol = 'BTC/USDC'"
         ).fetchone()
@@ -240,8 +249,13 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             ).fetchall()
         }
 
-    assert len(ledger_rows) == 7
+    assert len(ledger_rows) == 15
+    assert "2026-10-21-013-accumulation-return-totals" in {
+        version for version, _ in ledger_rows
+    }
     assert {status for _, status in ledger_rows} == {MIGRATION_STATUS_APPLIED}
+    assert accumulation_defaults == ("classic_dca", None, None, None)
+    assert len(accumulation_tables) == 8
     assert open_trade is not None
     assert open_trade[:3] == ("BTC/USDC", 1.0, 100.0)
     assert open_trade[3]
@@ -259,3 +273,48 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
     assert "funds_locked" in upnl_columns
     assert {"strategy_slug", "strategy_version"} <= execution_columns
     assert ("strategy_slug", "strategy_version") in execution_index_columns
+
+
+@pytest.mark.asyncio
+async def test_initial_entry_column_is_added_idempotently(_migration_database):
+    """An existing accumulation installation gets a false default without data loss."""
+    connection = Tortoise.get_connection("default")
+    await connection.execute_script(
+        "ALTER TABLE accumulation_opportunities DROP COLUMN is_initial_entry;"
+    )
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._ensure_accumulation_initial_entry_schema()
+    await database._ensure_accumulation_initial_entry_schema()
+    _, columns = await connection.execute_query(
+        "PRAGMA table_info('accumulation_opportunities')"
+    )
+    column = next(row for row in columns if row["name"] == "is_initial_entry")
+    assert column["notnull"] == 1 and column["dflt_value"] == "0"
+
+
+@pytest.mark.asyncio
+async def test_startup_migrates_archive_column_when_old_migrations_already_applied(
+    _migration_database,
+):
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._run_schema_init_steps()
+    # Reproduce an installation that completed every pre-archive migration.
+    await SchemaMigration.filter(
+        version="2026-10-23-015-accumulation-dust-archive"
+    ).delete()
+    connection = Tortoise.get_connection("default")
+    await UnsellableTrades.create(symbol="BTC/USDC", amount=0.01, cost=1)
+    await connection.execute_script(
+        "ALTER TABLE unsellabletrades DROP COLUMN accumulation_inventory_json;"
+    )
+    await database._run_schema_init_steps()
+    await database._run_schema_init_steps()
+    row = await UnsellableTrades.get(symbol="BTC/USDC")
+    assert row.amount == 0.01 and row.cost == 1
+    assert row.accumulation_inventory_json is None
+    ledger = await SchemaMigration.get(
+        version="2026-10-23-015-accumulation-dust-archive"
+    )
+    assert ledger.status == "applied"

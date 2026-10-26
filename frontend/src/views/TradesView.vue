@@ -4,6 +4,7 @@ import {
   defineAsyncComponent,
   ref,
 } from 'vue'
+import { useAccumulationPanel } from '../composables/useAccumulationPanel'
 import Statistics from '@/components/Statistics.vue'
 import { formatAutopilotMemoryHint } from '@/autopilot/presentation'
 import { useWebSocketDataStore } from '@/stores/websocket'
@@ -38,6 +39,7 @@ const performanceRanges: { value: PerformanceRange; label: string }[] = [
   { value: '365d', label: '1Y' },
 ]
 const profitPeriod = computed(() => ({
+  all: 'daily',
   '1d': 'daily',
   '30d': 'monthly',
   '365d': 'yearly',
@@ -48,6 +50,7 @@ const performanceDescription = computed(() => ({
   '30d': 'Monthly closed-trade profit this year',
   '365d': 'Yearly closed-trade profit',
 }[performanceRange.value]))
+const accumulation = useAccumulationPanel()
 const activeTradeView = ref<'open' | 'closed' | 'unsellable'>('open')
 const unsellableTradesCount = computed(() =>
   Array.isArray(unsellableTradesState.data.value) ? unsellableTradesState.data.value.length : 0
@@ -315,7 +318,7 @@ const admissionToneClass = computed(() =>
         <button type="button" :aria-pressed="activeTradeView === 'unsellable'" :class="{ 'is-active': activeTradeView === 'unsellable' }" @click="activeTradeView = 'unsellable'">Unsellable trades <span>{{ unsellableTradesCount }}</span></button>
       </div>
       <div class="dashboard-panel ledger-panel trade-table-panel">
-        <OpenTrades v-if="activeTradeView === 'open'" :global-trading-paused="tradingPaused" />
+        <OpenTrades v-if="activeTradeView === 'open'" :global-trading-paused="tradingPaused" :accumulation-context="accumulation" />
         <ClosedTrades v-else-if="activeTradeView === 'closed'" />
         <UnsellableTrades v-else />
       </div>

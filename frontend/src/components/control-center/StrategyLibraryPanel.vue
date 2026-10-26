@@ -51,7 +51,7 @@ const customStrategies = computed(() =>
             >
                 <span>{{ strategy.name }}</span>
                 <span class="strategy-row-meta">
-                    Built-in · v{{ strategy.active_version || 1 }}
+                    Built-in · v{{ strategy.active_version || 1 }} · {{ strategy.capabilities?.includes('accumulation') ? (strategy.capabilities?.includes('dca') ? 'DCA + accumulation' : 'Accumulation') : 'DCA' }}
                 </span>
             </button>
         </div>
@@ -68,7 +68,7 @@ const customStrategies = computed(() =>
             >
                 <span>{{ strategy.name }}</span>
                 <span class="strategy-row-meta">
-                    Custom · v{{ strategy.active_version || 1 }}
+                    Custom · v{{ strategy.active_version || 1 }} · {{ strategy.capabilities?.includes('accumulation') ? (strategy.capabilities?.includes('dca') ? 'DCA + accumulation' : 'Accumulation') : 'DCA' }}
                 </span>
             </button>
             <p v-if="!customStrategies.length" class="empty-copy">
@@ -162,7 +162,7 @@ const customStrategies = computed(() =>
     font-size: 0.82rem;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 600px) {
     .palette-group {
         display: none;
     }

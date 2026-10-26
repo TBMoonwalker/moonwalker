@@ -74,6 +74,7 @@ TRADE_ROW_KEYS = {
     "timestamp",
     "ordersize",
     "fee",
+    "cost_includes_fees",
     "precision",
     "amount",
     "amount_fee",
@@ -264,7 +265,9 @@ def _build_trade_row_payload(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Project persistence metadata onto columns owned by the trades table."""
-    return {key: value for key, value in payload.items() if key in TRADE_ROW_KEYS}
+    row = {key: value for key, value in payload.items() if key in TRADE_ROW_KEYS}
+    row.setdefault("cost_includes_fees", False)
+    return row
 
 
 async def _resolve_open_deal_state(symbol: str, conn: Any) -> tuple[str, bool]:

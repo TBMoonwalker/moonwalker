@@ -113,6 +113,19 @@ class _DummyOpenTradesModel:
         return list(self.rows)
 
 
+class _DummyAccumulationModel:
+    @classmethod
+    def all(cls):
+        return cls()
+
+    def exclude(self, **kwargs):
+        assert kwargs == {"state": "stopped"}
+        return self
+
+    async def values_list(self, *_args, **_kwargs):
+        return []
+
+
 class _DummyMemoryService:
     def __init__(self, profiles: dict[str, SymbolAdmissionProfile]) -> None:
         self._profiles = profiles
@@ -132,8 +145,9 @@ class _DummyMemoryService:
 
 
 @pytest.fixture(autouse=True)
-def _clear_signal_runtime_reservations() -> None:
+def _clear_signal_runtime_reservations(monkeypatch) -> None:
     signal_runtime_module._PENDING_ADMISSION_SYMBOLS.clear()
+    monkeypatch.setattr(model, "AccumulationActivation", _DummyAccumulationModel)
 
 
 @pytest.mark.asyncio

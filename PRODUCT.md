@@ -40,7 +40,7 @@ The meaningfully different claim a neighboring product could not truthfully copy
 
 ## Capabilities and Constraints
 
-- Trade mode: `dynamic_dca` is the only supported value of `trade_mode`. Expert safeguards provides Legacy factors, Recovery shadow, and Recovery target safety-order sizing; each new deal retains its selected recovery policy.
+- Trade modes: `dynamic_dca` and `accumulation` are supported values of `trade_mode`. Accumulation retains managed spot inventory until an explicit sale. Dynamic DCA's Expert safeguards provides Legacy factors, Recovery shadow, and Recovery target safety-order sizing; each new deal retains its selected recovery policy.
 - Signal plugins: `sym_signals`, `asap`, `csv_signal`, `websocket_signal`.
 - Strategies included: EMA cross, Bollinger Bands cross, Ichimoku, and others; indicators are computed via TA-Lib.
 - Autopilot / Autopilot Memory cockpit surfaces favored and cooling symbols, suggested base orders, and plain-language trust signals in the Control Center.

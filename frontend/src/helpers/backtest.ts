@@ -10,9 +10,14 @@ export const BACKTEST_TIMEFRAME_OPTIONS = [
     { label: '1w', value: '1w' },
 ] as const
 
-type BacktestTradeMode = 'dynamic_dca'
+type BacktestTradeMode = 'dynamic_dca' | 'accumulation'
 
 export interface BacktestFormState {
+    tradeMode: BacktestTradeMode
+    accumulationVersionId: number | null
+    funding: number
+    slippageBps: number
+    fixedIntervalCandles: number
     symbol: string
     strategySlug: string
     timeframe: string
@@ -26,16 +31,20 @@ export interface BacktestFormState {
 
 export interface BacktestRunRequest {
     symbol: string
-    strategy_slug: string
+    strategy_slug?: string
+    strategy_version_id?: number
+    funding?: string
+    slippage_bps?: string
+    fixed_interval_candles?: number
     trade_mode: BacktestTradeMode
     timeframe: string
     start_date: number
     end_date: number
-    base_order_size: number
-    take_profit_pct: number
-    stop_loss_pct: number | null
-    max_safety_orders: number
-    safety_order_step_pct: number
+    base_order_size?: number
+    take_profit_pct?: number
+    stop_loss_pct?: number | null
+    max_safety_orders?: number
+    safety_order_step_pct?: number
     fee: number
 }
 
@@ -56,7 +65,7 @@ export interface BacktestMarker {
     text: string
 }
 
-export type BacktestIndicatorPane = 'price' | 'rsi' | 'bandwidth' | 'macd'
+export type BacktestIndicatorPane = 'price' | 'rsi' | 'bandwidth' | 'macd' | 'atr' | 'dmi' | 'atr_units'
 type BacktestIndicatorRenderer = 'line' | 'histogram'
 
 interface BacktestIndicatorValue {
@@ -112,7 +121,16 @@ interface BacktestStats {
     still_open_at_end?: boolean
 }
 
+export interface AccumulationBacktestFill {
+    signal_close_ms: number; execution_open_ms: number; quantity: string; spent: string; fee: string; execution_price: string
+}
+export interface AccumulationBacktestReport {
+    funding: string; strategy_version_id: number; gap_count: number; trades_truncated: boolean; caveats: string[]
+    accumulation_trades: AccumulationBacktestFill[]
+    results: Array<{ strategy: string; contributed_quote: string; units: string; spent_quote_including_fees: string; fees_quote: string; cash_quote: string; ending_value_quote: string; maximum_drawdown_fraction: string; buy_count: number }>
+}
 export interface BacktestResult {
+    accumulation?: AccumulationBacktestReport
     trades: BacktestTrade[]
     chart: {
         candles: BacktestCandle[]
@@ -130,6 +148,11 @@ export interface BacktestComparison {
 
 export function createDefaultBacktestForm(): BacktestFormState {
     return {
+        tradeMode: 'dynamic_dca',
+        accumulationVersionId: null,
+        funding: 1000,
+        slippageBps: 20,
+        fixedIntervalCandles: 24,
         symbol: 'BTC/USDT',
         strategySlug: 'ema20_swing',
         timeframe: '1h',
@@ -151,6 +174,13 @@ export function buildBacktestRequest(
     form: BacktestFormState,
     dateRange: [number, number],
 ): BacktestRunRequest {
+    if (form.tradeMode === 'accumulation') {
+        return {
+            symbol: form.symbol.trim(), trade_mode: 'accumulation', strategy_version_id: form.accumulationVersionId!,
+            timeframe: form.timeframe, start_date: dateRange[0], end_date: dateRange[1], funding: String(form.funding),
+            fee: form.fee, slippage_bps: String(form.slippageBps), fixed_interval_candles: form.fixedIntervalCandles,
+        }
+    }
     return {
         symbol: form.symbol.trim(),
         strategy_slug: form.strategySlug.trim(),
@@ -175,7 +205,7 @@ export function computeBacktestComparison(
     current: BacktestResult | null,
     previous: BacktestResult | null,
 ): BacktestComparison | null {
-    if (!current || !previous) {
+    if (!current || !previous || current.accumulation || previous.accumulation) {
         return null
     }
 

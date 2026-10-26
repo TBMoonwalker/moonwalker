@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sqlite3
 from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import Any
@@ -49,6 +50,7 @@ from service.dca_tp_state import (
 )
 from service.exchange import Exchange
 from service.indicators import Indicators
+from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.lifecycle_snapshot import LifecycleSnapshotIdentity
 from service.orders import Orders
 from service.statistic import Statistic
@@ -56,6 +58,7 @@ from service.strategy_runtime import get_strategy_adapter
 from service.trades import Trades
 from service.trading_controls import is_mission_automation_paused
 from service.trading_maintenance import trading_maintenance_barrier
+from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 
@@ -665,6 +668,7 @@ class Dca:
                 fill_price=current_price,
                 take_profit_percent=self.__runtime_config().take_profit,
                 fee_ratio=float(trades.get("fee") or 0.0),
+                entry_cost=trades.get("entry_cost"),
                 atr_percent=atr_percent,
                 policy=policy,
             )
@@ -718,6 +722,7 @@ class Dca:
             fill_price=current_price,
             take_profit_percent=runtime_config.take_profit,
             fee_ratio=float(trades.get("fee") or 0.0),
+            entry_cost=trades.get("entry_cost"),
             atr_percent=float(trigger_details.get("atr_percent") or 0.0),
             policy=policy,
             minimum_order_quote=float(minimum_order_quote or 0.0),
@@ -764,6 +769,7 @@ class Dca:
             trades["total_cost"],
             trades["fee"],
             trades["total_amount"],
+            entry_cost=trades.get("entry_cost"),
         )
 
         # Calculate TP/SL
@@ -1355,6 +1361,19 @@ class Dca:
         if ticker["type"] == "ticker_price":
             price = ticker["ticker"]["price"]
             symbol = str(ticker["ticker"]["symbol"] or "")
+            try:
+                route = await load_lifecycle_route(symbol)
+            except (BaseORMException, RuntimeError, sqlite3.Error, ValueError):
+                logging.error(
+                    "Skipping ticker for %s: lifecycle ownership could not be read.",
+                    symbol,
+                    exc_info=True,
+                )
+                return
+            if route.route != LifecycleRoute.CLASSIC_DCA:
+                # Accumulation's candle evaluator owns this route. Never run
+                # DCA history aggregation, sizing, Autopilot or exit rules here.
+                return
             trades = await self.trades.get_trades_for_orders(symbol)
             if not trades:
                 return

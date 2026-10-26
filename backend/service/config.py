@@ -415,6 +415,17 @@ class Config:
         update = self.__parse_update_payload(raw_value)
         value_type = str(update["type"]).strip()
         value_data = update["value"]
+        if key == "accumulation_strategy_version_id" and value_data is not None:
+            if (
+                value_type != "int"
+                or type(value_data) is not int
+                or not 0 < value_data < 2**63
+            ):
+                raise ValueError(
+                    "accumulation_strategy_version_id must be an exact positive integer or null."
+                )
+        if key == "trade_mode" and value_data is not None and value_type != "str":
+            raise ValueError("trade_mode must use config type 'str'.")
         should_persist = should_persist_config_value(value_type, value_data)
         if not should_persist:
             return ConfigUpdateAction(
@@ -445,6 +456,8 @@ class Config:
     def __assert_supported_key(self, key: str) -> None:
         """Reject config writes for removed keys."""
         normalized_key = str(key).strip()
+        if normalized_key == "accumulation_available":
+            raise ValueError("accumulation_available is server-owned and read-only.")
         if is_removed_config_key(normalized_key):
             raise ValueError(build_removed_config_key_message(normalized_key))
 
@@ -497,9 +510,14 @@ class Config:
         Returns:
             True if the operation succeeded
         """
-        lock = await self._acquire_write_lock()
-        async with lock:
-            return await self._set_locked(key, value)
+        from service.accumulation_config import configuration_mode_boundary
+
+        async with configuration_mode_boundary(
+            self.snapshot(), {key: value}
+        ) as admitted:
+            lock = await self._acquire_write_lock()
+            async with lock:
+                return await self._set_locked(key, value, mode_change_admitted=admitted)
 
     async def _set_locked(
         self,
@@ -507,9 +525,15 @@ class Config:
         value: Any,
         *,
         notify_subscribers: bool = True,
+        mode_change_admitted: bool = False,
     ) -> bool:
         """Persist one config key. The caller must hold the write lock."""
         action = self.__build_update_action(key, value)
+        from service.accumulation_config import validate_accumulation_configuration
+
+        await validate_accumulation_configuration(
+            self.snapshot(), [action], mode_change_admitted=mode_change_admitted
+        )
 
         async with in_transaction() as conn:
             if action.persist:
@@ -554,24 +578,35 @@ class Config:
         Returns:
             True if the operation succeeded
         """
-        lock = await self._acquire_write_lock()
-        async with lock:
-            return await self._batch_set_locked(
-                updates,
-                notify_subscribers=notify_subscribers,
-            )
+        from service.accumulation_config import configuration_mode_boundary
+
+        async with configuration_mode_boundary(self.snapshot(), updates) as admitted:
+            lock = await self._acquire_write_lock()
+            async with lock:
+                return await self._batch_set_locked(
+                    updates,
+                    notify_subscribers=notify_subscribers,
+                    mode_change_admitted=admitted,
+                )
 
     async def _batch_set_locked(
         self,
         updates: dict[str, Any],
         *,
         notify_subscribers: bool = True,
+        mode_change_admitted: bool = False,
     ) -> bool:
         """Persist several config keys. The caller must hold the write lock."""
         actions: list[ConfigUpdateAction] = []
         for key, raw_value in updates.items():
             self.__assert_supported_key(key)
             actions.append(self.__build_update_action(key, raw_value))
+
+        from service.accumulation_config import validate_accumulation_configuration
+
+        await validate_accumulation_configuration(
+            self.snapshot(), actions, mode_change_admitted=mode_change_admitted
+        )
 
         async with in_transaction() as conn:
             for action in actions:

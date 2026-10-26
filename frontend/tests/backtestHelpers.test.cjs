@@ -95,3 +95,14 @@ test('normalizeBacktestTimestampSeconds accepts milliseconds and seconds', () =>
     assert.equal(normalizeBacktestTimestampSeconds(1_700_000_000_000), 1_700_000_000)
     assert.equal(normalizeBacktestTimestampSeconds(1_700_000_000), 1_700_000_000)
 })
+
+test('accumulation uses the normal backtest request without DCA exits or candle pasting', () => {
+    const form = createDefaultBacktestForm()
+    Object.assign(form, { tradeMode: 'accumulation', accumulationVersionId: 17, timeframe: '4h' })
+    const request = buildBacktestRequest(form, [1000, 2000])
+    assert.deepEqual(request, {
+        symbol: 'BTC/USDT', trade_mode: 'accumulation', strategy_version_id: 17,
+        timeframe: '4h', start_date: 1000, end_date: 2000, funding: '1000',
+        fee: 0.001, slippage_bps: '20', fixed_interval_candles: 24,
+    })
+})

@@ -3,6 +3,7 @@ import { computed, type ComputedRef, type Ref } from 'vue'
 import { getTaskPresentation, getTasksForMode } from '../control-center/taskRegistry'
 import type {
     ControlCenterConfigTrustKind,
+    ControlCenterTaskPresentation,
     ControlCenterConfigTrustState,
     ControlCenterReadiness,
     ControlCenterRouteState,
@@ -50,7 +51,7 @@ export function useControlCenterMissionState(
             options.viewState.value.kind === 'rescue'
         )
     })
-    const advancedSections = computed(() => {
+    const advancedSections = computed<Array<Pick<ControlCenterTaskPresentation, 'target' | 'title' | 'summary' | 'sectionId'>>>(() => {
         const expertDomains = getTasksForMode('advanced').filter((task) =>
             ['filter', 'autopilot', 'indicator'].includes(task.target),
         )

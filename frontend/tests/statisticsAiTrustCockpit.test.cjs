@@ -58,8 +58,8 @@ test('analytics store exposes AI trust states and calibration rows', () => {
 })
 
 test('AI Trust Cockpit tables use the shared statistics pagination rhythm', () => {
-    assert.match(statisticsSource, /const recentPredictionsPagination = reactive<PaginationProps>/)
-    assert.match(statisticsSource, /const badEntryReviewPagination = reactive<PaginationProps>/)
+    assert.match(statisticsSource, /const recentPredictionsPagination = shallowReactive<PaginationProps>/)
+    assert.match(statisticsSource, /const badEntryReviewPagination = shallowReactive<PaginationProps>/)
     assert.match(statisticsSource, /:pagination="recentPredictionsPagination"/)
     assert.match(statisticsSource, /:pagination="badEntryReviewPagination"/)
     assert.match(statisticsSource, /@update:page="handleRecentPredictionsPageChange"/)

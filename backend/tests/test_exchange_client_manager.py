@@ -237,3 +237,76 @@ async def test_init_bybit_exchange_acknowledges_fetch_order_contract(
         "fetchOrder": {"acknowledged": True},
         "adjustForTimeDifference": True,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("supported", [True, False])
+async def test_accumulation_preflighted_orders_use_demo_client_without_live_fallback(
+    monkeypatch: pytest.MonkeyPatch, supported: bool
+) -> None:
+    from service.exchange import Exchange
+
+    clients = []
+
+    class DemoExchange(_ConfigurableExchange):
+        def __init__(self, params):
+            super().__init__(params)
+            self.calls = []
+            clients.append(self)
+
+        def enableDemoTrading(self, enabled):
+            if not supported:
+                raise NotImplementedError("Demo unavailable")
+            super().enableDemoTrading(enabled)
+
+        async def create_order(self, symbol, kind, side, amount, price, params):
+            assert self.demo_enabled and not self.sandbox_enabled
+            self.calls.append(side)
+            return {"id": f"demo-{side}"}
+
+        async def create_market_sell_order(self, symbol, amount, params):
+            return await self.create_order(
+                symbol, "market", "sell", amount, None, params
+            )
+
+    monkeypatch.setattr("service.exchange_client_manager.ccxt.binance", DemoExchange)
+    exchange = Exchange()
+    config = {
+        "exchange": "binance",
+        "market": "spot",
+        "dry_run": True,
+        "key": "demo-key",
+        "secret": "test-secret-demo",
+    }
+    try:
+        if not supported:
+            with pytest.raises(ValueError, match="could not enable demo trading"):
+                await exchange.submit_preflighted_spot_buy(
+                    symbol="BTC/USDC",
+                    amount="0.001",
+                    price="60000",
+                    client_order_id="mw-demo-order",
+                    config=config,
+                )
+            assert len(clients) == 1 and not clients[0].calls
+            return
+        assert (
+            await exchange.submit_preflighted_spot_buy(
+                symbol="BTC/USDC",
+                amount="0.001",
+                price="60000",
+                client_order_id="mw-demo-order",
+                config=config,
+            )
+        )["id"] == "demo-buy"
+        assert (
+            await exchange.submit_preflighted_spot_sell(
+                symbol="BTC/USDC",
+                amount="0.001",
+                client_order_id="mw-demo-sale",
+                config=config,
+            )
+        )["id"] == "demo-sell"
+        assert len(clients) == 1 and clients[0].calls == ["buy", "sell"]
+    finally:
+        await exchange.close()

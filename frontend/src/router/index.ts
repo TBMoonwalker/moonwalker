@@ -56,6 +56,9 @@ export function createAppRouter(
     })
 
     router.beforeEach(async (to) => {
+        if (to.name === 'controlCenter' && to.query.mode === 'utilities' && to.hash === '#accumulation-controls') {
+            return { name: 'trades', query: typeof to.query.symbol === 'string' ? { symbol: to.query.symbol } : {} }
+        }
         const snapshotStore = useSharedConfigSnapshot()
         try {
             await snapshotStore.ensureLoaded(false)

@@ -1,5 +1,6 @@
 <template>
     <div class="chart-wrap performance-chart">
+        <p v-if="historyIsPartial">Realized history covers Dynamic DCA only; accumulation history has incomplete evidence.</p>
         <n-spin :show="isLoading" size="small">
             <v-chart v-if="!isLoading && !showNoProfit" class="chart" :option="option"
                 autoresize />
@@ -11,7 +12,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { useProfitDatastore } from '../stores/profit'
 import { storeToRefs } from 'pinia'
@@ -29,9 +30,10 @@ const { scheme } = storeToRefs(themeStore)
 const profit_store = useProfitDatastore()
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
+const historyIsPartial = computed(() => (statistics_data.data.value as any)?.profit_history_scope === 'dynamic_dca_only')
 const profit_store_refs = storeToRefs(profit_store)
 const chart_data = ref({
-    labels: [],
+    labels: [] as string[],
     datasets: [{}]
 })
 const option = ref({})

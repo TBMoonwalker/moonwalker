@@ -6,6 +6,7 @@ from typing import Any
 
 import helper
 import httpx
+from service.accumulation_entry import AccumulationEntryService
 from service.autopilot import Autopilot
 from service.config import resolve_history_lookback_days
 from service.data import Data
@@ -64,6 +65,7 @@ class SignalPlugin:
         self.indicators = Indicators()
         self.statistic = Statistic()
         self.config = None
+        self.accumulation_entry: AccumulationEntryService | None = None
         self.status = True
         self.watcher_queue = watcher_queue
         self._max_bots_blocked = False
@@ -482,6 +484,20 @@ class SignalPlugin:
             None
         """
         self.config = config
+        if config.get("trade_mode") == "accumulation":
+            if self.accumulation_entry is None:
+                raise ValueError("Accumulation entry is not enabled in this release.")
+            watched: set[str] = set()
+            while self.status:
+                results = await self.accumulation_entry.asap()
+                symbols = {
+                    row.symbol for row in results if row.reason != "WAIT_CAPACITY"
+                } - watched
+                if symbols:
+                    await self.watcher_queue.put(sorted(symbols))
+                    watched.update(symbols)
+                await asyncio.sleep(5)
+            return
         self._max_bots_log_interval_sec = resolve_max_bots_log_interval(self.config)
         await self.__prepare_runtime_settings()
 

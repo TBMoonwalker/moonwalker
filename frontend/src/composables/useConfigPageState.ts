@@ -211,6 +211,8 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
     const dca = ref<DcaConfigSection>({
         enabled: false,
         trade_mode: TRADE_MODE_DYNAMIC_DCA,
+        accumulation_strategy_version_id: null,
+        accumulation_available: false,
         strategy: null,
         timeframe: null,
         trailing_tp: null,

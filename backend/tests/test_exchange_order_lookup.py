@@ -356,3 +356,107 @@ def test_fallback_status_coerces_missing_cost_to_zero() -> None:
 
     assert parsed["ordersize"] is not None
     assert parsed["ordersize"] == 0.0
+
+
+@pytest.mark.parametrize("side", ["buy", "sell"])
+def test_shared_report_keeps_partial_execution_distinct_from_request(side):
+    from service.accumulation_fill import AccumulationFill
+    from service.exchange_types import ExchangeOrderReport
+
+    order = {
+        "id": "partial-1",
+        "symbol": "BTC/USDC",
+        "side": side,
+        "status": "canceled",
+        "timestamp": 1000,
+        "amount": "1",
+        "filled": "0.400000000000000001",
+        "cost": "40.0000000000000001",
+        "price": "100",
+        "fees": [{"currency": "BTC", "cost": "0.000000000000000001"}],
+    }
+    report = ExchangeOrderReport.from_order(order)
+    legacy = AccumulationFill.from_order(order)
+    assert isinstance(legacy, ExchangeOrderReport)
+    assert report.requested_quantity == "1"
+    assert report.filled == legacy.filled == "0.400000000000000001"
+    assert report.quote_cost == legacy.quote_cost == "40.0000000000000001"
+    assert report.fees == legacy.fees == {"BTC": "0.000000000000000001"}
+    parsed = build_parsed_order_status(order, None)
+    assert parsed["amount"] == pytest.approx(0.4)
+    assert parsed["total_amount"] == pytest.approx(0.4)
+
+
+def test_requested_amount_in_acknowledgement_is_not_execution_evidence():
+    order = {
+        "id": "ack-only",
+        "symbol": "BTC/USDC",
+        "side": "buy",
+        "timestamp": 1000,
+        "amount": "1",
+        "price": "100",
+        "cost": None,
+    }
+    parsed = build_parsed_order_status(order, None)
+    assert parsed["amount"] == 0
+    assert parsed["total_amount"] == 0
+
+
+def test_shared_execution_report_preserves_currencies_and_missing_fee_evidence():
+    from service.exchange_types import ExchangeOrderReport
+
+    order = {
+        "id": "fill-1",
+        "symbol": "BTC/USDC",
+        "side": "buy",
+        "status": "closed",
+        "timestamp": 1000,
+        "filled": "0.1",
+        "cost": "10",
+        "fees": [],
+    }
+    report = ExchangeOrderReport.from_order(order)
+    assert not report.fees_complete
+    assert report.requested_quantity is None
+    report = ExchangeOrderReport.from_order(
+        {
+            **order,
+            "fees": [
+                {"currency": "BTC", "cost": "0.0001"},
+                {"currency": "USDC", "cost": "0.01"},
+                {"currency": "BNB", "cost": "0.001"},
+            ],
+        }
+    )
+    assert report.fees_complete
+    assert report.fees == {"BTC": "0.0001", "USDC": "0.01", "BNB": "0.001"}
+
+    zero = ExchangeOrderReport.from_order(
+        {**order, "fee": {"cost": 0, "currency": None}}
+    )
+    assert zero.fees_complete and zero.fees == {}
+
+
+def test_shared_private_fill_aggregation_keeps_exact_fees_and_rejects_duplicates():
+    from service.exchange_helpers import aggregate_matched_trades
+
+    fill = {
+        "id": "fill-1",
+        "order": "order-1",
+        "symbol": "BTC/USDC",
+        "side": "buy",
+        "amount": "0.100000000000000001",
+        "cost": "10.0000000000000001",
+        "price": "100",
+        "timestamp": 1000,
+        "fee": {"currency": "BTC", "cost": "0.000000000000000001"},
+    }
+    aggregate = aggregate_matched_trades([fill, {**fill, "id": "fill-2"}], "BTC/USDC")
+    report = aggregate["execution_report"]
+    assert report.filled == "0.200000000000000002"
+    assert report.quote_cost == "20.0000000000000002"
+    assert report.fees == {"BTC": "0.000000000000000002"}
+    with pytest.raises(ValueError, match="Duplicate execution identity"):
+        aggregate_matched_trades([fill, fill], "BTC/USDC")
+    with pytest.raises(ValueError, match="execution identity"):
+        aggregate_matched_trades([{**fill, "id": None}], "BTC/USDC")

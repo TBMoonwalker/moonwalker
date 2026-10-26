@@ -20,6 +20,8 @@ from litestar import Litestar
 from litestar.config.compression import CompressionConfig
 from litestar.config.cors import CORSConfig
 from litestar.middleware import DefineMiddleware
+from litestar.types import ASGIApp, Receive, Scope, Send
+from service.accumulation_runtime import AccumulationRuntime, build_accumulation_runtime
 from service.ai_provider import ai_provider_client
 from service.ai_trust import recover_pending_outcome_attributions
 from service.ai_work_queue import ai_work_queue
@@ -40,7 +42,7 @@ from service.origin_policy import (
     parse_allowed_hosts,
     parse_allowed_origins,
 )
-from service.redis import redis_client, start_redis, stop_redis
+from service.redis import redis_client, start_redis
 from service.replay_repair_queue import replay_repair_queue
 from service.runtime_services import (
     RuntimeServices,
@@ -67,6 +69,7 @@ class RuntimeState:
     market_cap_rank_service: CoinMarketCapRankService | None = None
     controller_services: RuntimeServices | None = None
     placement_orders: Orders | None = None
+    accumulation_runtime: AccumulationRuntime | None = None
     watcher: Watcher | None = None
     housekeeper: Housekeeper | None = None
     green_phase_service: GreenPhaseService | None = None
@@ -77,6 +80,64 @@ class RuntimeState:
 
 
 runtime_state = RuntimeState()
+
+
+def _repair_only() -> bool:
+    runtime = runtime_state.accumulation_runtime
+    return (
+        runtime is not None
+        and getattr(runtime, "repair_ready", False)
+        and not runtime.ready
+    )
+
+
+class AccumulationRepairOnlyMiddleware:
+    """Keep HTTP recovery access separate from every trading and config route."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if not _repair_only():
+            await self.app(scope, receive, send)
+            return
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1013})
+            return
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path, method = scope["path"], scope.get("method", "")
+        reads = {
+            "/",
+            "/index.html",
+            "/config/all",
+            "/accumulation/activations",
+            "/accumulation/activation",
+            "/accumulation/strategies",
+        }
+        if (
+            method in {"GET", "HEAD"}
+            and (path in reads or path.startswith(("/static/", "/assets/")))
+            or method == "POST"
+            and path == "/accumulation/repair"
+            or method == "OPTIONS"
+        ):
+            await self.app(scope, receive, send)
+            return
+        body = b'{"error":"Recovery only: reconcile quarantined accumulation orders, then restart. Trading and configuration changes are unavailable.","code":"recovery_only"}'
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 503 if method in {"GET", "HEAD"} else 409,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"cache-control", b"no-store"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
 
 
 class RuntimeShutdownError(RuntimeError):
@@ -145,6 +206,13 @@ async def startup() -> None:
         )
 
         runtime_state.placement_orders = Orders()
+        runtime_state.accumulation_runtime = build_accumulation_runtime(
+            config_service.snapshot
+        )
+        if runtime_state.accumulation_runtime is not None:
+            runtime_state.placement_orders.accumulation_recovery = (
+                runtime_state.accumulation_runtime.recovery.reconcile
+            )
         reconciliation = await _run_startup_step(
             "exchange placement reconciliation",
             lambda: runtime_state.database.run_with_context(
@@ -152,11 +220,33 @@ async def startup() -> None:
                 config_service.snapshot(),
             ),
         )
-        if not reconciliation.ready:
-            operations = ", ".join(reconciliation.action_required)
+        accumulation_ready = True
+        if runtime_state.accumulation_runtime is not None:
+            accumulation_ready = await _run_startup_step(
+                "accumulation runtime recovery",
+                lambda: runtime_state.database.run_with_context(
+                    runtime_state.accumulation_runtime.startup
+                ),
+            )
+        if not reconciliation.ready or not accumulation_ready:
+            if _repair_only():
+                runtime_state.controller_services = build_runtime_services(
+                    orders=runtime_state.placement_orders,
+                    accumulation=runtime_state.accumulation_runtime,
+                )
+                activate_runtime_services(runtime_state.controller_services)
+                logging.error(
+                    "Serving accumulation recovery only; all trading workers remain stopped. Restart after explicit repair."
+                )
+                return
+            if not reconciliation.ready:
+                operations = ", ".join(reconciliation.action_required)
+                raise RuntimeError(
+                    "Exchange placement reconciliation requires operator action "
+                    f"before trading can start: {operations}"
+                )
             raise RuntimeError(
-                "Exchange placement reconciliation requires operator action "
-                f"before trading can start: {operations}"
+                "Accumulation recovery requires operator action before trading starts."
             )
 
         runtime_state.watcher = Watcher()
@@ -195,6 +285,7 @@ async def startup() -> None:
         assert runtime_state.placement_orders is not None
         runtime_state.controller_services = build_runtime_services(
             orders=runtime_state.placement_orders,
+            accumulation=runtime_state.accumulation_runtime,
             delisting_protection=runtime_state.delisting_protection_service,
             statistics_balance_cache_ttl_seconds=(
                 statistics_controller.STATISTICS_BALANCE_CACHE_TTL_SECONDS
@@ -203,6 +294,10 @@ async def startup() -> None:
         activate_runtime_services(runtime_state.controller_services)
 
         runtime_state.signal_plugin = Signal(runtime_state.watcher_queue)
+        if runtime_state.accumulation_runtime is not None:
+            runtime_state.signal_plugin.accumulation_entry = (
+                runtime_state.accumulation_runtime.entry
+            )
         await _run_startup_step(
             "signal plugin init",
             lambda: runtime_state.database.run_with_context(
@@ -258,11 +353,19 @@ async def shutdown() -> None:
         await attempt("signal plugin", runtime_state.signal_plugin.shutdown)
         runtime_state.signal_plugin = None
 
+    if runtime_state.accumulation_runtime is not None:
+        runtime_state.accumulation_runtime.request_stop()
     for task in runtime_state.background_tasks:
         task.cancel()
     if runtime_state.background_tasks:
         await asyncio.gather(*runtime_state.background_tasks, return_exceptions=True)
     runtime_state.background_tasks.clear()
+
+    if runtime_state.accumulation_runtime is not None:
+        await attempt(
+            "accumulation runtime", runtime_state.accumulation_runtime.shutdown
+        )
+        runtime_state.accumulation_runtime = None
 
     if runtime_state.watcher is not None:
         await attempt("watcher", runtime_state.watcher.shutdown)
@@ -312,13 +415,8 @@ async def shutdown() -> None:
     await attempt("AI provider", ai_provider_client.close)
     await attempt("Redis client", redis_client.aclose)
 
-    if runtime_state.redis_proc is not None:
-        redis_proc = runtime_state.redis_proc
-        await attempt(
-            "Redis process",
-            lambda: asyncio.to_thread(stop_redis, redis_proc),
-        )
-        runtime_state.redis_proc = None
+    # Close this instance's client above, but leave the shared server running.
+    runtime_state.redis_proc = None
     runtime_state.watcher_queue = None
 
     if failures:
@@ -383,6 +481,11 @@ async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
     """Own runtime tasks and services for exactly one application lifespan."""
     try:
         await startup()
+        if _repair_only():
+            # The HTTP server owns the repair session; no signal, watcher,
+            # command worker, Autopilot or liquidation task is started.
+            yield
+            return
         await ai_provider_client.start()
         assert runtime_state.database is not None
         assert runtime_state.watcher is not None
@@ -450,11 +553,26 @@ async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
                         name="moonwalker:configuration-listener",
                     )
                 )
+            if runtime_state.accumulation_runtime is not None:
+                accumulation_runtime = runtime_state.accumulation_runtime
+                runtime_state.background_tasks.append(
+                    task_group.create_task(
+                        _run_critical_runtime_task(
+                            "accumulation",
+                            lambda: runtime_state.database.run_with_context(
+                                accumulation_runtime.run
+                            ),
+                        ),
+                        name="moonwalker:accumulation",
+                    )
+                )
             try:
                 yield
             finally:
                 await ai_work_queue.stop()
                 await replay_repair_queue.stop()
+                if runtime_state.accumulation_runtime is not None:
+                    runtime_state.accumulation_runtime.request_stop()
                 for task in runtime_state.background_tasks:
                     task.cancel()
     finally:
@@ -469,6 +587,7 @@ app = Litestar(
         allow_headers=["*"],
     ),
     middleware=[
+        DefineMiddleware(AccumulationRepairOnlyMiddleware),
         DefineMiddleware(
             TrustedLanHttpMiddleware,
             allowed_origins=ALLOWED_ORIGINS,

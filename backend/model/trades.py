@@ -11,6 +11,7 @@ class Trades(Model):
     timestamp = fields.TextField()
     ordersize = fields.FloatField()
     fee = fields.FloatField()
+    cost_includes_fees = fields.BooleanField(null=True)
     precision = fields.IntField(null=True)
     amount = fields.FloatField()
     amount_fee = fields.FloatField()

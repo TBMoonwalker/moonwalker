@@ -127,7 +127,7 @@ export function useConfigBackupRestore(
         backupFileInputRef.value?.click()
     }
 
-    function bindBackupFileInput(element: Element | null): void {
+    function bindBackupFileInput(element: Element | import('vue').ComponentPublicInstance | null): void {
         backupFileInputRef.value =
             typeof HTMLInputElement !== 'undefined' &&
             element instanceof HTMLInputElement

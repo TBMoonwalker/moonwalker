@@ -1,9 +1,16 @@
-import { ref } from 'vue'
+import { ref, type Ref, type ComponentPublicInstance } from 'vue'
 
 import { trackUiEvent } from '../utils/uiTelemetry'
 
 export interface ConfigSectionFormExpose {
     validate: () => Promise<boolean>
+}
+
+export function bindConfigSectionForm(form: Ref<ConfigSectionFormExpose | null>) {
+    return (instance: Element | ComponentPublicInstance | null): void => {
+        form.value = instance && 'validate' in instance && typeof instance.validate === 'function'
+            ? instance as ConfigSectionFormExpose : null
+    }
 }
 
 interface MessageApiLike {

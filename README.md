@@ -6,20 +6,25 @@
 
 ## Summary
 Moonwalker is a self-hosted cryptocurrency trading bot with a Litestar backend,
-Vue dashboard, exchange integration via CCXT/CCXT Pro, and support for both
-signal-driven entries and dynamic DCA management. It also includes an
-Autopilot Memory cockpit that surfaces favored and cooling symbols, suggested
+Vue dashboard, exchange integration via CCXT/CCXT Pro, and support for
+signal-driven entries, Dynamic DCA management, and accumulation with manual
+exits. It also includes an Autopilot Memory cockpit that surfaces favored and cooling symbols, suggested
 base orders, and plain-language trust signals in the Control Center.
 
 ## Trade Mode and Safety Orders
 
-`dynamic_dca` is the only supported trade mode. Expert safeguards offers three
-safety-order sizing modes: Legacy factors, Recovery shadow, and Recovery target.
-See [safety-order sizing](docs/dynamic-so.md) for their behavior, budget limits,
-and the policy retained by existing deals.
+Choose **Dynamic DCA** for deals with safety orders and configured exits, or
+**Accumulation** to retain selected spot coins until an explicit sale. ASAP opens
+an accumulation holding with the configured base order; its pinned strategy
+controls later purchases. CSV can adopt coins already owned. See the
+[accumulation operating guide](docs/howto-operate-accumulation.md) or try the
+[backtest tutorial](docs/tutorial-accumulation-backtest.md) without placing orders.
 
-Older stored trade-mode settings and backups are normalized during startup and
-restore. Sidestep is no longer a supported runtime mode.
+Dynamic DCA's Expert safeguards offers three safety-order sizing modes: Legacy
+factors, Recovery shadow, and Recovery target. See
+[safety-order sizing](docs/dynamic-so.md) for behavior and budget limits.
+Sidestep is no longer supported. Legacy Sidestep values are normalized during
+startup and restore; valid accumulation records retain their lifecycle.
 
 ## Disclaimer
 **Moonwalker is meant to be used for educational purposes only. Use with real funds at your own risk**
@@ -51,6 +56,17 @@ The script builds the Vue frontend, copies assets into the backend, creates a
 Python venv, installs backend deps, and starts the Litestar app in the
 background. Logs go to `run.log`.
 
+On macOS, startup also looks for the required Python in Homebrew when the
+`python3` on PATH is missing or unsupported. It checks Homebrew on PATH and
+the standard Apple Silicon and Intel locations. Install the runtime with
+`brew install python@3.14` if it is missing. Startup selects the interpreter
+without changing your shell PATH or installing Python automatically.
+
+Startup and CI also discover Homebrew's `node@24` when Node.js or npm on PATH
+is missing or unsupported. They select its Node.js and npm for the current
+process and its builds; your shell configuration stays unchanged. Install
+the runtime with `brew install node@24` if needed.
+
 By default the app listens on port `8130`. The backend runtime is intentionally
 single-process because the trading engine uses shared in-memory runtime state.
 
@@ -69,6 +85,9 @@ You also need to install the ta-lib library for your OS. Please see: https://ta-
 
 ## Documentation
 - [Documentation index](docs/README.md)
+- [Accumulation: setup, operation and manual exits](docs/howto-operate-accumulation.md)
+- [Accumulation recovery](docs/howto-recover-accumulation.md)
+- [Reviewed dependency updates](docs/howto-update-dependencies.md)
 - Release notes: `CHANGELOG.md`
 - Current tracked release version: `VERSION`
 - Configuration and full key reference: `docs/configuration.md`

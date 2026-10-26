@@ -43,13 +43,20 @@ vi.mock('../src/control-center/configSnapshotStore', () => ({
     }),
 }))
 
-vi.mock('../src/composables/useTradeTableFeed', () => ({
+vi.mock('../src/composables/useAccumulationPanel', async () => {
+    const { ref } = await import('vue')
+    return { useAccumulationPanel: () => ({ rows: ref([]), fresh: ref(false), visible: ref(false), pendingRequest: ref(null) }) }
+})
+
+vi.mock('../src/composables/useTradeTableFeed', async () => {
+    const { ref } = await import('vue')
+    return ({
     useTradeTableFeed: () => ({
-        rows: { value: testState.rows },
+        rows: ref(testState.rows),
         isTableLoading: { value: false },
         tableEmptyText: { value: 'No open trades' },
     }),
-}))
+}) })
 
 vi.mock('../src/composables/useViewport', () => ({
     useViewport: () => ({
@@ -222,16 +229,18 @@ function openTrade(): OpenTradeRow {
     }
 }
 
+const tradeStubs = {
+    NDataTable: DataTableStub,
+    DataTable: DataTableStub,
+    NModal: ModalStub,
+    Modal: ModalStub,
+    OpenTradeExpandedRow: ExpandedRowStub,
+}
+
 function mountOpenTrades() {
     return mount(OpenTrades, {
         global: {
-            stubs: {
-                NDataTable: DataTableStub,
-                DataTable: DataTableStub,
-                NModal: ModalStub,
-                Modal: ModalStub,
-                OpenTradeExpandedRow: ExpandedRowStub,
-            },
+            stubs: tradeStubs,
         },
     })
 }
@@ -242,6 +251,20 @@ describe('OpenTrades mobile replay interaction', () => {
         testState.rows = [openTrade()]
         loadConfiguredMinTimeframeMock.mockReset()
         loadConfiguredMinTimeframeMock.mockResolvedValue(undefined)
+    })
+
+    it('opens accumulation details from its action without toggling them closed', async () => {
+        const row = { ...openTrade(), lifecycle_mode: 'accumulation' }
+        testState.rows = [row]
+        const wrapper = mountOpenTrades()
+        const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<Record<string, unknown>>
+        const render = columns.find(column => column.key === 'action')!.render as (row: OpenTradeRow) => VNode
+        const actions = mount(defineComponent({ render: () => render(row) }), { global: { stubs: tradeStubs } })
+        expect(actions.text()).toBe('SellMore')
+        await actions.get('button[aria-label="Sell SEI/USDC"]').trigger('click')
+        expect(wrapper.find('[data-test="mobile-trade-details"]').exists()).toBe(true)
+        await actions.get('button[aria-label="Sell SEI/USDC"]').trigger('click')
+        expect(wrapper.find('[data-test="mobile-trade-details"]').exists()).toBe(true)
     })
 
     it('omits the expand column and opens replay details in a modal', async () => {
@@ -262,7 +285,7 @@ describe('OpenTrades mobile replay interaction', () => {
         expect(wrapper.get('[data-test="mobile-trade-details"]').attributes('role')).toBe(
             'dialog',
         )
-        expect(wrapper.get('[data-test="expanded-replay"]').exists()).toBe(true)
+        expect(wrapper.find('[data-test="expanded-replay"]').exists()).toBe(true)
     })
 
     it('keeps the expand column and inline replay on larger viewports', async () => {
@@ -282,6 +305,6 @@ describe('OpenTrades mobile replay interaction', () => {
         expect(wrapper.find('[data-test="mobile-trade-details"]').exists()).toBe(
             false,
         )
-        expect(wrapper.get('[data-test="expanded-replay"]').exists()).toBe(true)
+        expect(wrapper.find('[data-test="expanded-replay"]').exists()).toBe(true)
     })
 })

@@ -30,6 +30,9 @@ export function resolveControlCenterNavigation(
     },
 ): Record<string, unknown> | true {
     if (!options.loadError && !options.readiness.complete) {
+        if (to.name === 'controlCenter' && to.query.mode === 'strategy-builder' &&
+            options.readiness.blockers.length > 0 &&
+            options.readiness.blockers.every(blocker => blocker.key === 'accumulation_strategy_version_id')) return true
         const nextMode = options.readiness.nextMode
         const rawTarget = Array.isArray(to.query.target)
             ? to.query.target[0]

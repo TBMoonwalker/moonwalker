@@ -7,6 +7,7 @@ from typing import Any
 
 import helper
 import model
+from service.accumulation_entry import AccumulationEntryService
 from service.config import resolve_history_lookback_days, resolve_timeframe
 from service.csv_signal_import import CSVSignalImportService
 from service.data import Data
@@ -28,6 +29,7 @@ class SignalPlugin:
         self.import_service = CSVSignalImportService()
         self.data = Data(persist_exchange=True)
         self._import_finished = False
+        self.accumulation_entry: AccumulationEntryService | None = None
 
     async def _load_csv_content(self, source: str) -> str:
         """Load CSV content from URL, filesystem path, or inline payload."""
@@ -82,7 +84,10 @@ class SignalPlugin:
     async def _import_once(self) -> bool:
         """Import trades once and return True when no further retries are needed."""
         open_trade_count = await model.OpenTrades.all().count()
-        if open_trade_count > 0:
+        accumulation = self.config.get("trade_mode") == "accumulation"
+        if accumulation and self.accumulation_entry is None:
+            raise ValueError("Accumulation entry is not enabled in this release.")
+        if open_trade_count > 0 and not accumulation:
             logging.info(
                 "Skipping csv_signal import: %s open trades already exist.",
                 open_trade_count,
@@ -102,6 +107,12 @@ class SignalPlugin:
             )
 
         csv_content = await self._load_csv_content(str(csv_source))
+        if accumulation and self.accumulation_entry is not None:
+            results = await self.accumulation_entry.csv(csv_content)
+            symbols = [row.symbol for row in results if row.reason != "WAIT_CAPACITY"]
+            if symbols:
+                await self.watcher_queue.put(symbols)
+            return not any(row.reason == "WAIT_CAPACITY" for row in results)
         quote_currency = str(self.config.get("currency", "USDT")).upper().strip()
         parsed_rows = self.import_service._parse_csv_rows(csv_content, quote_currency)
         symbols = sorted(parsed_rows.keys())
@@ -176,4 +187,3 @@ class SignalPlugin:
         """Signal plugin loop to stop."""
         self.status = False
         await self.data.close()
-        await self.orders.close()

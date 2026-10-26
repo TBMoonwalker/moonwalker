@@ -10,6 +10,8 @@ class UnsellableTrades(Model):
     symbol = fields.CharField(max_length=50)
     deal_id = fields.CharField(max_length=36, null=True, unique=True)
     execution_history_complete = fields.BooleanField(default=False)
+    # Exact accumulation archive; generic table amounts remain display projections.
+    accumulation_inventory_json = fields.TextField(null=True)
     so_count = fields.IntField(default=0)
     profit = fields.FloatField(default=0.0)
     profit_percent = fields.FloatField(default=0.0)

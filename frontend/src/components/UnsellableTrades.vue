@@ -30,6 +30,7 @@
 
 <script setup lang="ts">
 import { computed, h, ref } from 'vue'
+import { archivedDust } from '../helpers/archivedDust'
 import { NButton } from 'naive-ui/es/button'
 import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
 import { useDialog } from 'naive-ui/es/dialog'
@@ -257,7 +258,7 @@ const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
             render: (rowData) => {
                 const [symbol] = String(rowData.symbol ?? '').split('/')
                 return renderCellStack(
-                    `${formatAssetAmount(rowData.amount)} ${symbol}`,
+                    `${archivedDust(rowData.accumulation_inventory_json)?.quantity ?? formatAssetAmount(rowData.amount)} ${symbol}`,
                 )
             },
             sorter: true,
@@ -266,7 +267,7 @@ const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
         {
             title: 'Cost',
             key: 'cost',
-            render: (rowData) => renderCellStack(formatFixed(rowData.cost)),
+            render: (rowData) => h('span', { title: String(rowData.cost) }, rowData.cost === 'Unknown' ? 'Unknown' : formatFixed(rowData.cost)),
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(sortState.value, 'cost'),
         },
@@ -275,7 +276,7 @@ const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
             key: 'profit_percent',
             render: (rowData) =>
                 renderCellStack(
-                    `${formatFixed(rowData.profit_percent)}%`,
+                    archivedDust(rowData.accumulation_inventory_json) ? 'Unsold' : `${formatFixed(rowData.profit_percent)}%`,
                     undefined,
                     'trade-cell-main profit',
                 ),

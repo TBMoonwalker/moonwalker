@@ -7,7 +7,9 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from service.accumulation_contracts import AccumulationIdentity
 from service.order_requests import normalize_order_symbol
+from service.spot_campaign_types import TradeLifecycleMode, parse_lifecycle_mode
 
 
 def _stable_revision(value: Any) -> str:
@@ -39,6 +41,8 @@ class LifecycleSnapshotIdentity:
     exposure_state: str | None
     tp_limit_order_id: str | None
     dca_policy_revision: str
+    lifecycle_mode: str = TradeLifecycleMode.CLASSIC_DCA.value
+    accumulation_identity: AccumulationIdentity | None = None
 
     @classmethod
     def from_trade(
@@ -68,6 +72,8 @@ class LifecycleSnapshotIdentity:
             exposure_state=_optional_string(trade.get("exposure_state")),
             tp_limit_order_id=_optional_string(trade.get("tp_limit_order_id")),
             dca_policy_revision=_stable_revision(policy_state),
+            lifecycle_mode=parse_lifecycle_mode(trade.get("lifecycle_mode")).value,
+            accumulation_identity=_accumulation_identity(trade),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -87,7 +93,20 @@ class LifecycleSnapshotIdentity:
             exposure_state=_optional_string(payload.get("exposure_state")),
             tp_limit_order_id=_optional_string(payload.get("tp_limit_order_id")),
             dca_policy_revision=str(payload.get("dca_policy_revision") or ""),
+            lifecycle_mode=parse_lifecycle_mode(payload.get("lifecycle_mode")).value,
+            accumulation_identity=_accumulation_identity(payload),
         )
+
+
+def _accumulation_identity(payload: dict[str, Any]) -> AccumulationIdentity | None:
+    """Require complete accumulation identity while accepting old DCA snapshots."""
+    mode = parse_lifecycle_mode(payload.get("lifecycle_mode"))
+    identity = payload.get("accumulation_identity")
+    if mode == TradeLifecycleMode.ACCUMULATION:
+        return AccumulationIdentity.from_dict(identity)
+    if identity is not None:
+        raise ValueError("Accumulation identity requires accumulation lifecycle mode.")
+    return None
 
 
 def _optional_string(value: Any) -> str | None:

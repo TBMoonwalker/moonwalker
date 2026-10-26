@@ -8,7 +8,6 @@ import {
     toNullableConfigString,
 } from './configForm'
 import {
-    isDynamicTradeMode,
     normalizeTradeMode,
 } from './tradeLifecycle'
 
@@ -80,6 +79,8 @@ export interface ExchangeConfigSection {
 export interface DcaConfigSection {
     enabled: boolean
     trade_mode: string | null
+    accumulation_strategy_version_id?: number | null
+    accumulation_available?: boolean
     strategy: string | null
     timeframe: string | null
     trailing_tp: number | null
@@ -238,7 +239,7 @@ export function buildConfigSubmitPayload(
             : null
     const normalizedDenyList = normalizePairEntries(filter.denylist, quoteCurrency)
     const capitalBudgetBufferPct =
-        dca.enabled && isDynamicTradeMode(tradeMode)
+        dca.enabled
             ? (capital.budget_buffer_pct ?? 0)
             : 0
 
@@ -366,6 +367,7 @@ export function buildConfigSubmitPayload(
         watcher_ohlcv: serializeConfigValue(exchange.watcher_ohlcv || false, 'bool'),
         dca: serializeConfigValue(dca.enabled || false, 'bool'),
         trade_mode: serializeConfigValue(tradeMode, 'str'),
+        accumulation_strategy_version_id: serializeConfigValue(dca.accumulation_strategy_version_id ?? null, 'int'),
         dca_strategy: serializeConfigValue(toNullableConfigString(dca.strategy), 'str'),
         trailing_tp: serializeConfigValue(dca.trailing_tp || false, 'float'),
         max_bots: serializeConfigValue(dca.max_bots || false, 'int'),

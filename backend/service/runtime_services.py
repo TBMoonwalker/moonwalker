@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Generic, Literal, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
 
 from service.analytics import Analytics
 from service.backup_restore import BackupService
@@ -16,6 +16,9 @@ from service.statistic import Statistic
 from service.trade_replay_indicators import TradeReplayIndicatorService
 from service.trades import Trades
 from service.trading_controls import TradingControlsService
+
+if TYPE_CHECKING:
+    from service.accumulation_runtime import AccumulationRuntime
 
 ServiceT = TypeVar("ServiceT")
 
@@ -45,6 +48,7 @@ class RuntimeServices:
     trading_controls: TradingControlsService
     trade_replay_indicators: TradeReplayIndicatorService
     delisting_protection: DelistingProtectionService
+    accumulation: AccumulationRuntime | None = None
 
     async def shutdown(self) -> None:
         """Close clients held by controller-facing services."""
@@ -71,6 +75,7 @@ def build_runtime_services(
     orders: Orders | None = None,
     delisting_protection: DelistingProtectionService | None = None,
     statistics_balance_cache_ttl_seconds: float = 5.0,
+    accumulation: AccumulationRuntime | None = None,
 ) -> RuntimeServices:
     """Build one internally shared controller service graph."""
     orders_service = orders or Orders()
@@ -98,6 +103,7 @@ def build_runtime_services(
         delisting_protection=(
             delisting_protection or DelistingProtectionService.shared()
         ),
+        accumulation=accumulation,
     )
 
 
@@ -129,6 +135,11 @@ def get_runtime_services() -> RuntimeServices:
     if _compatibility_services is None:
         _compatibility_services = build_runtime_services()
     return _compatibility_services
+
+
+def get_active_accumulation_runtime() -> AccumulationRuntime | None:
+    """Resolve only the lifespan owner, never construct compatibility services."""
+    return _active_services.accumulation if _active_services is not None else None
 
 
 def reset_runtime_services_for_testing() -> None:

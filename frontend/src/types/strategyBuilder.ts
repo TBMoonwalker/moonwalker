@@ -1,6 +1,9 @@
+import type { AccumulationParameters } from './accumulation'
+
 type StrategyKind = 'builtin' | 'custom'
 
 export interface StrategySummary {
+    capabilities?: string[]
     slug: string
     name: string
     description: string
@@ -33,6 +36,7 @@ export interface StrategyIr {
     root: string
     nodes: StrategyNode[]
     connections: Array<Record<string, unknown>>
+    accumulation?: AccumulationParameters
     metadata?: Record<string, unknown>
 }
 

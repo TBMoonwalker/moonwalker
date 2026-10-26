@@ -2,6 +2,46 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.3.0.0] - 2026-10-26
+
+### Added
+- Accumulate spot holdings without automatic profit-taking. Start with an ASAP
+  base order or import an existing CSV purchase, then manage pause, resume,
+  additional orders and sales from the open-trade card. See the
+  [accumulation guide](docs/accumulation.md).
+- Build and backtest accumulation strategies in the existing Strategy Builder
+  and Backtest views, using shared indicators and the exchange candle timeframe
+  when the strategy inherits it.
+- Follow the next buy condition, current-cycle orders, recorded fees and
+  performance through the existing trade status, history and portfolio views.
+
+### Changed
+- DCA and accumulation share exchange submission, execution recovery, history
+  preparation and capital admission. Uncertain orders remain blocked pending
+  reconciliation, and mode changes retain ownership of unresolved activity.
+- Accumulation buys respond to new declines with spacing anchored to the base
+  order. Candle-close waits show indicative conditions without promising a buy.
+- macOS startup and CI discover supported Homebrew Python and Node installations.
+  Redis remains running when an instance stops so other installations can use it.
+- Updated reviewed backend and frontend dependencies, including compatible major
+  versions, and documented upgrade and recovery procedures.
+
+### Fixed
+- Preserve exact accounting through partial fills, manual sales, unsellable dust
+  transfers and fresh accumulation cycles after a holding closes.
+- Count declared CSV acquisition fees once in DCA valuation, preserve their
+  provenance across backups, and distinguish imported purchases from later fills.
+- Keep accumulation entry recovery, order logging, registration pagination and
+  WebSocket database access consistent across restarts and multiple dashboards.
+- Show the first performance sample and release chart subscriptions when their
+  views close.
+- Address dependency security advisories, including the verified Zod release,
+  certificate trust and redirect handling updates.
+
+### Removed
+- Retired accumulation dip presets and duplicate utility, strategy-selection and
+  portfolio panels; accumulation uses the existing trading and configuration views.
+
 ## [5.2.5.0] - 2026-10-13
 
 ### Fixed

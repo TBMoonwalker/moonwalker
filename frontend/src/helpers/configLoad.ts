@@ -183,8 +183,9 @@ function toStrategyConfigOptions(
 function buildTradeModeSwitchGuard(
     response: ConfigApiResponse,
 ): TradeModeSwitchGuardState {
-    const rawGuard = response.trade_mode_switch_guard
-    if (!rawGuard || typeof rawGuard !== 'object') {
+    const value = response.trade_mode_switch_guard
+    const rawGuard = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+    if (!rawGuard) {
         return {
             blocked: false,
             can_switch: true,
@@ -389,6 +390,8 @@ timezone: toNullableString(response.timezone) || defaults.clientTimezone,
         dca: {
             enabled: dcaEnabled,
             trade_mode: tradeMode,
+            accumulation_strategy_version_id: toNumberOrNull(response.accumulation_strategy_version_id),
+            accumulation_available: response.accumulation_available === true,
             strategy: toNullableString(response.dca_strategy),
             timeframe,
             trailing_tp: toNumberOrNull(response.trailing_tp),

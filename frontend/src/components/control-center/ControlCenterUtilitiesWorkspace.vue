@@ -11,8 +11,8 @@ defineProps<{
     backupIncludeTradeData: boolean
     backupRestoreSummary: string
     backupRestoreTitle: string
-    bindBackupFileInput: (element: Element | null) => void
-    bindBackupRestoreTargetRef: (element: Element | null) => void
+    bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
+    bindBackupRestoreTargetRef: (element: Element | import('vue').ComponentPublicInstance | null) => void
     canTestMonitoringTelegram: boolean
     hasSelectedBackupPayload: boolean
     monitoringTestLoading: boolean

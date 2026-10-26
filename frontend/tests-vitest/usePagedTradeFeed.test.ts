@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, ref, type Ref } from 'vue'
 
 import { fetchJson } from '../src/api/client'
 import { usePagedTradeFeed } from '../src/composables/usePagedTradeFeed'
@@ -77,7 +77,7 @@ it('discards a stale first-page result resolved after the page advanced', async 
   expect(feed.pagedRows.value).toEqual([])
 })
 
-function useFeedHarness(liveRows: ReturnType<typeof ref<number[]>>) {
+function useFeedHarness(liveRows: Ref<number[]>) {
   let feed!: ReturnType<typeof usePagedTradeFeed<number>>
   mount(
     defineComponent({

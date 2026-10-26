@@ -1,8 +1,16 @@
-"""Pure planning helpers for OHLCV history backfill."""
+"""Shared completed OHLCV windows and planning helpers for history backfill."""
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
+from weakref import WeakKeyDictionary
+
+from cachetools import TTLCache
 
 
 @dataclass(frozen=True)
@@ -131,3 +139,115 @@ def plan_boundary_fetch_starts(
         return [window.required_since]
 
     return list(dict.fromkeys(fetch_starts))
+
+
+class CompletedHistoryWindows:
+    """Coalesce source-qualified windows without sharing authenticated clients.
+
+    Only complete windows are cached. A cancelled fetch owns no detached task;
+    the next waiter retries through its own client's existing lifecycle.
+    """
+
+    def __init__(self) -> None:
+        self._rows: TTLCache[str, tuple[tuple[Any, ...], ...]] = TTLCache(
+            maxsize=20000, ttl=60, getsizeof=len
+        )
+        self._locks: dict[str, tuple[asyncio.Lock, int]] = {}
+
+    async def read(
+        self,
+        *,
+        config: dict[str, Any],
+        symbol: str,
+        timeframe: str,
+        window: HistorySyncWindow,
+        fetch: Callable[[], Awaitable[list[list[Any]]]],
+    ) -> list[list[Any]]:
+        """Return defensive rows for one exact completed window.
+
+        All configuration participates in invalidation, including venue, market,
+        sandbox and credential changes. The digest never exposes credentials.
+        Legacy unqualified ticker rows are deliberately not a cache input.
+        """
+        if not window.required_timestamps or len(window.required_timestamps) > 20000:
+            return await fetch()
+        key = hashlib.sha256(
+            json.dumps(
+                [
+                    config,
+                    symbol,
+                    timeframe,
+                    window.required_since,
+                    window.required_until,
+                    window.timeframe_ms,
+                ],
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        lock, users = self._locks.get(key, (asyncio.Lock(), 0))
+        self._locks[key] = (lock, users + 1)
+        try:
+            async with lock:
+                cached = self._rows.get(key)
+                if cached is not None:
+                    return [list(row) for row in cached]
+                rows = [
+                    row
+                    for row in await fetch()
+                    if not (
+                        isinstance(row, (list, tuple))
+                        and row
+                        and isinstance(row[0], (int, float))
+                        and not window.required_since <= row[0] <= window.required_until
+                    )
+                ]
+                # Do not normalize malformed evidence into valid market data.
+                valid = all(
+                    isinstance(row, (list, tuple))
+                    and len(row) >= 6
+                    and isinstance(row[0], (int, float))
+                    and row[0] in window.required_timestamps
+                    for row in rows
+                )
+                timestamps = {row[0] for row in rows} if valid else set()
+                if (
+                    valid
+                    and timestamps == window.required_timestamps
+                    and len(rows) == len(timestamps)
+                ):
+                    self._rows[key] = tuple(tuple(row) for row in rows)
+                return [
+                    list(row) if isinstance(row, (list, tuple)) else row for row in rows
+                ]
+        finally:
+            _, users = self._locks[key]
+            if users == 1:
+                del self._locks[key]
+            else:
+                self._locks[key] = (lock, users - 1)
+
+
+_completed_windows: WeakKeyDictionary[
+    asyncio.AbstractEventLoop, CompletedHistoryWindows
+] = WeakKeyDictionary()
+
+
+async def completed_history_window(
+    *,
+    config: dict[str, Any],
+    symbol: str,
+    timeframe: str,
+    window: HistorySyncWindow,
+    fetch: Callable[[], Awaitable[list[list[Any]]]],
+) -> list[list[Any]]:
+    """Share bounded history windows within the current application event loop."""
+    loop = asyncio.get_running_loop()
+    windows = _completed_windows.get(loop)
+    if windows is None:
+        windows = CompletedHistoryWindows()
+        _completed_windows[loop] = windows
+    return await windows.read(
+        config=config, symbol=symbol, timeframe=timeframe, window=window, fetch=fetch
+    )

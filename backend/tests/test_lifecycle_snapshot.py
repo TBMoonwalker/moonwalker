@@ -135,11 +135,24 @@ async def test_stale_buy_decision_aborts_before_any_exchange_work() -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalid_snapshot_fails_closed_before_trade_loading() -> None:
+@pytest.mark.parametrize(
+    "raw_snapshot",
+    [
+        {"execution_count": "not-an-integer"},
+        {
+            "symbol": "BTC/USDC",
+            "lifecycle_mode": "classic_dca",
+            "accumulation_identity": {},
+        },
+    ],
+)
+async def test_invalid_snapshot_fails_closed_before_trade_loading(
+    raw_snapshot: dict[str, Any],
+) -> None:
     orders = Orders()
     order = {
         "symbol": "BTC/USDC",
-        "lifecycle_snapshot": {"execution_count": "not-an-integer"},
+        "lifecycle_snapshot": raw_snapshot,
     }
 
     result = await orders.receive_buy_order(order, {"dry_run": True})

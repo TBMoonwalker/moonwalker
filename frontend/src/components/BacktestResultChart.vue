@@ -49,6 +49,7 @@ import {
     createSeriesMarkers,
     type CandlestickData,
     type LineData,
+    type Logical,
     type SeriesMarker,
     type UTCTimestamp,
 } from 'lightweight-charts'
@@ -68,6 +69,7 @@ import {
     getIndicatorPanes,
     getPriceIndicatorSeries,
     renderIndicatorSeries,
+    synchronizeTimeScales,
     withDistinctIndicatorColors,
     type IndicatorPane,
 } from '../helpers/tradingViewIndicators'
@@ -82,7 +84,7 @@ const chartRef = ref<HTMLElement | null>(null)
 const indicatorChartRefs = new Map<string, HTMLElement>()
 let chart: ReturnType<typeof createChart> | null = null
 let indicatorCharts: Array<ReturnType<typeof createChart>> = []
-let isSynchronizingTimeScale = false
+let stopTimeScaleSynchronization: (() => void) | null = null
 let activeRenderToken: object | null = null
 
 const MARKER_EDGE_GUTTER_PX = 8
@@ -109,6 +111,8 @@ function setIndicatorChartRef(key: string, element: unknown): void {
 }
 
 function removeCharts(): void {
+    stopTimeScaleSynchronization?.()
+    stopTimeScaleSynchronization = null
     activeRenderToken = null
     chartRef.value?.removeAttribute('data-backtest-chart-ready')
     if (chart) {
@@ -161,22 +165,6 @@ function chartOptions() {
     }
 }
 
-function synchronizeTimeScales(charts: Array<ReturnType<typeof createChart>>): void {
-    for (const sourceChart of charts) {
-        sourceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-            if (!range || isSynchronizingTimeScale) {
-                return
-            }
-            isSynchronizingTimeScale = true
-            for (const targetChart of charts) {
-                if (targetChart !== sourceChart) {
-                    targetChart.timeScale().setVisibleRange(range)
-                }
-            }
-            isSynchronizingTimeScale = false
-        })
-    }
-}
 
 async function renderChart(): Promise<void> {
     removeCharts()
@@ -282,7 +270,7 @@ async function renderChart(): Promise<void> {
         indicatorCharts.push(indicatorChart)
     }
 
-    synchronizeTimeScales([priceChart, ...indicatorCharts])
+    stopTimeScaleSynchronization = synchronizeTimeScales([priceChart, ...indicatorCharts])
 
     await waitForSizingFrame()
     if (activeRenderToken !== renderToken || chart !== priceChart) {
@@ -322,7 +310,7 @@ async function renderChart(): Promise<void> {
                 })
                 if (paddedRange) {
                     timeScale.setVisibleLogicalRange(paddedRange)
-                    appliedBoundaryRange = paddedRange
+                    appliedBoundaryRange = { from: paddedRange.from as Logical, to: paddedRange.to as Logical }
                  }
              }
          }

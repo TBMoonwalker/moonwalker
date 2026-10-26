@@ -20,6 +20,9 @@ from tortoise import Tortoise
 
 @pytest_asyncio.fixture
 async def strategy_db(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "service.strategy_persistence._STRATEGY_SEED_LOCK", asyncio.Lock()
+    )
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "strategy_builder.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -652,3 +655,35 @@ def test_validation_requires_explicit_comparison_value_ports() -> None:
         "explicit value1 and value2" in error["message"]
         for error in validation["blocking_errors"]
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("strategy_db")
+async def test_shared_accumulation_versions_keep_exact_pins_and_common_catalog():
+    from service.accumulation_catalog import list_accumulation_strategies
+    from service.accumulation_strategy import BUILTIN_ACCUMULATION_SLUG
+    from service.strategy_runtime import load_accumulation_strategy_version
+
+    await seed_builtin_strategies()
+    original = await model.StrategyVersion.get(
+        strategy_slug="regime_accumulation", version=1
+    )
+    before = original.ir_json
+    custom = await duplicate_strategy("regime_accumulation", "Patient shared dip")
+    assert custom["capabilities"] == ["dca", "accumulation"]
+    assert custom["validation"]["status"] == "valid"
+    pinned = await model.StrategyVersion.get(strategy_slug=custom["slug"], version=1)
+    ir = custom["ir"]
+    ir["accumulation"]["spacing_atr"] = "2"
+    updated, status = await promote_strategy_version(
+        custom["slug"], ir, custom["lock_version"]
+    )
+    assert status == 200 and updated["active_version"] == 2
+    assert (
+        await load_accumulation_strategy_version(pinned.id)
+    ).parameters.spacing_atr == "1"
+    assert (await model.StrategyVersion.get(id=original.id)).ir_json == before
+    page = await list_accumulation_strategies(limit=100)
+    assert len([row for row in page["versions"] if row["slug"] == custom["slug"]]) == 2
+    assert "regime_accumulation" in await list_strategy_options()
+    assert BUILTIN_ACCUMULATION_SLUG not in await list_strategy_options()

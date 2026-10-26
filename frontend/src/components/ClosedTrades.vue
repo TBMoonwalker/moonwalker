@@ -109,7 +109,7 @@ const {
 })
 
 function row_classes(row: ClosedTradeRow) {
-    if (Math.sign(row.profit_percent) >= 0) {
+    if (Math.sign(Number(row.profit_percent)) >= 0) {
         return 'green'
     } else {
         return 'red'

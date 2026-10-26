@@ -11,6 +11,8 @@ import {
     StopCircleOutline,
 } from '@vicons/ionicons5'
 
+import AccumulationOrderStatus from '../components/AccumulationOrderStatus.vue'
+import type { AccumulationStatus } from '../types/accumulation'
 import OpenTradeExpandedRow from '../components/OpenTradeExpandedRow.vue'
 import {
     OPEN_TRADES_MOBILE_COLUMN_KEYS,
@@ -46,6 +48,11 @@ interface UseOpenTradeColumnsOptions {
     onDealSell: (rowData: OpenTradeRow) => void
     onDealStop: (rowData: OpenTradeRow) => void
     onDealDeny: (rowData: OpenTradeRow) => void
+    onOpenTradeDetails?: (rowData: OpenTradeRow) => void
+    onAccumulationAction?: (rowData: OpenTradeRow, action: string) => void
+    accumulationRows?: Ref<AccumulationStatus[]>
+    accumulationFresh?: Ref<boolean>
+    accumulationIntent?: Ref<{ symbol: string; action: string; id: number } | null>
     onPauseMission: (rowData: OpenTradeRow) => void | Promise<void>
     onResumeMission: (rowData: OpenTradeRow) => void | Promise<void>
     sortState: Ref<TradeTableSortState | null>
@@ -348,7 +355,8 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     h(OpenTradeExpandedRow, {
                         rowData,
                         minTimeframe: options.configuredMinTimeframe.value,
-                        onAddOrderManually: options.onAddManualBuy,
+                        onAddOrderManually: () => options.onAddManualBuy(rowData),
+                        accumulationIntent: options.accumulationIntent?.value?.symbol === rowData.symbol ? options.accumulationIntent.value : null,
                     }),
             },
             {
@@ -380,6 +388,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 title: 'PNL',
                 key: 'display_profit_percent',
                 render: (rowData) => {
+                    if (rowData.lifecycle_mode === 'accumulation') return 'See trade details'
                     const [, currency] = splitTradeSymbol(rowData.symbol)
                     const profitPercent =
                         `${formatFixed(getDisplayedProfitPercent(rowData))}%`
@@ -397,9 +406,9 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 ),
             },
             {
-                title: 'TP/SO',
+                title: 'Order status',
                 key: 'so_count',
-                render: (rowData) => renderTpSoCell(rowData),
+                render: (rowData) => rowData.lifecycle_mode === 'accumulation' ? h(AccumulationOrderStatus, { status: options.accumulationRows?.value.find(row => row.symbol === rowData.symbol), fresh: options.accumulationFresh?.value ?? false }) : renderTpSoCell(rowData),
                 align: 'center',
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
@@ -411,6 +420,32 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 title: 'Action',
                 key: 'action',
                 render: (rowData) => {
+                    if (rowData.lifecycle_mode === 'accumulation') {
+                        const registration = options.accumulationRows?.value.find(row => row.symbol === rowData.symbol)
+                        const paused = registration ? registration.explicitly_paused : rowData.automation_paused
+                        const act = (action: string) => options.onAccumulationAction?.(rowData, action)
+                        return h('div', { class: 'trade-row-actions' }, [
+                            h(NButton, {
+                                class: 'trade-action-button trade-action-sell', size: 'medium', ghost: true, type: 'primary',
+                                style: tradeActionButtonStyle, 'aria-label': `Sell ${rowData.symbol}`,
+                                onClick: (event: MouseEvent) => { event.stopPropagation(); act(registration?.state === 'closing' ? 'retry_close' : 'close') },
+                            }, { icon: () => h(NIcon, { size: 18 }, () => h(CashOutline)), default: () => h('span', { class: 'trade-action-label' }, 'Sell') }),
+                            h(NDropdown, {
+                                trigger: 'click',
+                                options: [
+                                    { key: 'details', label: 'Trade details' },
+                                    ...(registration?.state === 'closing' ? [{ key: 'archive_dust', label: 'Archive remaining dust' }] : []),
+                                    { key: paused ? 'resume' : 'pause', label: paused ? 'Resume automation' : 'Pause automation' },
+                                    { key: 'sell_partial', label: 'Sell part' },
+                                    { key: 'adjust_inventory', label: 'Inventory correction' },
+                                ],
+                                onSelect: (key: string) => key === 'details' ? options.onOpenTradeDetails?.(rowData) : act(key),
+                            }, { default: () => h(NButton, {
+                                class: 'trade-action-button trade-action-more', 'aria-label': 'More trade actions',
+                                size: 'medium', ghost: true, style: tradeActionButtonStyle,
+                            }, { icon: () => h(NIcon, { size: 18 }, () => h(EllipsisHorizontal)), default: () => h('span', { class: 'trade-action-label' }, 'More') }) }),
+                        ])
+                    }
                     if (isUnsellableRemainder(rowData)) {
                         return [
                             h(NTooltip, {}, {

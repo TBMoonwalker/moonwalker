@@ -7,8 +7,10 @@
                 </div>
                 <div class="profit-summary">
                     <div class="profit-label">Net profit &amp; loss</div>
-                    <n-statistic :class="hasStatisticsData ? profit_class : undefined" :value="hasStatisticsData ? formatFixed2(profit_overall) : 'Unavailable'" />
-                    <div v-if="hasStatisticsData" class="stat-detail">Realized {{ formatFixed2(profit_overall - upnl) }} · Unrealized {{ formatFixed2(upnl) }}</div>
+                    <n-statistic :class="hasStatisticsData && performanceComplete ? profit_class : undefined" :value="hasStatisticsData && performanceComplete ? formatFixed2(profit_overall) : 'Unavailable'" />
+                    <div v-if="hasStatisticsData && performanceComplete" class="stat-detail">Realized {{ formatFixed2(profit_overall - upnl) }} · Unrealized {{ formatFixed2(upnl) }}</div>
+                    <div v-if="includesCsvDeclarations" class="stat-detail">Includes CSV-declared purchase costs and fees.</div>
+                    <div v-if="!performanceComplete" class="stat-detail">Accumulation returns are not included in the legacy performance totals.</div>
                 </div>
                 <template v-if="exposure">
                     <template v-if="budgetAllocation">
@@ -42,7 +44,14 @@ import { resolveBudgetAllocation } from '../helpers/portfolioExposure'
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
 const configSnapshotStore = useSharedConfigSnapshot()
+const includesCsvDeclarations = computed(() => {
+    const value = statistics_data.data.value
+    if (!value || typeof value !== 'object' || !('accumulation_performance' in value)) return false
+    const performance = value.accumulation_performance
+    return Boolean(performance && typeof performance === 'object' && 'includes_csv_declarations' in performance && performance.includes_csv_declarations)
+})
 const hasStatisticsData = computed(() => statistics_data.hasReceivedData.value)
+const performanceComplete = ref(true)
 const profit_overall = ref(0)
 const profit_class = ref<'green' | 'red'>('green')
 const upnl = ref(0)
@@ -55,7 +64,7 @@ const capital_reserve = ref<number | null>(null)
 const capital_pending = ref<number | null>(null)
 const capital_budget_reason = ref<string | null>(null)
 const portfolio_value = computed(() =>
-    funds_available.value === null
+    funds_available.value === null || !performanceComplete.value
         ? null
         : Math.max(0, funds_available.value + funds_locked.value + upnl.value),
 )
@@ -85,6 +94,7 @@ const quote_currency = computed(() =>
 watch(statistics_data.data, (newData) => {
     if (newData !== undefined && newData !== null) {
         const websocket_data = newData as any
+        performanceComplete.value = websocket_data.performance_complete !== false
         upnl.value = toNumberOrZero(websocket_data.upnl)
         profit_overall.value = toNumberOrZero(websocket_data.profit_overall)
         profit_class.value = row_classes(profit_overall.value)

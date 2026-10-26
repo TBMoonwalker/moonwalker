@@ -10,6 +10,7 @@ from controller.responses import json_response
 from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
 from litestar.params import FromPath, FromQuery
+from service.accumulation_csv_accounting import declared_purchase_history
 from service.config import Config
 from service.order_requests import normalize_order_symbol
 from service.runtime_services import runtime_service_proxy
@@ -169,7 +170,7 @@ async def trade_executions(
     response = await trades.get_trade_executions(
         deal_id,
     )
-    return {"result": response}
+    return {"result": response, **await declared_purchase_history(deal_id)}
 
 
 @get(
@@ -243,7 +244,7 @@ async def mission_pause(symbol: FromPath[str]) -> Any:
     result = await trading_controls.pause_mission(normalized_symbol, config.snapshot())
     if result.status == "not_found":
         return json_response({"result": "", "error": result.message}, 404)
-    if result.status == "tp_cancel_failed":
+    if result.status in {"tp_cancel_failed", "lifecycle_required"}:
         return json_response(
             {
                 "result": "",
@@ -276,6 +277,8 @@ async def mission_resume(symbol: FromPath[str]) -> Any:
     result = await trading_controls.resume_mission(normalized_symbol)
     if result.status == "not_found":
         return json_response({"result": "", "error": result.message}, 404)
+    if result.status == "lifecycle_required":
+        return json_response({"result": "", "error": result.message}, 409)
     return {
         "result": result.status,
         "message": result.message,

@@ -12,6 +12,12 @@ class _DummyFilter:
     async def values_list(self, *args, **kwargs) -> list[Any]:
         return self._values
 
+    def using_db(self, _conn):
+        return self
+
+    async def exists(self) -> bool:
+        return bool(self._values)
+
 
 class _DummyTradesModel:
     created_bulk: list[Any] = []
@@ -56,6 +62,9 @@ async def test_csv_signal_import_creates_base_and_safety_orders(monkeypatch) -> 
 
     monkeypatch.setattr(csv_import_module.model, "Trades", _DummyTradesModel)
     monkeypatch.setattr(csv_import_module.model, "OpenTrades", _DummyOpenTradesModel)
+    monkeypatch.setattr(
+        csv_import_module.model, "AccumulationActivation", _DummyOpenTradesModel
+    )
     monkeypatch.setattr(
         csv_import_module,
         "run_sqlite_write_with_retry",

@@ -133,11 +133,11 @@ test('fmtProfitRange returns range string when min differs from max', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 9. Import SorterResult type
+// 9. Import DataTableSortState type
 // ---------------------------------------------------------------------------
 
-test('StatisticsView imports SorterResult from naive-ui', () => {
-    assert.match(source, /SorterResult.*from 'naive-ui'/)
+test('StatisticsView imports DataTableSortState from naive-ui', () => {
+    assert.match(source, /DataTableSortState.*from 'naive-ui'/)
 })
 
 // ---------------------------------------------------------------------------

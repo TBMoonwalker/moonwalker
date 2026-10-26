@@ -1,8 +1,17 @@
 <template>
+  <div class="expanded-trade-container">
     <n-flex class="expanded-trade-layout">
         <n-card class="expanded-order-card">
-            <RecoveryDcaStatus :trade="rowData" />
-            <n-timeline :horizontal="false">
+            <AccumulationOutlook v-if="accumulation?.detail.value" :detail="accumulation.detail.value" :fresh="accumulation.fresh.value" compact />
+            <RecoveryDcaStatus :trade="rowData" v-else-if="!accumulation" />
+            <p v-if="!executionHistoryResolved" role="status">Loading order history…</p>
+            <p v-else-if="executionHistoryFailed" role="status">Execution history could not be loaded.</p>
+            <AccumulationOrderTimeline v-if="accumulation" :detail="accumulation.detail.value" :executions="executions" :declarations="declarations" :declaration-unavailable="declarationUnavailable" :deal-id="rowData.deal_id" :fallback="timelineItems">
+              <template #base-order>
+                <AccumulationTradeStatus :key="rowData.symbol" :symbol="rowData.symbol" :context="accumulation" hide-outlook :intent="accumulationIntent" />
+              </template>
+            </AccumulationOrderTimeline>
+            <n-timeline v-else :horizontal="false">
                 <n-timeline-item
                     v-for="item in timelineItems"
                     :key="item.key"
@@ -12,7 +21,7 @@
                     :time="formatTimestamp(item.timestamp)"
                 />
             </n-timeline>
-            <div class="manual-order-actions">
+            <div v-if="rowData.lifecycle_mode !== 'accumulation'" class="manual-order-actions">
                 <n-button
                     class="manual-order-button"
                     secondary
@@ -36,17 +45,23 @@
             :price-lines="chartPriceLines"
         />
     </n-flex>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NButton } from 'naive-ui/es/button'
 
 import { fetchJson } from '../api/client'
 import TradeReplayChart from './TradeReplayChart.vue'
 import RecoveryDcaStatus from './RecoveryDcaStatus.vue'
+import AccumulationTradeStatus from './AccumulationTradeStatus.vue'
+import AccumulationOrderTimeline from './AccumulationOrderTimeline.vue'
+import AccumulationOutlook from './AccumulationOutlook.vue'
+import { useAccumulationPanel } from '../composables/useAccumulationPanel'
 import { formatTradingViewDate } from '../helpers/date'
 import type { TimeframeChoice } from '../helpers/openTrades'
+import type { DeclaredPurchase } from '../helpers/accumulationOrders'
 import type { TradeExecutionRow } from '../stores/trades'
 
 type OrderData = {
@@ -61,6 +76,7 @@ type OrderData = {
 
  type RowData = {
     symbol: string
+    lifecycle_mode?: string | null
      deal_id?: string | null
      campaign_started_at?: string | null
      tp_price: number
@@ -74,15 +90,18 @@ type OrderData = {
     dca_reference_atr_percent?: number
     dca_next_trigger_price?: number
     dca_last_decision_json?: string | null
-    baseorder: OrderData
+    baseorder?: OrderData
     safetyorder?: OrderData[]
 }
 
 const props = defineProps<{
     rowData: RowData
     minTimeframe: TimeframeChoice
+    accumulationIntent?: { action: string; id: number } | null
     onAddOrderManually?: (rowData: RowData) => void
 }>()
+
+const accumulation = props.rowData.lifecycle_mode === 'accumulation' ? useAccumulationPanel(props.rowData.symbol) : null
 
 const BUY_MARKER_COLOR = '#2E7D5B'
 const BUY_LINE_COLOR = '#1D5C49'
@@ -98,28 +117,30 @@ type TimelineItem = {
 }
 
 const executions = ref<TradeExecutionRow[]>([])
+const declarations = ref<DeclaredPurchase[]>([])
+const declarationUnavailable = ref(false)
 
 const safetyOrders = computed(() =>
     Array.isArray(props.rowData.safetyorder) ? props.rowData.safetyorder : [],
 )
 const requiresExecutionHistory = computed(() => Boolean(props.rowData.deal_id))
 const executionHistoryResolved = ref(!requiresExecutionHistory.value)
+const executionHistoryFailed = ref(false)
 const sortedExecutions = computed(() =>
       [...executions.value].sort(
           (left, right) => Number(left.timestamp) - Number(right.timestamp),
        ),
 )
 const useExecutionHistory = computed(() => sortedExecutions.value.length > 0)
-const chartReady = computed(
-    () => !requiresExecutionHistory.value || executionHistoryResolved.value,
-)
 const replayStartTimestamp = computed(() =>
-     useExecutionHistory.value
-          ? sortedExecutions.value[0]?.timestamp ?? props.rowData.baseorder.timestamp
-          : props.rowData.baseorder.timestamp,
+    [...declarations.value.map(row => row.timestamp), ...sortedExecutions.value.map(row => row.timestamp)].sort((a, b) => Number(a) - Number(b))[0] ?? props.rowData.baseorder?.timestamp ?? props.rowData.campaign_started_at ?? '',
+)
+const chartReady = computed(
+    () => (!requiresExecutionHistory.value || executionHistoryResolved.value) && Boolean(replayStartTimestamp.value),
 )
 const timelineItems = computed<TimelineItem[]>(() => {
     if (!useExecutionHistory.value) {
+        if (!props.rowData.baseorder) return []
         return [
             {
                  key: `base-${props.rowData.baseorder.id ?? 0}`,
@@ -190,9 +211,16 @@ const timelineItems = computed<TimelineItem[]>(() => {
     })
 })
 
+const declaredMarkers = computed(() => declarations.value.map(row => ({
+    timestamp: row.timestamp, position: 'belowBar' as const, color: BUY_MARKER_COLOR,
+    shape: 'arrowUp' as const, text: 'Buy · CSV',
+})))
 const chartMarkers = computed(() => {
     if (!useExecutionHistory.value) {
+        if (declarations.value.length || declarationUnavailable.value) return declaredMarkers.value
+        if (!props.rowData.baseorder) return declaredMarkers.value
         return [
+            ...declaredMarkers.value,
             {
                 timestamp: props.rowData.baseorder.timestamp,
                 position: 'belowBar' as const,
@@ -210,7 +238,7 @@ const chartMarkers = computed(() => {
         ]
     }
 
-    return sortedExecutions.value.map((execution, index) => {
+    return [...declaredMarkers.value, ...sortedExecutions.value.map((execution, index) => {
         if (execution.side === 'buy') {
             const baseOrderIndex = countExecutionsUntil(
                 sortedExecutions.value,
@@ -244,7 +272,7 @@ const chartMarkers = computed(() => {
             shape: 'arrowDown' as const,
             text: 'Exit',
         }
-    })
+    })]
 })
 
 const chartPriceLines = computed(() => {
@@ -262,7 +290,10 @@ const chartPriceLines = computed(() => {
         },
     ]
 
+    if (props.rowData.lifecycle_mode === 'accumulation') lines.length = 0
+
     if (!useExecutionHistory.value) {
+        if (!props.rowData.baseorder) return lines
         lines.push({
             price: Number(props.rowData.baseorder.price),
             color: BUY_LINE_COLOR,
@@ -346,6 +377,9 @@ function getBuyTitle(
     buyIndex: number,
     baseOrderIndex: number,
 ): string {
+    if (execution.role === 'accumulation_buy') {
+        return buyIndex === 1 ? 'Initial buy' : `Accumulation buy ${buyIndex - 1}`
+    }
     if (execution.role === 'manual_buy') {
         return 'Manual buy'
     }
@@ -373,6 +407,9 @@ function getBuyLineTitle(
     buyIndex: number,
     baseOrderIndex: number,
 ): string {
+    if (execution.role === 'accumulation_buy') {
+        return buyIndex === 1 ? 'INITIAL' : `ACC${buyIndex - 1}`
+    }
     if (execution.role === 'manual_buy') {
         return 'MANUAL'
     }
@@ -441,30 +478,44 @@ function emitAddOrderManually(): void {
     }
 }
 
+let executionHistoryRequest = 0
 async function loadExecutions(): Promise<void> {
-    if (!requiresExecutionHistory.value) {
-        executionHistoryResolved.value = true
-        return
-    }
+    const request = ++executionHistoryRequest
+    const dealId = props.rowData.deal_id
+    executions.value = []
+    declarations.value = []
+    declarationUnavailable.value = false
+    executionHistoryFailed.value = false
+    executionHistoryResolved.value = !dealId
+    if (!dealId) return
     try {
-        const response = await fetchJson<{ result: TradeExecutionRow[] }>(
-            `/trades/executions/${props.rowData.deal_id}`,
+        const response = await fetchJson<{ result: TradeExecutionRow[]; declared_purchases?: DeclaredPurchase[]; declaration_status?: string }>(
+            `/trades/executions/${dealId}`,
         )
-        executions.value = Array.isArray(response.result) ? response.result : []
+        if (request !== executionHistoryRequest || props.rowData.deal_id !== dealId) return
+        executions.value = Array.isArray(response.result) ? response.result.filter(row => row.deal_id === dealId) : []
+        declarations.value = accumulation && Array.isArray(response.declared_purchases) ? response.declared_purchases.filter(row => row.deal_id === dealId && row.provenance === 'csv_declaration') : []
+        declarationUnavailable.value = response.declaration_status === 'unavailable'
+        if (declarationUnavailable.value) executionHistoryFailed.value = true
     } catch (_error) {
-        executions.value = []
+        if (request !== executionHistoryRequest || props.rowData.deal_id !== dealId) return
+        executionHistoryFailed.value = true
     } finally {
-        executionHistoryResolved.value = true
+        if (request === executionHistoryRequest && props.rowData.deal_id === dealId) executionHistoryResolved.value = true
     }
 }
 
-onMounted(() => {
-    void loadExecutions()
-})
+watch([
+    () => props.rowData.deal_id,
+    () => accumulation?.detail.value?.orders
+        ?.filter(order => order.deal_id === props.rowData.deal_id)
+        .map(order => `${order.checkpoint_id}:${order.updated_at}`).join('|') ?? '',
+], () => { void loadExecutions() }, { immediate: true })
 
 </script>
 
 <style scoped>
+.expanded-trade-container { display: grid; gap: 16px; min-width: 0; width: 100%; }
 .expanded-trade-layout {
     align-items: stretch;
     flex-wrap: nowrap;

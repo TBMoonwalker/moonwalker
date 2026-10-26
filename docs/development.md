@@ -13,6 +13,7 @@ understand and maintain the system without access to an individual machine.
 | Signal entry | [signal_runtime.py](../backend/service/signal_runtime.py) coordinates admission; the order service remains the central execution boundary. |
 | Trading data | [trading_contracts.py](../backend/service/trading_contracts.py), [exchange_types.py](../backend/service/exchange_types.py), and [persistence_records.py](../backend/service/persistence_records.py) define intent, execution, and persistence contracts. |
 | AI work | [ai_work_queue.py](../backend/service/ai_work_queue.py) bounds background work; provider transport, analytics, and calibration have separate modules behind the AI Trust facade. |
+| Accumulation | [accumulation_runtime.py](../backend/service/accumulation_runtime.py) owns orchestration; shared Strategy Builder graphs feed pure calculations while the execution journal, capital checks and fill accounting enforce purchases. See [lifecycle boundaries](explanation-accumulation-lifecycle.md). |
 | Recovery sizing | [dca_recovery_sizing.py](../backend/service/dca_recovery_sizing.py) contains pure calculations; [dca.py](../backend/service/dca.py) integrates strategy signals, balances, diagnostics, and order execution. |
 | Browser access policy | [origin_policy.py](../backend/service/origin_policy.py) owns origin checks. Origin checks are not an authentication system. |
 
@@ -30,9 +31,12 @@ For the operator-facing behavior, see [safety-order sizing](dynamic-so.md),
   durable product and visual constraints.
 - [Project backlog](../TODOS.md): unfinished work and completed-item history.
 
-Dynamic DCA is the only supported trade mode. Legacy configuration and backup
-mode values are normalized to it. Historical Sidestep plans do not describe a
-supported runtime capability.
+Dynamic DCA and accumulation are supported trade modes. Accumulation retains
+managed inventory until an explicit sale and does not use DCA's automatic exits.
+Valid accumulation configuration survives reload and backup normalization;
+legacy Sidestep values normalize to Dynamic DCA. Historical Sidestep plans do not
+describe a supported runtime capability. See the [accumulation reference](accumulation.md)
+and [recovery guide](howto-recover-accumulation.md).
 
 The old Control Center audit's proposed theme unification has since been
 implemented: [themeStore.ts](../frontend/src/theme/themeStore.ts) owns the
@@ -134,7 +138,39 @@ without executing the loader or changing how tests run. Dynamic path expressions
 still require manual review. No blanket exclusions suppress candidates. Knip
 remains an on-demand check rather than a CI gate.
 
-Follow [AGENTS.md](../AGENTS.md) and [dependency policy](dependencies.md).
+Follow [AGENTS.md](../AGENTS.md), [dependency policy](dependencies.md), and the
+[pre-update supply-chain review workflow](howto-update-dependencies.md).
 After code changes, run `./ci.sh` from `scripts/`; on macOS, put Homebrew
 `node@24` on PATH as documented in AGENTS.md. Documentation-only changes should
 verify relative links, source-backed claims, and `git diff --check`.
+
+
+### Shared order execution ownership
+
+`PlacementWorkflow.begin` prepares and claims classic orders; accumulation retains
+its transactional activation/capital checks when claiming its orders. Once claimed,
+both modes use `PlacementWorkflow.submit` to journal accepted evidence or uncertain
+outcomes. Exchange buy/sell managers own transport and existing exchange-specific
+bounded handling. `ExchangeOrderReport` in `exchange_types.py` owns exact cumulative
+fill facts; the DCA lookup adapter preserves its existing output fields. Accumulation
+inventory arithmetic and DCA deal/exit accounting remain their respective handlers.
+The common workflow does not choose strategies, acquire capital or authorize sales.
+
+Demo mode uses exchange demo accounts and therefore journals orders like live mode.
+Recovery must validate the persisted account/environment scope before private
+lookup or saved-result replay. Preserve historical identities and payload shapes;
+an unscoped legacy record is unresolved evidence, not permission to bind the current
+account. Do not migrate historical financial data to make recovery pass.
+
+`GET /trades/executions/{deal_id}` projects adopted CSV purchases separately from
+native fills. Keep CSV rows out of the execution ledger and routine WebSocket
+status snapshots. Validate their receipt's exact deal identity on every read.
+
+
+### Frontend type checking
+
+`cd frontend && npm run type-check` explicitly checks the application, test and
+Node tooling projects with `--noEmit`. The root references file alone does not
+check those projects. Test configuration includes the application sources it
+imports, and path aliases resolve without the deprecated `baseUrl` option.
+The mandatory CI type-check step uses this same command; builds also run it.

@@ -2,6 +2,23 @@
 
 ## Next up
 
+### Prepare request bodies and OHLCV helpers for future major upgrades
+
+**Status:** Litestar 2.25.0 and pandas 3.1.0 expose deprecation warnings during
+CI on 2026-10-23. All 1,855 backend tests pass on these versions.
+
+Before upgrading Litestar to 3.x, replace unmarked `data` request parameters
+with explicit body markers such as `JSONBody[...]` in backtest, configuration
+and strategy controllers. Preserve strict payload validation and verify the
+existing malformed/unknown-field regression tests.
+
+Before upgrading pandas to 4.x, replace deprecated `inplace=True` DataFrame
+operations in `backend/service/data_ohlcv.py` with explicit assignments. Verify
+candle timestamps, resampling, duplicate removal and history serialization.
+Do not suppress the warnings or bundle either major upgrade into a lock refresh.
+
+**Priority:** P2
+
 ### Denylist from open trade: symmetric re-enable + DESIGN.md badge pass
 
 **Status:** Ready to design when picked up

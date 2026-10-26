@@ -27,7 +27,7 @@ import { trackUiEvent } from '../utils/uiTelemetry'
 
 type UiTelemetryPayload = Record<
     string,
-    string | number | boolean | null | undefined
+    string | number | boolean | null
 >
 
 export type SetupStyle = 'guided' | 'full'

@@ -210,6 +210,29 @@ class Indicators:
             return await self.data.get_data_for_pair(symbol, timerange, minimum_length)
         return df_raw
 
+    async def condition_frame(self, symbol: str, timeframe: str, length: int) -> Any:
+        """Return bounded source OHLC bars for the shared, causal graph evaluator."""
+        import pandas as pd
+
+        raw = await self.data.get_data_for_pair(symbol, timeframe, length + 1)
+        if raw is None or raw.empty:
+            return pd.DataFrame()
+        frame = await asyncio.to_thread(self.data.resample_data, raw, timeframe)
+        if frame is not None and not frame.empty:
+            return frame.set_index("timestamp")
+        return pd.DataFrame()
+
+    async def calculate_condition_series(
+        self, symbol: str, timeframe: str, params: dict[str, Any]
+    ) -> Any:
+        """Expose shared ATR/DMI/slope calculations through the indicator library."""
+        from service.strategy_conditions import indicator_history, indicator_series
+
+        frame = await self.condition_frame(symbol, timeframe, indicator_history(params))
+        if frame.empty:
+            return None
+        return indicator_series(frame, params)
+
     async def calculate_ema(
         self, symbol: str, timerange: str, lengths: list[int]
     ) -> dict[str, Any]:

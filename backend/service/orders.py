@@ -22,6 +22,7 @@ from service.exchange_types import (
     SoldCheckStatus,
 )
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
+from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.lifecycle_snapshot import (
     LifecycleSnapshotIdentity,
     snapshots_match,
@@ -61,12 +62,13 @@ from service.placement_intents import (
     PlacementIntentState,
     build_derived_operation_id,
     ensure_operation_id,
-    is_live_placement_enabled,
+    is_exchange_placement_enabled,
     is_terminal_placement_state,
 )
 from service.placement_reconciliation import (
     PlacementReconciler,
     PlacementReconciliationSummary,
+    RecoverAccumulation,
 )
 from service.placement_recovery import PlacementRecoveryHandler
 from service.placement_workflow import PlacementWorkflow
@@ -76,7 +78,7 @@ from service.trade_math import calculate_order_size, calculate_so_percentage
 from service.trades import Trades, TradeStateUnavailableError
 from service.trading_contracts import BuyIntent, SellIntent
 from service.trading_controls import evaluate_buy_like_gate
-from tortoise.exceptions import ConfigurationError
+from tortoise.exceptions import BaseORMException, ConfigurationError
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
 
@@ -100,10 +102,51 @@ class Orders:
         self.placement_workflow = PlacementWorkflow()
         self.placement_intents = self.placement_workflow.intents
         self.trades = Trades()
+        self.accumulation_recovery: RecoverAccumulation | None = None
 
     async def close(self) -> None:
         """Close exchange resources owned by this order service."""
         await self.exchange.close()
+
+    async def _legacy_lifecycle_rejection(
+        self,
+        symbol: str,
+        action: str,
+        operation_id: str | None = None,
+    ) -> OrderMutationResult | None:
+        """Reject non-DCA ownership without trusting order payload mode/reason.
+
+        Accumulation uses dedicated lifecycle-authorized execution. Legacy manual endpoints are not a bypass.
+        Reconciliation and cancellation of existing orders remain available.
+        """
+        try:
+            decision = await load_lifecycle_route(symbol)
+        except (BaseORMException, RuntimeError, sqlite3.Error, ValueError):
+            logging.error(
+                "Cannot resolve lifecycle ownership for %s.", symbol, exc_info=True
+            )
+            return self._trade_state_unavailable_result(
+                operation_id=operation_id, symbol=symbol, action=action
+            )
+        if decision.route == LifecycleRoute.CLASSIC_DCA:
+            return None
+        accumulation = decision.route == LifecycleRoute.ACCUMULATION
+        reason = "accumulation_lifecycle_required" if accumulation else decision.reason
+        message = (
+            "This symbol belongs to accumulation. Use its strategy and explicit "
+            "lifecycle actions in Trading Overview."
+            if accumulation
+            else "Lifecycle ownership is invalid. No mutation was performed; repair the state first."
+        )
+        logging.warning("Rejecting legacy %s for %s: %s.", action, symbol, reason)
+        return OrderMutationResult(
+            operation_id=str(operation_id or ""),
+            symbol=symbol,
+            action=action,
+            status=OrderMutationStatus.REJECTED,
+            reason_code=reason,
+            user_message=message,
+        )
 
     @staticmethod
     def _expected_lifecycle_snapshot(
@@ -305,6 +348,7 @@ class Orders:
             self.exchange,
             recovery.resume,
             self.placement_intents,
+            accumulation_recovery=self.accumulation_recovery,
         )
 
     async def _persist_reconciled_limit_fallback(
@@ -390,7 +434,11 @@ class Orders:
         placement_operation_id: str | None = None,
     ) -> bool:
         """Persist a filled buy order and emit monitoring."""
-        logging.debug(order_status)
+        logging.debug(
+            "Finalizing buy symbol=%s order_id=%s",
+            order_status.get("symbol"),
+            order_status.get("id") or order_status.get("orderid"),
+        )
         if not self._has_valid_buy_fill(order_status):
             logging.error(
                 "Skipping trade creation for %s: invalid order status.",
@@ -450,6 +498,14 @@ class Orders:
             order_status["symbol"],
             payload,
             **persistence_options,
+        )
+        self.placement_workflow.log_persisted(
+            placement_operation_id,
+            symbol=order_status["symbol"],
+            side="buy",
+            order_id=str(order_status.get("id") or order_status.get("orderid") or ""),
+            amount=str(order_status.get("amount") or "0"),
+            quote_cost=str(order_status.get("ordersize") or "0"),
         )
         await self._reset_unsellable_state(order_status["symbol"])
         await self.monitoring.notify_trade(
@@ -559,6 +615,16 @@ class Orders:
             order_status["symbol"],
             close_context["payload"],
             **close_options,
+        )
+        self.placement_workflow.log_persisted(
+            placement_operation_id,
+            symbol=order_status["symbol"],
+            side="sell",
+            order_id=str(order_status.get("id") or ""),
+            amount=str(
+                order_status.get("amount") or order_status.get("total_amount") or "0"
+            ),
+            quote_cost=str(order_status.get("ordersize") or "0"),
         )
         await self.trades.invalidate_trade_caches()
         await self.monitoring.notify_trade(
@@ -914,6 +980,8 @@ class Orders:
         """Arm one proactive TP order with the symbol prelocked."""
         symbol = str(order["symbol"])
         async with lifecycle_mutation_coordinator.prelocked(symbol):
+            if await self._legacy_lifecycle_rejection(symbol, "take_profit_prearm"):
+                return False
             if not await self._order_snapshot_is_current(order, config):
                 return False
             placement = await self.placement_workflow.begin(
@@ -937,37 +1005,15 @@ class Orders:
                 return False
             try:
                 try:
-                    order_status = await self.exchange.place_spot_limit_sell(
-                        order,
-                        config,
-                    )
-                except ExchangePostSubmissionFailure as exc:
-                    active_operation_id = str(
-                        exc.operation_id or placement.operation_id or ""
-                    )
-                    await self.placement_intents.transition(
-                        active_operation_id,
-                        PlacementIntentState.ACCEPTED,
-                        exchange_order_id=str(exc.order.get("id") or "") or None,
-                        result=exc.order,
-                        reason_code="local_finalization_pending",
-                        error_message=str(exc.cause or exc),
-                    )
-                    logging.error(
-                        "Sell submission for %s was accepted but could not be "
-                        "finalized locally; operation=%s requires reconciliation.",
-                        order.get("symbol"),
-                        active_operation_id,
-                        exc_info=True,
-                    )
-                    return False
-                except ExchangeSubmissionIndeterminate as exc:
-                    await self.placement_intents.transition(
+                    order_status = await self.placement_workflow.submit(
                         placement.operation_id,
-                        PlacementIntentState.INDETERMINATE,
-                        reason_code="exchange_response_lost",
-                        error_message=str(exc),
+                        symbol=symbol,
+                        side="sell",
+                        submit=lambda: self.exchange.place_spot_limit_sell(
+                            order, config
+                        ),
                     )
+                except (ExchangePostSubmissionFailure, ExchangeSubmissionIndeterminate):
                     return False
                 if not order_status or order_status.get("requires_market_fallback"):
                     await self.placement_intents.transition(
@@ -998,7 +1044,7 @@ class Orders:
                     logging.info(
                         "Proactive TP limit order for %s was not armed: %s",
                         symbol,
-                        order_status,
+                        (order_status or {}).get("fallback_reason"),
                     )
                     return False
 
@@ -1214,6 +1260,8 @@ class Orders:
         logging.info("Incoming sell order for %s", order["symbol"])
         async with lifecycle_mutation_coordinator.prelocked(order["symbol"]):
             try:
+                if await self._legacy_lifecycle_rejection(order["symbol"], "sell"):
+                    return False
                 if not await self._order_snapshot_is_current(order, config):
                     return False
                 if not bool(order.get("skip_tp_limit_cancel", False)):
@@ -1259,60 +1307,23 @@ class Orders:
                     )
                     return False
                 try:
-                    if sell_order_type == "limit":
-                        order_status = await self.exchange.create_spot_sell(
-                            order,
-                            config,
-                            create_market_fallback=(
-                                self._create_durable_market_fallback
-                            ),
-                        )
-                    else:
-                        order_status = await self.exchange.create_spot_sell(
-                            order,
-                            config,
-                        )
-                except ExchangePostSubmissionFailure as exc:
-                    active_operation_id = str(
-                        exc.operation_id or placement.operation_id or ""
-                    )
-                    await self.placement_intents.transition(
-                        active_operation_id,
-                        PlacementIntentState.ACCEPTED,
-                        exchange_order_id=str(exc.order.get("id") or "") or None,
-                        result=exc.order,
-                        reason_code="local_finalization_pending",
-                        error_message=str(exc.cause or exc),
-                    )
-                    logging.error(
-                        "Sell submission for %s was accepted but could not be "
-                        "finalized locally; operation=%s requires reconciliation.",
-                        order.get("symbol"),
-                        active_operation_id,
-                        exc_info=True,
-                    )
-                    return False
-                except ExchangeSubmissionIndeterminate as exc:
-                    if exc.operation_id and exc.operation_id != placement.operation_id:
-                        logging.error(
-                            "Market fallback for %s is indeterminate; "
-                            "child operation=%s will be reconciled before retry.",
-                            order.get("symbol"),
-                            exc.operation_id,
-                        )
-                        return False
-                    await self.placement_intents.transition(
+
+                    async def submit_sell() -> dict[str, Any] | None:
+                        if sell_order_type == "limit":
+                            return await self.exchange.create_spot_sell(
+                                order,
+                                config,
+                                create_market_fallback=self._create_durable_market_fallback,
+                            )
+                        return await self.exchange.create_spot_sell(order, config)
+
+                    order_status = await self.placement_workflow.submit(
                         placement.operation_id,
-                        PlacementIntentState.INDETERMINATE,
-                        reason_code="exchange_response_lost",
-                        error_message=str(exc),
+                        symbol=order["symbol"],
+                        side="sell",
+                        submit=submit_sell,
                     )
-                    logging.error(
-                        "Sell submission for %s is indeterminate; operation=%s "
-                        "will be reconciled before any retry.",
-                        order.get("symbol"),
-                        placement.operation_id,
-                    )
+                except (ExchangePostSubmissionFailure, ExchangeSubmissionIndeterminate):
                     return False
 
                 if not order_status:
@@ -1709,6 +1720,8 @@ class Orders:
         logging.info("Incoming buy order for %s", order["symbol"])
         if not await self._order_snapshot_is_current(order, config):
             return False
+        if await self._legacy_lifecycle_rejection(order["symbol"], "buy"):
+            return False
         if str(order.get("campaign_id") or "").strip():
             logging.info(
                 "Incoming campaign buy order for %s: campaign=%s strategy=%s signal=%s.",
@@ -1830,9 +1843,10 @@ class Orders:
         config: dict[str, Any],
     ) -> tuple[bool, dict[str, Any] | None]:
         """Run capital-budget preflight, exchange buy, and persistence."""
-        if config.get("exchange") in {"bybit", "bybiteu"} and is_live_placement_enabled(
-            config
-        ):
+        if config.get("exchange") in {
+            "bybit",
+            "bybiteu",
+        } and is_exchange_placement_enabled(config):
             for pending in await self.placement_intents.list_nonterminal():
                 if (
                     str(pending.exchange_name) == config.get("exchange")
@@ -1927,55 +1941,24 @@ class Orders:
                 )
 
             try:
-                order_status = await self.exchange.create_spot_market_buy(
-                    order,
-                    config,
-                )
-            except ExchangePostSubmissionFailure as exc:
-                await self.placement_intents.transition(
+                order_status = await self.placement_workflow.submit(
                     placement.operation_id,
-                    PlacementIntentState.ACCEPTED,
-                    exchange_order_id=str(exc.order.get("id") or "") or None,
-                    result=exc.order,
-                    reason_code="local_finalization_pending",
-                    error_message=str(exc.cause or exc),
+                    symbol=order["symbol"],
+                    side="buy",
+                    submit=lambda: self.exchange.create_spot_market_buy(order, config),
                 )
-                logging.error(
-                    "Buy submission for %s was accepted but could not be "
-                    "finalized locally; operation=%s requires reconciliation.",
-                    order.get("symbol"),
-                    placement.operation_id,
-                    exc_info=True,
-                )
-                return (
-                    False,
-                    {
-                        "ok": False,
-                        "reason": "placement_reconciliation_pending",
-                        "symbol": str(order.get("symbol") or ""),
-                    },
-                )
-            except ExchangeSubmissionIndeterminate as exc:
-                await self.placement_intents.transition(
-                    placement.operation_id,
-                    PlacementIntentState.INDETERMINATE,
-                    reason_code="exchange_response_lost",
-                    error_message=str(exc),
-                )
-                logging.error(
-                    "Buy submission for %s is indeterminate; operation=%s will "
-                    "be reconciled before any retry.",
-                    order.get("symbol"),
-                    placement.operation_id,
-                )
-                return (
-                    False,
-                    {
-                        "ok": False,
-                        "reason": "placement_indeterminate",
-                        "symbol": str(order.get("symbol") or ""),
-                    },
-                )
+            except ExchangePostSubmissionFailure:
+                return False, {
+                    "ok": False,
+                    "reason": "placement_reconciliation_pending",
+                    "symbol": str(order.get("symbol") or ""),
+                }
+            except ExchangeSubmissionIndeterminate:
+                return False, {
+                    "ok": False,
+                    "reason": "placement_indeterminate",
+                    "symbol": str(order.get("symbol") or ""),
+                }
             if not order_status:
                 precheck = self.exchange.get_last_buy_precheck_result()
                 await self.placement_intents.transition(
@@ -2070,6 +2053,12 @@ class Orders:
         )
         normalized_symbol = request.symbol
         lifecycle_mutation_coordinator.assert_prelocked(normalized_symbol)
+
+        rejection = await self._legacy_lifecycle_rejection(
+            normalized_symbol, "manual_buy_add"
+        )
+        if rejection is not None:
+            raise ValueError(rejection.user_message)
 
         open_trade_rows = await self.trades.get_open_trades_by_symbol(normalized_symbol)
         if not open_trade_rows:
@@ -2241,6 +2230,11 @@ class Orders:
                 reason_code="invalid_symbol",
                 user_message="The symbol is invalid.",
             )
+        rejection = await self._legacy_lifecycle_rejection(
+            normalized_symbol, "manual_stop", operation_id
+        )
+        if rejection is not None:
+            return rejection
         try:
             trade = await self._load_authoritative_trade(normalized_symbol)
         except TradeStateUnavailableError:
@@ -2310,6 +2304,8 @@ class Orders:
         logging.info("Incoming stop order")
         symbol = normalize_order_symbol(symbol)
         lifecycle_mutation_coordinator.assert_prelocked(symbol)
+        if await self._legacy_lifecycle_rejection(symbol, "manual_stop"):
+            return False
         try:
             canceled = await self._cancel_tp_limit_order_locked(
                 symbol,
@@ -2338,6 +2334,8 @@ class Orders:
     async def receive_sell_signal(self, symbol: str, config: dict[str, Any]) -> bool:
         """Handle a manual sell signal."""
         symbol = normalize_order_symbol(symbol)
+        if await self._legacy_lifecycle_rejection(symbol, "manual_sell"):
+            return False
         trades = await self.trades.get_trades_for_orders(symbol)
         if not trades:
             logging.error("No running trade found for manual sell of %s.", symbol)
@@ -2435,6 +2433,11 @@ class Orders:
     ) -> OrderMutationResult:
         """Handle a manual sell and report its durable execution outcome."""
         symbol = normalize_order_symbol(symbol)
+        rejection = await self._legacy_lifecycle_rejection(
+            symbol, "manual_sell", operation_id
+        )
+        if rejection is not None:
+            return rejection
         try:
             trades = await self._load_authoritative_trade(symbol)
         except TradeStateUnavailableError:
@@ -2506,6 +2509,8 @@ class Orders:
     ) -> bool:
         """Handle a manual buy signal."""
         symbol = normalize_order_symbol(symbol)
+        if await self._legacy_lifecycle_rejection(symbol, "manual_buy"):
+            return False
         trades = await self.trades.get_trades_for_orders(symbol)
 
         if not trades:
@@ -2525,6 +2530,11 @@ class Orders:
     ) -> OrderMutationResult:
         """Handle a manual safety buy and report its durable outcome."""
         symbol = normalize_order_symbol(symbol)
+        rejection = await self._legacy_lifecycle_rejection(
+            symbol, "manual_buy", operation_id
+        )
+        if rejection is not None:
+            return rejection
         if operation_id:
             existing = await self._get_placement_intent(str(operation_id))
             if existing is not None:

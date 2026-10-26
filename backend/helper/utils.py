@@ -21,7 +21,9 @@ class Utils:
         """
         if not current_price:
             current_price = trades["current_price"]
-        total_cost = trades["total_cost"] + trades["fee"]
+        total_cost = trades.get("entry_cost")
+        if total_cost is None:
+            total_cost = trades["total_cost"] + trades["fee"]
         average_buy_price = total_cost / trades["total_amount"]
         actual_pnl = ((current_price - average_buy_price) / average_buy_price) * 100
 

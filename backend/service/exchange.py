@@ -2,9 +2,9 @@
 
 import asyncio
 import json
-import math
 import time
 from collections.abc import Awaitable, Callable
+from decimal import Decimal
 from typing import Any, cast
 
 import ccxt.async_support as ccxt
@@ -16,6 +16,7 @@ from service.exchange_capabilities import (
     ExchangeOrderLookupStatus,
     ExchangePostSubmissionFailure,
     UnsupportedExchangeCapability,
+    build_client_order_params,
     require_exchange_placement_capabilities,
     resolve_exchange_placement_capabilities,
 )
@@ -865,8 +866,8 @@ class Exchange:
             raise ValueError("Execution cap is below the minimum price tick")
         return price
 
-    async def __get_bybiteu_buy_ceiling(self, symbol: str, ceiling: float) -> float:
-        """Clamp a recovery ceiling to Bybit EU's fresh dynamic spot price band."""
+    async def __fetch_bybiteu_buy_limit(self, symbol: str) -> Decimal:
+        """Read Bybit EU's validated dynamic spot limit without losing precision."""
         market_id = self.exchange.market(symbol)["id"]
         async with asyncio.timeout(10):
             response = await self.exchange.public_get_v5_market_price_limit(
@@ -894,10 +895,29 @@ class Exchange:
         raw_ceiling = result.get("buyLmt")
         if type(raw_ceiling) not in (str, int, float):
             raise ValueError("Bybit EU maximum buy price has an invalid type")
-        band_ceiling = float(raw_ceiling)
-        if not math.isfinite(band_ceiling) or band_ceiling <= 0:
+        from service.accumulation_fill import decimal_evidence
+
+        band_ceiling = Decimal(decimal_evidence(raw_ceiling))
+        if not band_ceiling.is_finite() or band_ceiling <= 0:
             raise ValueError("Bybit EU maximum buy price is invalid")
-        return min(ceiling, band_ceiling)
+        return band_ceiling
+
+    async def __get_bybiteu_buy_ceiling(self, symbol: str, ceiling: float) -> float:
+        """Keep legacy DCA's float boundary while sharing validated venue evidence."""
+        return min(ceiling, float(await self.__fetch_bybiteu_buy_limit(symbol)))
+
+    async def get_spot_buy_ceiling(
+        self, symbol: str, maximum: str, config: dict[str, Any]
+    ) -> str:
+        """Clamp an exact accumulation ceiling before precision, sizing and claim."""
+        from service.accumulation_contracts import canonical_decimal
+
+        ceiling = Decimal(canonical_decimal(maximum, positive=True))
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        if getattr(self.exchange, "id", None) == "bybiteu":
+            ceiling = min(ceiling, await self.__fetch_bybiteu_buy_limit(symbol))
+        return format(ceiling, "f")
 
     def __is_bybiteu_price_band_rejection(self, error: Exception) -> bool:
         """Recognize only a definitive Bybit EU maximum-buy-price rejection."""
@@ -1297,6 +1317,60 @@ class Exchange:
             )
         return finalized
 
+    async def submit_preflighted_spot_buy(
+        self,
+        *,
+        symbol: str,
+        amount: str,
+        price: str,
+        client_order_id: str,
+        config: dict[str, Any],
+    ) -> Any:
+        """Submit one journaled, precision-checked IOC buy and return raw evidence.
+
+        The owning lifecycle supplies exact preflighted strings and retains all
+        unknown outcomes. This boundary never resizes, retries or runs the DCA
+        finalizer. It is not registered as a controller or runtime producer.
+        """
+        if type(config.get("dry_run")) is not bool or config.get("market") != "spot":
+            raise ValueError("A validated demo or live spot configuration is required.")
+        if not client_order_id:
+            raise ValueError("A durable client order identity is required.")
+        capabilities = require_exchange_placement_capabilities(
+            config, order_type="limit"
+        )
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        params = build_client_order_params(client_order_id, capabilities)
+        params["timeInForce"] = "IOC"
+        return await self._buy_manager.submit_buy_once(
+            symbol=symbol, order_type="limit", amount=amount, price=price, params=params
+        )
+
+    async def submit_preflighted_spot_sell(
+        self,
+        *,
+        symbol: str,
+        amount: str,
+        client_order_id: str,
+        config: dict[str, Any],
+    ) -> Any:
+        """Submit one owned manual market sale without retry or DCA finalization."""
+        if type(config.get("dry_run")) is not bool or config.get("market") != "spot":
+            raise ValueError("A validated demo or live spot configuration is required.")
+        if not client_order_id:
+            raise ValueError("A durable client order identity is required.")
+        capabilities = require_exchange_placement_capabilities(
+            config, order_type="market"
+        )
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        return await self._sell_manager.submit_market_sell_once(
+            symbol=symbol,
+            amount=amount,
+            params=build_client_order_params(client_order_id, capabilities),
+        )
+
     async def build_spot_buy_order_status(
         self,
         exchange_order: dict[str, Any],
@@ -1440,6 +1514,19 @@ class Exchange:
                 exc,
             )
             return None
+
+    async def read_spot_order_executions(
+        self, order: dict[str, Any], config: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Read at most 1000 authenticated fills for exactly this order, never a wallet history."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        exchange = self.exchange
+        if exchange is None or not getattr(exchange, "has", {}).get("fetchOrderTrades"):
+            raise ccxt.NotSupported("Order-specific execution lookup is unavailable.")
+        return await exchange.fetch_order_trades(
+            order["id"], order["symbol"], None, 1000
+        )
 
     async def lookup_spot_order(
         self,

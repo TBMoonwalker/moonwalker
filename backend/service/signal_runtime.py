@@ -491,7 +491,12 @@ async def get_active_open_symbols() -> list[str]:
         symbol = _normalize_symbol(row.get("symbol"))
         if symbol:
             active_symbols.append(symbol)
-    return active_symbols
+    activations = (
+        await model.AccumulationActivation.all()
+        .exclude(state="stopped")
+        .values_list("symbol", flat=True)
+    )
+    return sorted(set(active_symbols) | set(activations))
 
 
 async def _resolve_runtime_capacity(

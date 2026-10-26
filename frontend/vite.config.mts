@@ -12,7 +12,7 @@ export default defineConfig({
   server: {
     // Keep SPA view paths local while forwarding dashboard data to the backend.
     proxy: {
-      '^/(analytics|autopilot|config|data|orders|statistic|strategies|trades)(/|$)': 'http://127.0.0.1:8130',
+      '^/(accumulation|analytics|autopilot|config|data|orders|statistic|strategies|trades)(/|$)': 'http://127.0.0.1:8130',
       '^/backtest/': 'http://127.0.0.1:8130',
       '^/control-center/[^/]+/': 'http://127.0.0.1:8130',
       '^/monitoring/': 'http://127.0.0.1:8130',

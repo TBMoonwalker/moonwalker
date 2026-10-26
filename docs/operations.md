@@ -39,6 +39,19 @@ requirements installation step before launching `backend/app.py` directly.
 Starting `backend/app.py` from an existing virtual environment bypasses
 dependency synchronization after an upgrade.
 
+## Shared local Redis
+
+Separate Moonwalker installations can reuse the Redis server on
+`localhost:6379`. Startup reuses an available server or launches one in a
+separate process session. Stopping or restarting Moonwalker closes only that
+instance's Redis connections and leaves the shared server running, including
+when that instance originally launched it.
+
+Manage Redis separately with your operating system's service manager. On macOS,
+`brew services start redis` keeps it managed independently of Moonwalker.
+Redis may therefore remain running after all Moonwalker instances have stopped;
+stop it separately only when no application needs it.
+
 ## Dashboard origin policy
 
 Moonwalker allows same-origin dashboard HTTP and WebSocket connections by
@@ -165,12 +178,15 @@ Completed and rejected exchange-placement records are portable audit history and
 are included in full backups. Any placement that was unresolved when the backup
 was created is kept separately in a SHA-256-checksummed recovery manifest. The
 checksum detects accidental corruption; it does not authenticate a backup from
-an untrusted source. On
-restore, Moonwalker clears its source exchange and client-order identities,
+an untrusted source. For Dynamic DCA placements, on
+restore, Moonwalker clears source exchange and client-order identities,
 invalidates any nonportable result, retains the recorded capital reservation,
 and marks the row `restored_quarantined`. Restored quarantined rows are never
 submitted automatically. Keep trading paused and reconcile them manually before
 resuming live operation.
+
+Accumulation placements retain their recorded identities and evidence under
+quarantine for explicit repair. See [accumulation backup and restore](accumulation.md#backup-and-restore).
 
 Two restore modes are available:
 
@@ -191,6 +207,10 @@ nonterminal exchange-placement intent by stable client/exchange order identity.
 If an intent cannot be resolved safely, startup fails closed and identifies the
 operation requiring manual reconciliation. Capital recorded by an unresolved
 buy remains reserved until the intent reaches a safe terminal state.
+
+If only paused, quarantined accumulation obligations remain, startup can instead
+serve restricted recovery access with trading workers stopped. See the
+[accumulation recovery guide](howto-recover-accumulation.md#recover-after-restore-or-upgrade).
 
 An accepted buy acknowledgement can omit fill details, especially for a capped
 IOC safety order. Moonwalker records that acceptance and looks up the existing

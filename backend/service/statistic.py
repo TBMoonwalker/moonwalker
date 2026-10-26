@@ -121,17 +121,35 @@ class Statistic:
             open_trade_rows = await model.OpenTrades.all().values(
                 "profit",
                 "cost",
+                "lifecycle_mode",
+                "accumulation_remaining_cost",
             )
             upnl_value = 0.0
             funds_locked = 0.0
             for row in open_trade_rows:
-                upnl_value += float(row.get("profit") or 0.0)
-                committed_quote = float(row.get("cost") or 0.0)
+                accumulation = row.get("lifecycle_mode") == "accumulation"
+                if not accumulation:
+                    upnl_value += float(row.get("profit") or 0.0)
+                committed_quote = float(
+                    row.get("accumulation_remaining_cost" if accumulation else "cost")
+                    or 0.0
+                )
                 funds_locked += max(0.0, committed_quote)
             return float(upnl_value), float(funds_locked)
         except BaseORMException as exc:
             logging.error("Error getting open-trade profit snapshot: %s", exc)
             return 0.0, 0.0
+
+    async def _performance_complete(self) -> bool:
+        """Do not label legacy DCA aggregates as complete accumulation returns."""
+        try:
+            return not (
+                await model.AccumulationActivation.all().exists()
+                or await model.OpenTrades.filter(lifecycle_mode="accumulation").exists()
+            )
+        except BaseORMException:
+            logging.exception("Could not verify performance coverage.")
+            return False
 
     @staticmethod
     def _resample_profit_data_sync(
@@ -230,6 +248,10 @@ class Statistic:
                 f"Error getting profits for {period} data: %s",
             )
             profit_data = self._group_profit_rows_by_date(data)
+            native, _ = await self._accumulation_history(begin_datetime.isoformat())
+            for day, value in native.items():
+                if day >= begin_datetime.isoformat():
+                    profit_data[day] = profit_data.get(day, 0.0) + value
             profit_data = await asyncio.to_thread(
                 self._resample_profit_data_sync, profit_data, period
             )
@@ -238,6 +260,30 @@ class Statistic:
             logging.error("Error getting profits for %s data: %s", period, e)
 
         return profit_data
+
+    async def _accumulation_history(
+        self, since: str | None = None
+    ) -> tuple[dict[str, float], bool]:
+        """Merge only a complete single-quote native execution history."""
+        from service.runtime_services import get_active_accumulation_runtime
+
+        runtime = get_active_accumulation_runtime()
+        if runtime is None or not runtime.ready:
+            return {}, await self._performance_complete()
+        report = await runtime.performance()
+        currency = str(runtime.adapter.config_provider().get("currency", "")).upper()
+        from service.accumulation_performance import accumulated_daily_history
+
+        history = (
+            await accumulated_daily_history(since)
+            if report.get("history_complete", False)
+            else []
+        )
+        if not report.get("history_complete", False) or any(
+            row["quote"] != currency for row in history
+        ):
+            return {}, False
+        return {row["date"]: float(row["profit"]) for row in history}, True
 
     async def get_profit(self) -> dict[str, Any]:
         """Return profit, uPNL, and autopilot summaries."""
@@ -299,12 +345,56 @@ class Statistic:
         )
         upnl_value, funds_locked = open_trade_snapshot
 
+        profit_data["performance_complete"] = await self._performance_complete()
+        if not profit_data["performance_complete"]:
+            from service.runtime_services import get_active_accumulation_runtime
+
+            runtime = get_active_accumulation_runtime()
+            if runtime is not None and runtime.ready:
+                try:
+                    report = await runtime.performance()
+                    profit_data["accumulation_performance"] = report
+                    currency = str(
+                        runtime.adapter.config_provider().get("currency", "")
+                    ).upper()
+                    if report["complete"] and all(
+                        group["quote"] == currency for group in report["by_quote"]
+                    ):
+                        upnl_value += sum(
+                            float(group["unrealized"]) for group in report["by_quote"]
+                        )
+                        closed_profit += sum(
+                            float(group["realized"]) for group in report["by_quote"]
+                        )
+                        profit_data["performance_complete"] = True
+                except (ValueError, OSError, TimeoutError):
+                    logging.warning(
+                        "Accumulation valuation unavailable; retaining Dynamic DCA subtotals."
+                    )
+        profit_data["performance_scope"] = (
+            "all_trades" if profit_data["performance_complete"] else "dynamic_dca_only"
+        )
+
         profit_data["upnl"] = upnl_value
         profit_data["profit_overall"] = closed_profit + float(
             profit_data["upnl"] or 0.0
         )
         profit_data["funds_locked"] = funds_locked
         profit_data["profit_week"] = self._group_profit_rows_by_date(profit_week_rows)
+        try:
+            native_history, history_complete = await self._accumulation_history(
+                begin_week.isoformat()
+            )
+            for day, value in native_history.items():
+                if day >= begin_week.isoformat():
+                    profit_data["profit_week"][day] = (
+                        profit_data["profit_week"].get(day, 0.0) + value
+                    )
+            profit_data["profit_history_scope"] = (
+                "all_verified_executions" if history_complete else "dynamic_dca_only"
+            )
+        except (ValueError, OSError, TimeoutError):
+            profit_data["profit_history_scope"] = "dynamic_dca_only"
         profit_data["profit_overall_timestamp"] = datetime.now(timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
@@ -411,6 +501,8 @@ class Statistic:
 
     async def _store_upnl_snapshot(self, profit_data: dict[str, Any]) -> None:
         """Persist a sampled uPNL snapshot for long-term charting."""
+        if profit_data.get("performance_complete") is False:
+            return
         try:
             latest_snapshot = (
                 await model.UpnlHistory.all().order_by("-timestamp").first()

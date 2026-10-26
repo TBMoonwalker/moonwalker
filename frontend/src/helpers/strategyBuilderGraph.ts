@@ -10,6 +10,12 @@ const COMPARISON_LABELS: Record<string, string> = {
 }
 
 const INDICATOR_LABELS: Record<string, string> = {
+    atr: 'ATR',
+    adx: 'ADX',
+    plus_di: '+DI',
+    minus_di: '−DI',
+    ema_slope: 'EMA slope / ATR',
+    ema_distance_atr: 'EMA discount / ATR',
     ema: 'EMA',
     rsi: 'RSI',
     bollinger_upper: 'Bollinger upper',
@@ -69,7 +75,7 @@ export function normalizeComparisonPort(port: string): string {
 export function indicatorUsesSample(node: StrategyNode | null): boolean {
     const indicator = String(node?.params?.indicator ?? '')
     return (
-        ['ema', 'rsi'].includes(indicator) ||
+        ['ema', 'rsi', 'atr', 'adx', 'plus_di', 'minus_di', 'ema_slope', 'ema_distance_atr'].includes(indicator) ||
         indicator.startsWith('bollinger_') ||
         indicator.startsWith('macd_')
     )

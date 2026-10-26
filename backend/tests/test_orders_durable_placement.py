@@ -244,8 +244,10 @@ async def _init_database(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("with_accumulation", [False, True])
 async def test_orders_reconciliation_uses_recovery_handler_and_closes_exchange(
     monkeypatch: pytest.MonkeyPatch,
+    with_accumulation: bool,
 ) -> None:
     summary = PlacementReconciliationSummary(
         inspected=0,
@@ -257,9 +259,17 @@ async def test_orders_reconciliation_uses_recovery_handler_and_closes_exchange(
     )
     callback_names: list[str] = []
 
+    async def recover_accumulation(_intent, _config) -> str:
+        return "completed"
+
+    accumulation_callback = recover_accumulation if with_accumulation else None
+
     class _FakeReconciler:
-        def __init__(self, _exchange, resume, _intents) -> None:
+        def __init__(
+            self, _exchange, resume, _intents, *, accumulation_recovery=None
+        ) -> None:
             callback_names.append(resume.__name__)
+            assert accumulation_recovery is accumulation_callback
 
         async def reconcile(self, _config) -> PlacementReconciliationSummary:
             return summary
@@ -271,6 +281,7 @@ async def test_orders_reconciliation_uses_recovery_handler_and_closes_exchange(
             self.closed = True
 
     orders = Orders()
+    orders.accumulation_recovery = accumulation_callback
     exchange = _FakeCloseExchange()
     orders.exchange = exchange  # type: ignore[assignment]
     monkeypatch.setattr(orders_module, "PlacementReconciler", _FakeReconciler)

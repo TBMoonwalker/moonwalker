@@ -12,7 +12,7 @@ interface SetupTaskStatus {
 defineProps<{
     bindTargetElement: (
         target: ControlCenterTarget,
-    ) => (element: Element | null) => void
+    ) => (element: Element | import('vue').ComponentPublicInstance | null) => void
     getSetupTaskStatus: (target: ControlCenterTarget) => SetupTaskStatus
     isSetupTaskExpanded: (target: ControlCenterTarget) => boolean
     readyLayout?: boolean

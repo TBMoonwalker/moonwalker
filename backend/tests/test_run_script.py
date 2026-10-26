@@ -1,6 +1,11 @@
 """Regression coverage for the repository startup script."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 RUN_SCRIPT = ROOT_DIR / "run.sh"
@@ -48,11 +53,12 @@ def test_startup_script_rejects_unsupported_node_before_creating_lock() -> None:
     runtime_check = "check_frontend_runtime"
     lock_step = 'touch "$LOCK_FILE"'
 
-    assert "Required: Node.js >=24.11.0 <25 and npm >=11 <12." in script
-    assert "nvm install" in script
-    assert "nvm use" in script
-    assert "brew install node@24" in script
-    assert 'export PATH="$(brew --prefix node@24)/bin:$PATH"' in script
+    runtime = (ROOT_DIR / "scripts/node_runtime.sh").read_text()
+    assert "Required: Node.js >=24.11.0 <25 and npm >=11 <12." in runtime
+    assert "nvm install" in runtime
+    assert "nvm use" in runtime
+    assert "brew install node@24" in runtime
+    assert 'export PATH="$(brew --prefix node@24)/bin:$PATH"' in runtime
     assert script.index(runtime_check, script.index("start_services()")) < script.index(
         lock_step, script.index("start_services()")
     )
@@ -118,3 +124,170 @@ def test_stop_script_allows_graceful_shutdown_before_forcing_exit() -> None:
     assert force_step in stop_script
     assert stop_script.index(term_step) < stop_script.index(wait_step)
     assert stop_script.index(wait_step) < stop_script.index(force_step)
+
+
+def _probe_python(
+    commands: Path, version_file: Path
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            'source "$1"; find_python_runtime "$2"',
+            "probe",
+            str(ROOT_DIR / "scripts/python_runtime.sh"),
+            str(version_file),
+        ],
+        env={**os.environ, "PATH": str(commands)},
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("path_python", ["missing", "unsupported"])
+@pytest.mark.parametrize("brew_layout", ["bin", "libexec/bin"])
+def test_python_detection_finds_homebrew_runtime(
+    tmp_path: Path, path_python: str, brew_layout: str
+) -> None:
+    """An unsupported PATH Python must not hide the installed Homebrew runtime."""
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    prefix = tmp_path / "Homebrew Python"
+    runtime_dir = prefix / brew_layout
+    runtime_dir.mkdir(parents=True)
+    interpreter = runtime_dir / ("python3.14" if brew_layout == "bin" else "python3")
+    interpreter.symlink_to(sys.executable)
+    if path_python != "missing":
+        wrong = commands / "python3"
+        wrong.write_text("#!/bin/bash\nexit 1\n")
+        wrong.chmod(0o755)
+    brew = commands / "brew"
+    brew.write_text(
+        '#!/bin/bash\n[ "$1" = --prefix ] && [ "$2" = python@3.14 ] || exit 1\n'
+        + f"printf '%s\\n' '{prefix}'\n"
+    )
+    brew.chmod(0o755)
+    uname = commands / "uname"
+    uname.write_text("#!/bin/bash\nprintf 'Darwin\\n'\n")
+    uname.chmod(0o755)
+    result = _probe_python(commands, ROOT_DIR / ".python-version")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(interpreter)
+
+
+@pytest.mark.parametrize("executable", ["python3.14", "python3"])
+def test_python_detection_preserves_a_supported_path_interpreter(
+    tmp_path: Path, executable: str
+) -> None:
+    """A valid PATH interpreter works without requiring Homebrew."""
+    runtime = tmp_path / executable
+    runtime.symlink_to(sys.executable)
+    result = _probe_python(tmp_path, ROOT_DIR / ".python-version")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(runtime)
+
+
+def test_python_detection_rejects_wrong_version_and_explains_install(
+    tmp_path: Path,
+) -> None:
+    """An executable name is not sufficient proof of its Python version."""
+    version_file = tmp_path / ".python-version"
+    version_file.write_text("3.99.1\n")
+    (tmp_path / "python3.99").symlink_to(sys.executable)
+    uname = tmp_path / "uname"
+    uname.write_text("#!/bin/bash\nprintf 'Linux\\n'\n")
+    uname.chmod(0o755)
+    result = _probe_python(tmp_path, version_file)
+    assert result.returncode != 0
+    assert not result.stdout
+    assert "Python 3.99 is required" in result.stderr
+    assert "brew install python@3.99" in result.stderr
+
+
+def _probe_node(
+    commands: Path, check: str = "check_frontend_runtime"
+) -> subprocess.CompletedProcess[str]:
+    (commands / "dirname").symlink_to("/usr/bin/dirname")
+    definitions = RUN_SCRIPT.read_text().split("service_process_is_running()")[0]
+    return subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            definitions + f"\n{check} || exit $?\ncommand -v node\ncommand -v npm\n",
+            str(RUN_SCRIPT),
+        ],
+        env={**os.environ, "PATH": str(commands)},
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("path_node", ["missing", "unsupported"])
+def test_node_detection_selects_homebrew_pair(tmp_path: Path, path_node: str) -> None:
+    """Homebrew Node and npm must be selected together for subsequent commands."""
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    runtime = tmp_path / "Homebrew Node" / "bin"
+    runtime.mkdir(parents=True)
+    node = runtime / "node"
+    node.write_text("#!/bin/bash\nprintf '24.18.0\\n'\n")
+    node.chmod(0o755)
+    npm = runtime / "npm"
+    npm.write_text(
+        '#!/bin/bash\n[ "$(node -p process.versions.node)" = 24.18.0 ] || exit 1\n'
+        "printf '11.16.0\\n'\n"
+    )
+    npm.chmod(0o755)
+    if path_node == "unsupported":
+        wrong = commands / "node"
+        wrong.write_text("#!/bin/bash\nprintf '26.11.1\\n'\n")
+        wrong.chmod(0o755)
+        (commands / "npm").symlink_to(npm)
+    brew = commands / "brew"
+    brew.write_text(
+        '#!/bin/bash\n[ "$1" = --prefix ] && [ "$2" = node@24 ] || exit 1\n'
+        + f"printf '%s\\n' '{runtime.parent}'\n"
+    )
+    brew.chmod(0o755)
+    uname = commands / "uname"
+    uname.write_text("#!/bin/bash\nprintf 'Darwin\\n'\n")
+    uname.chmod(0o755)
+    result = _probe_node(commands)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[-2:] == [str(node), str(npm)]
+
+
+@pytest.mark.parametrize(
+    ("node_version", "npm_version", "supported"),
+    [
+        ("24.11.0", "11.0.0", True),
+        ("24.18.0", "11.16.0", True),
+        ("24.10.0", "11.16.0", False),
+        ("26.11.1", "11.16.0", False),
+        ("24.18.0", "12.0.0", False),
+        ("unknown", "11.16.0", False),
+        ("24.18.0", "unknown", False),
+    ],
+)
+def test_node_runtime_validation_preserves_supported_path_and_rejects_others(
+    tmp_path: Path, node_version: str, npm_version: str, supported: bool
+) -> None:
+    """Discovery must retain the existing supported Node and npm version ranges."""
+    for name, version in [("node", node_version), ("npm", npm_version)]:
+        executable = tmp_path / name
+        executable.write_text(f"#!/bin/bash\nprintf '%s\\n' '{version}'\n")
+        executable.chmod(0o755)
+    # Successful public checks must preserve the user's PATH installation.
+    result = _probe_node(
+        tmp_path, "check_frontend_runtime" if supported else "frontend_runtime_matches"
+    )
+    assert (result.returncode == 0) is supported
+    if supported:
+        assert result.stdout.splitlines()[-2:] == [
+            str(tmp_path / "node"),
+            str(tmp_path / "npm"),
+        ]

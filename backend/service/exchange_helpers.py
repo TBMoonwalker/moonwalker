@@ -1,8 +1,10 @@
 """Utility helpers for exchange order and balance handling."""
 
+from decimal import Decimal, localcontext
 from typing import Any
 
-from service.feedback_accounting import execution_accounting, execution_fees
+from service.exchange_types import ExchangeOrderReport
+from service.feedback_accounting import execution_accounting
 
 
 def is_matching_order_id(candidate_order_id: Any, expected_order_id: str) -> bool:
@@ -17,41 +19,83 @@ def aggregate_matched_trades(
     symbol: str,
 ) -> dict[str, Any]:
     """Aggregate partial fills into one trade-like payload."""
-    amount = 0.0
-    fee = 0.0
-    cost = 0.0
-    base_fee = 0.0
-
-    for order in matched_orders:
-        amount += float(order["amount"])
-        cost += float(order["cost"])
-        base_asset = str(order.get("symbol", symbol)).split("/")[0].upper()
-        side = str(order.get("side") or "").lower()
-        for fee_data in execution_fees(order):
-            if not isinstance(fee_data, dict):
-                continue
-            fee_cost = float(fee_data.get("cost") or 0.0)
-            fee += fee_cost
-            fee_currency = str(fee_data.get("currency") or "").upper()
-            if side == "buy" and fee_currency == base_asset:
-                base_fee += fee_cost
-
-    last_order = max(matched_orders, key=lambda o: int(o.get("timestamp") or 0))
-
-    trade: dict[str, Any] = {}
-    trade["cost"] = cost
-    trade["fee"] = fee
-    trade["base_fee"] = base_fee
-    trade["amount"] = amount
-    trade["timestamp"] = last_order["timestamp"]
-    trade["price"] = (cost / amount) if amount > 0 else last_order["price"]
-    trade["order"] = last_order["order"]
-    trade["symbol"] = last_order["symbol"]
-    trade["side"] = last_order["side"]
-    trade["fee_cost"] = fee
-    trade["feedback_accounting"] = execution_accounting(matched_orders, symbol)
-
-    return trade
+    if not matched_orders or len(matched_orders) > 1000:
+        raise ValueError("A bounded, nonempty execution list is required.")
+    last_order = max(matched_orders, key=lambda row: int(row.get("timestamp") or 0))
+    order_id = str(last_order["order"])
+    side = last_order["side"]
+    seen: set[str] = set()
+    reports = []
+    with localcontext() as context:
+        context.prec = 512
+        for row in matched_orders:
+            if (
+                str(row.get("order")) != order_id
+                or row.get("symbol", symbol) != symbol
+                or row.get("side") != side
+            ):
+                raise ValueError("Execution evidence belongs to another order.")
+            identity = row.get("id")
+            if (
+                isinstance(identity, bool)
+                or not isinstance(identity, (str, int))
+                or not str(identity)
+            ):
+                raise ValueError("An execution identity is required.")
+            if str(identity) in seen:
+                raise ValueError("Duplicate execution identity.")
+            seen.add(str(identity))
+            report = ExchangeOrderReport.from_order(
+                {
+                    "id": order_id,
+                    "symbol": symbol,
+                    "side": side,
+                    "filled": row["amount"],
+                    "cost": row["cost"],
+                    "timestamp": row["timestamp"],
+                    "fees": row.get("fees"),
+                    "fee": row.get("fee"),
+                }
+            )
+            reports.append(report)
+        amount = sum((Decimal(row.filled) for row in reports), Decimal(0))
+        cost = sum((Decimal(row.quote_cost) for row in reports), Decimal(0))
+        fees: dict[str, Decimal] = {}
+        for row in reports:
+            for currency, value in row.fees.items():
+                fees[currency] = fees.get(currency, Decimal(0)) + Decimal(value)
+        combined = ExchangeOrderReport(
+            order_id,
+            symbol,
+            side,
+            format(amount, "f"),
+            format(cost, "f"),
+            {key: format(value, "f") for key, value in fees.items()},
+            all(row.fees_complete for row in reports),
+            False,
+            int(last_order["timestamp"]),
+        )
+        base_fee = (
+            fees.get(symbol.split("/")[0].upper(), Decimal(0))
+            if side == "buy"
+            else Decimal(0)
+        )
+        # Unitless fee totals remain only in the legacy output, never the report.
+        legacy_fee = float(sum(fees.values(), Decimal(0)))
+        return {
+            "cost": float(cost),
+            "fee": legacy_fee,
+            "fee_cost": legacy_fee,
+            "base_fee": float(base_fee),
+            "amount": float(amount),
+            "timestamp": combined.timestamp_ms,
+            "price": float(cost / amount) if amount else last_order["price"],
+            "order": order_id,
+            "symbol": symbol,
+            "side": side,
+            "execution_report": combined,
+            "feedback_accounting": execution_accounting(matched_orders, symbol),
+        }
 
 
 def precision_step_for_amount(amount_str: str) -> float:

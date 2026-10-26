@@ -178,3 +178,102 @@ async def test_signal_plugin_crash_is_logged_and_restarted(monkeypatch) -> None:
     assert not signal._task.done()
 
     await signal.shutdown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name,enabled",
+    [
+        ("asap", False),
+        ("csv_signal", False),
+        ("sym_signals", True),
+        ("websocket_signal", True),
+    ],
+)
+async def test_accumulation_loader_rejects_unsupported_or_disabled_entry(
+    monkeypatch, name, enabled
+):
+    signal = Signal(asyncio.Queue())
+    if enabled:
+        signal.accumulation_entry = object()
+
+    def unexpected(_name):
+        raise AssertionError("Unsupported accumulation setup must not start a plugin")
+
+    monkeypatch.setattr(signal, "_load_plugin_instance", unexpected)
+    await signal._reload_plugin({"signal": name, "trade_mode": "accumulation"})
+    assert signal.signal_plugin is None
+    assert signal._task is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["asap", "csv_signal"])
+async def test_demo_accumulation_loader_starts_supported_plugin(monkeypatch, name):
+    signal = Signal(asyncio.Queue())
+    signal.accumulation_entry = object()
+    started = asyncio.Event()
+
+    class DemoPlugin:
+        def __init__(self, queue):
+            self.accumulation_entry = None
+
+        async def run(self, config):
+            assert config["dry_run"] is True
+            assert self.accumulation_entry is signal.accumulation_entry
+            started.set()
+            await asyncio.Event().wait()
+
+        async def shutdown(self):
+            pass
+
+    monkeypatch.setattr(
+        signal_module.importlib,
+        "import_module",
+        lambda _: types.SimpleNamespace(SignalPlugin=DemoPlugin),
+    )
+    try:
+        await signal._reload_plugin(
+            {
+                "signal": name,
+                "trade_mode": "accumulation",
+                "dry_run": True,
+            }
+        )
+        assert signal.signal_name == name
+        await asyncio.wait_for(started.wait(), 1)
+    finally:
+        await signal.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_identical_configuration_does_not_cancel_active_entry(monkeypatch):
+    signal = Signal(asyncio.Queue())
+    created = []
+
+    class Plugin:
+        def __init__(self, queue):
+            self.shutdown_calls = 0
+            created.append(self)
+
+        async def run(self, config):
+            await asyncio.Event().wait()
+
+        async def shutdown(self):
+            self.shutdown_calls += 1
+
+    monkeypatch.setattr(
+        signal_module.importlib,
+        "import_module",
+        lambda _: types.SimpleNamespace(SignalPlugin=Plugin),
+    )
+    config = {"signal": "asap", "dry_run": True}
+    try:
+        await signal._reload_plugin(config)
+        original = signal._task
+        await signal._reload_plugin(dict(config))
+        assert signal._task is original and not original.cancelled()
+        assert len(created) == 1 and created[0].shutdown_calls == 0
+        await signal._reload_plugin({**config, "currency": "usdc"})
+        assert len(created) == 2 and created[0].shutdown_calls == 1
+    finally:
+        await signal.shutdown()

@@ -1,5 +1,15 @@
 """Tortoise ORM model exports."""
 
+from .accumulation import AccumulationActivation as AccumulationActivation
+from .accumulation import AccumulationAttempt as AccumulationAttempt
+from .accumulation import AccumulationFillCheckpoint as AccumulationFillCheckpoint
+from .accumulation import (
+    AccumulationLifecycleOperation as AccumulationLifecycleOperation,
+)
+from .accumulation import AccumulationOpportunity as AccumulationOpportunity
+from .accumulation import AccumulationReturnDay as AccumulationReturnDay
+from .accumulation import AccumulationReturnTotals as AccumulationReturnTotals
+from .accumulation import AccumulationStrategyState as AccumulationStrategyState
 from .aitrustanalyticsrevision import (
     AiTrustAnalyticsRevision as AiTrustAnalyticsRevision,
 )
@@ -27,6 +37,14 @@ from .unsellabletrades import UnsellableTrades as UnsellableTrades
 from .upnlhistory import UpnlHistory as UpnlHistory
 
 __all__ = [
+    "AccumulationActivation",
+    "AccumulationAttempt",
+    "AccumulationFillCheckpoint",
+    "AccumulationLifecycleOperation",
+    "AccumulationOpportunity",
+    "AccumulationReturnDay",
+    "AccumulationReturnTotals",
+    "AccumulationStrategyState",
     "AppConfig",
     "AthCache",
     "AiTrustAnalyticsRevision",
@@ -54,6 +72,12 @@ __all__ = [
 
 if __name__ == "__main__":
     __models__ = [
+        "AccumulationActivation",
+        "AccumulationAttempt",
+        "AccumulationFillCheckpoint",
+        "AccumulationLifecycleOperation",
+        "AccumulationOpportunity",
+        "AccumulationStrategyState",
         "Autopilot",
         "AiTrustAnalyticsRevision",
         "AiTrustPrediction",

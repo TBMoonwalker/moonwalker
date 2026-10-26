@@ -23,6 +23,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+    'update-accumulation': [key: string, value: unknown]
     validate: []
     'set-decision': [nodeId: string]
     'connect-decision': []
@@ -46,7 +47,23 @@ const comparisonOperatorOptions = [
     { label: 'not equals', value: 'not_equals' },
 ]
 
+const accumulationFields = [
+    ['peak_length', 'Peak lookback (candles)'],
+    ['atr_length', 'ATR length'], ['entry_atr', 'Minimum dip (ATR)'],
+    ['spacing_atr', 'Buy spacing (ATR)'], ['recovery_atr', 'Recovery reset (ATR)'],
+    ['min_fraction', 'Minimum budget fraction'], ['slope', 'Budget increase per ATR'],
+    ['max_fraction', 'Maximum budget fraction'],
+] as const
+const timeframeOptions = ['', '1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'].map(value => ({
+    value, label: value || 'Base timeframe',
+}))
 const indicatorOptions = [
+    { label: 'ATR', value: 'atr' },
+    { label: 'ADX', value: 'adx' },
+    { label: '+DI', value: 'plus_di' },
+    { label: '−DI', value: 'minus_di' },
+    { label: 'EMA slope / ATR', value: 'ema_slope' },
+    { label: 'EMA discount / ATR', value: 'ema_distance_atr' },
     { label: 'EMA', value: 'ema' },
     { label: 'RSI', value: 'rsi' },
     { label: 'Bollinger upper', value: 'bollinger_upper' },
@@ -116,7 +133,7 @@ function isComparisonOperatorParam(key: string): boolean {
 function isGenericParamVisible(key: string, value: unknown): boolean {
     if (
         props.selectedNode?.type === 'indicator' &&
-        ['indicator', 'length', 'sample'].includes(key)
+        ['indicator', 'length', 'sample', 'timeframe'].includes(key)
     ) {
         return false
     }
@@ -127,7 +144,7 @@ function indicatorUsesLength(node: StrategyNode | null): boolean {
     const indicator = String(node?.params?.indicator ?? '')
     return (
         indicator === 'ema' ||
-        indicator === 'rsi' ||
+        ['rsi', 'atr', 'adx', 'plus_di', 'minus_di', 'ema_slope', 'ema_distance_atr'].includes(indicator) ||
         indicator.startsWith('bollinger_')
     )
 }
@@ -181,6 +198,25 @@ function selectedInputSource(port: string): string | null {
                     />
                 </label>
 
+                <n-checkbox
+                    :checked="!!detail.ir.accumulation"
+                    :disabled="readOnly"
+                    @update:checked="emit('update-accumulation', 'enabled', $event)"
+                >Use with accumulation
+                </n-checkbox>
+                <details v-if="detail.ir.accumulation" class="connection-editor">
+                    <summary>Accumulation execution settings</summary>
+                    <p class="empty-copy">The graph filters subsequent buys. ASAP still buys the initial base order. Assign saved versions in Configuration.</p>
+                    <p class="empty-copy">Base timeframe follows Exchange configuration. Budget increases apply to fresh downside since the preceding purchase.</p>
+                    <label v-for="[key, label] in accumulationFields" :key="key">
+                        {{ label }}
+                        <n-input :value="String(detail.ir.accumulation[key])"
+                            :disabled="readOnly"
+                            @update:value="emit('update-accumulation', key, $event)"
+                        />
+                    </label>
+                </details>
+
                 <div v-if="selectedNode" class="node-inspector">
                     <div class="node-inspector-header">
                         <strong>{{ nodeTitle(selectedNode) }}</strong>
@@ -219,6 +255,12 @@ function selectedInputSource(port: string): string | null {
                         class="connection-editor"
                     >
                         <strong>Indicator attributes</strong>
+                        <label>Timeframe
+                            <n-select :value="String(selectedNode.params?.timeframe ?? '')"
+                                :options="timeframeOptions" :disabled="readOnly"
+                                @update:value="emit('update-param-value', 'timeframe', $event)"
+                            />
+                        </label>
                         <label>
                             Indicator
                             <n-select
@@ -458,8 +500,10 @@ label {
         grid-template-columns: 1fr;
     }
 
-    .inspector-panel {
-        display: none;
-    }
+
+
+}
+@media (max-width: 600px) {
+    .inspector-panel { display: none; }
 }
 </style>

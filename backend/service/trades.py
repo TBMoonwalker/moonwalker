@@ -15,7 +15,7 @@ from service.order_persistence import (
 )
 from service.placement_intents import mark_placement_persisted_in_transaction
 from service.spot_campaign_types import TradeExposureState
-from service.trade_math import parse_date_to_ms
+from service.trade_math import has_fee_inclusive_cost, parse_date_to_ms
 from service.trading_controls import resolve_mission_pause_fields
 from tortoise.exceptions import BaseORMException
 from tortoise.expressions import F
@@ -740,6 +740,10 @@ class Trades:
         total_amount = 0
         current_price = 0
         safetyorders = []
+        included_cost = 0.0
+        legacy_cost = 0.0
+        legacy_fee = 0.0
+        has_included_cost = False
 
         try:
             trades = await self.get_trades_by_symbol(symbol)
@@ -756,6 +760,12 @@ class Trades:
             for order in trades:
                 amount = float(order["amount"])
                 total_cost += float(order["ordersize"])
+                if has_fee_inclusive_cost(order):
+                    has_included_cost = True
+                    included_cost += float(order["ordersize"])
+                else:
+                    legacy_cost += float(order["ordersize"])
+                    legacy_fee = float(order["fee"])
                 total_amount += amount
                 latest_order = order
 
@@ -785,18 +795,29 @@ class Trades:
                 total_amount=total_amount,
                 open_trade=open_trade,
             )
+            # CSV costs already include declared acquisition fees; only legacy
+            # costs receive the existing latest non-CSV fee estimate.
+            entry_cost = (
+                included_cost + legacy_cost * (1 + legacy_fee)
+                if has_included_cost
+                else None
+            )
 
             # For unsellable remnants, OpenTrades carries the authoritative
             # remaining amount/cost after partial close bookkeeping.
             if unsellable_state["is_unsellable"] and open_trade:
+                original_cost = total_cost
                 total_amount = float(open_trade.get("amount") or total_amount)
                 total_cost = float(open_trade.get("cost") or total_cost)
+                if entry_cost is not None and original_cost > 0:
+                    entry_cost *= total_cost / original_cost
                 sellable_amount = total_amount
 
             trade_data = {
                 "timestamp": latest_order["timestamp"],
                 "fee": latest_order["fee"],
                 "total_cost": total_cost,
+                "entry_cost": entry_cost,
                 "total_amount": total_amount,
                 "sellable_amount": sellable_amount,
                 "symbol": latest_order["symbol"],

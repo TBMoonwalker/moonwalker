@@ -29,8 +29,9 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 - If updates are found, record them in the task summary and explicitly classify each as:
   - patch/minor (safe candidate)
   - major (needs compatibility review)
-- check updates against online services to check if they are safe or have been compromised or are vulnerable
-- if they are not safe do not classify them as updateable
+- Before updating any direct or transitive dependency, research the web for known vulnerabilities, malicious releases, compromised repositories or registries, and maintainer account incidents affecting the package and exact proposed version. Check official maintainer statements, registry notices, and security advisories; follow credible incident reports to primary sources.
+- A clean vulnerability audit, a patch/minor version number, or a valid registry signature alone does not establish that a release is trustworthy. When a compromise is reported, verify the actual release artifact against its expected source commit and signed build provenance where available, inspect lifecycle hooks and reported malicious indicators, and prefer a verified post-incident release. Keep package lifecycle scripts disabled during inspection and initial installation.
+- Do not install or classify a release as updateable while its involvement in a reported compromise remains unresolved. Record the research links, exact target version, verification evidence, and update/hold decision in the task summary.
 - Apply dependency updates (only if safe) only in dedicated dependency PRs/changesets unless the task explicitly asks for version upgrades.
 
 ### Backend (Python)
@@ -77,6 +78,7 @@ This script:
 
 Moonwalker is a cryptocurrency trading bot that connects to exchanges (like Binance) and executes trades based on signals from various plugins. It supports:
 - Dynamic DCA (Dollar Cost Averaging) deals
+- Accumulation with strategy-driven spot purchases and explicit operator sales
 - Multiple signal plugins (ASAP, SymSignals, CSV Signal)
 - Various trading strategies (EMA cross, Bbands cross, Ichimoku, etc.)
 - Autopilot mode for automatic portfolio management
@@ -147,6 +149,7 @@ The backend is a Python application using Litestar with the following structure:
     - `config.py` - Singleton configuration manager backed by DB (`AppConfig`), hot-reload via Redis pub/sub
     - `exchange.py` - Async CCXT wrapper: buy/sell lifecycle, precision, balance, retry logic
     - `dca.py` - Core DCA engine: processes tickers, evaluates TP/SO triggers, places orders
+    - `accumulation_runtime.py` - Lifespan-owned accumulation orchestration, entry recovery, strategy evaluation and operator commands
     - `watcher.py` - Real-time OHLCV/trade streaming via CCXT Pro WebSockets with auto-reconnect
     - `trades.py` - Trade persistence layer: CRUD for open/closed trades, aggregation
     - `orders.py` - Order execution and management
@@ -176,7 +179,8 @@ The backend is a Python application using Litestar with the following structure:
    - Each strategy is a module with indicator calculation logic
 
 5. **Models** (`backend/model/`)
-   - 9 Tortoise ORM models: `AppConfig`, `AthCache`, `Autopilot`, `Trades`, `OpenTrades`, `ClosedTrades`, `Tickers`, `Listings`, `UpnlHistory`
+   - Tortoise ORM models include `AppConfig`, `AthCache`, `Autopilot`, `Trades`, `OpenTrades`, `ClosedTrades`, `Tickers`, `Listings`, `UpnlHistory`
+   - `accumulation.py` adds activation, strategy observations, opportunities, attempts, lifecycle operations, fill checkpoints and derived return caches
    - Database: SQLite (configurable via `MOONWALKER_DB_URL`)
 
 6. **Helper** (`backend/helper/`)
@@ -201,8 +205,8 @@ In QA mode, flag any code that doesn't match DESIGN.md.
 ## Development Setup
 
 ### Prerequisites
-- Python > 3.10.x
-- Node.js (for frontend)
+- Python 3.14.x (verified patch in `.python-version`)
+- Node.js 24.x and npm 11.x (verified Node patch in `.nvmrc`)
 - TA-Lib (install separately - see https://ta-lib.org/install/)
 
 ### Installation

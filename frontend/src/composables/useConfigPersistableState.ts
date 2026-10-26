@@ -46,6 +46,7 @@ const SECTION_LABELS: Record<string, string> = {
 function buildPersistableState(
     options: UseConfigPersistableStateOptions,
 ): PersistableState {
+    const { accumulation_available: _available, ...persistedDca } = options.dca.value
     return {
         aiTrust: { ...options.aiTrust.value },
         general: { ...options.general.value },
@@ -78,7 +79,7 @@ function buildPersistableState(
         },
         filter: { ...options.filter.value },
         exchange: { ...options.exchange.value },
-        dca: { ...options.dca.value },
+        dca: persistedDca,
         capital: { ...options.capital.value },
         autopilot: { ...options.autopilot.value },
         monitoring: { ...options.monitoring.value },

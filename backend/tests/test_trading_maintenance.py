@@ -101,6 +101,7 @@ async def test_buy_is_rejected_while_restore_owns_lifecycle_coordinator(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_maintenance_drains_complete_dca_evaluation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

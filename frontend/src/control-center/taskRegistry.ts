@@ -46,7 +46,7 @@ const TASKS: readonly ControlCenterTaskPresentation[] = [
     {
         target: 'dca',
         title: 'Trade modes',
-        summary: 'Tune Dynamic DCA runtime behavior.',
+        summary: 'Choose the trade mode and configure how positions are managed.',
         defaultMode: 'setup',
         modes: ['setup', 'advanced'],
         sectionId: 'control-center-dca',
@@ -164,6 +164,8 @@ const KEY_TARGETS: Record<string, ControlCenterTarget> = {
     btc_pulse: 'filter',
     dca: 'dca',
     trade_mode: 'dca',
+    accumulation_strategy_version_id: 'dca',
+    accumulation_available: 'dca',
     dca_strategy: 'dca',
     max_bots: 'dca',
     bo: 'dca',
