@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
+import model
 import pytest
+import pytest_asyncio
 from service.lifecycle_snapshot import LifecycleSnapshotIdentity
 from service.order_mutation_result import (
     OrderMutationResult,
@@ -14,6 +17,216 @@ from service.order_mutation_result import (
 from service.orders import Orders
 from service.placement_intents import PlacementIntentState
 from service.trades import TradeStateUnavailableError
+from tortoise import Tortoise
+from tortoise.exceptions import IntegrityError
+
+
+@pytest_asyncio.fixture
+async def stopped_trade_db(tmp_path, monkeypatch):
+    """Exercise operator stops against real isolated trade persistence."""
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'stop.sqlite'}", modules={"models": ["model"]}
+    )
+    await Tortoise.generate_schemas()
+    orders = Orders()
+    # Replay exchange repair is unrelated to the accounting transaction.
+    monkeypatch.setattr(
+        "service.order_persistence._repair_replay_archive_after_commit", AsyncMock()
+    )
+    monkeypatch.setattr(orders.exchange, "create_spot_sell", AsyncMock())
+    monkeypatch.setattr(orders.monitoring, "notify_trade", AsyncMock())
+    await model.Trades.create(
+        symbol="BTC/USDC",
+        deal_id="stop-deal",
+        timestamp="1773580000000",
+        ordersize=200.0,
+        amount=2.0,
+        price=100.0,
+        fee=0.0,
+        precision=8,
+        amount_fee=0.0,
+        orderid="stop-buy",
+        bot="csv_signal",
+        ordertype="market",
+        baseorder=True,
+        safetyorder=False,
+        order_count=0,
+        direction="long",
+        side="buy",
+        cost_includes_fees=True,
+    )
+    await model.OpenTrades.create(
+        symbol="BTC/USDC",
+        deal_id="stop-deal",
+        amount=2.0,
+        cost=200.0,
+        current_price=120.0,
+        avg_price=100.0,
+        open_date="1773580000000",
+    )
+    await model.TradeExecutions.create(
+        symbol="BTC/USDC",
+        deal_id="stop-deal",
+        side="buy",
+        role="base_order",
+        timestamp="1773580000000",
+        price=100.0,
+        amount=2.0,
+        ordersize=200.0,
+    )
+    try:
+        yield orders
+    finally:
+        await orders.trades.invalidate_trade_caches()
+        await orders.trades.get_trade_by_ordertype.cache_clear()
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("price", [80.0, 100.0, 120.0])
+async def test_operator_stop_records_market_value_without_selling(
+    stopped_trade_db, price
+):
+    orders = stopped_trade_db
+    await model.OpenTrades.filter(symbol="BTC/USDC").update(current_price=price)
+
+    result = await orders.receive_stop_signal_result("BTC/USDC", {})
+
+    assert result.applied
+    closed = await model.ClosedTrades.get(symbol="BTC/USDC")
+    assert closed.close_reason == "manual_stop"
+    assert closed.deal_id == "stop-deal"
+    assert closed.amount == pytest.approx(2.0)
+    assert closed.cost == pytest.approx(200.0)
+    assert closed.tp_price == pytest.approx(price)
+    assert closed.profit == pytest.approx(2 * price - 200)
+    assert closed.profit_percent == pytest.approx(price - 100)
+    assert not await model.OpenTrades.exists()
+    assert not await model.Trades.exists()
+    assert await model.TradeExecutions.filter(side="buy").count() == 1
+    mark = await model.TradeExecutions.get(side="sell")
+    assert mark.price == pytest.approx(price)
+    assert mark.order_id is None
+    assert mark.order_type == "manual_stop"
+    assert mark.fee == 0.0
+    assert '"valuation_only": true' in mark.metadata_json
+    orders.exchange.create_spot_sell.assert_not_awaited()
+    orders.monitoring.notify_trade.assert_not_awaited()
+    assert not (await orders.receive_stop_signal_result("BTC/USDC", {})).applied
+    assert await model.ClosedTrades.all().count() == 1
+
+
+@pytest.mark.asyncio
+async def test_operator_stop_includes_fill_during_tp_cancellation(
+    stopped_trade_db, monkeypatch
+):
+    orders = stopped_trade_db
+
+    async def cancel_with_partial_fill(_symbol, _config):
+        from service.order_persistence import persist_tp_limit_cancellation
+
+        return await persist_tp_limit_cancellation(
+            "BTC/USDC",
+            {"filled": 0.5, "average": 110.0, "cost": 55.0, "timestamp": 1773580001000},
+        )
+
+    monkeypatch.setattr(
+        orders, "_cancel_tp_limit_order_locked", cancel_with_partial_fill
+    )
+    assert (await orders.receive_stop_signal_result("BTC/USDC", {})).applied
+    closed = await model.ClosedTrades.get(symbol="BTC/USDC")
+    assert closed.amount == pytest.approx(2.0)
+    assert closed.cost == pytest.approx(200.0)
+    assert closed.profit == pytest.approx(55 + 1.5 * 120 - 200)
+    assert closed.tp_price == pytest.approx(117.5)
+    assert await model.TradeExecutions.filter(role="partial_sell").count() == 1
+    assert (await model.TradeExecutions.get(role="final_sell")).amount == pytest.approx(
+        1.5
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("price", [0.0, -1.0, float("inf")])
+async def test_operator_stop_rejects_invalid_valuation(stopped_trade_db, price):
+    await model.OpenTrades.filter(symbol="BTC/USDC").update(current_price=price)
+    assert not (
+        await stopped_trade_db.receive_stop_signal_result("BTC/USDC", {})
+    ).applied
+    assert await model.OpenTrades.exists()
+    assert await model.Trades.exists()
+    assert await model.TradeExecutions.all().count() == 1
+    assert not await model.ClosedTrades.exists()
+
+
+@pytest.mark.asyncio
+async def test_operator_stop_rolls_back_failed_closure(stopped_trade_db, monkeypatch):
+    monkeypatch.setattr(
+        model.TradeExecutions,
+        "create",
+        AsyncMock(side_effect=IntegrityError("write failed")),
+    )
+    assert not (
+        await stopped_trade_db.receive_stop_signal_result("BTC/USDC", {})
+    ).applied
+    assert await model.OpenTrades.exists()
+    assert await model.Trades.exists()
+    assert await model.TradeExecutions.all().count() == 1
+    assert not await model.ClosedTrades.exists()
+
+
+@pytest.mark.asyncio
+async def test_operator_stop_retains_trade_when_cancellation_fails(
+    stopped_trade_db, monkeypatch
+):
+    monkeypatch.setattr(
+        stopped_trade_db, "_cancel_tp_limit_order_locked", AsyncMock(return_value=False)
+    )
+    assert not (
+        await stopped_trade_db.receive_stop_signal_result("BTC/USDC", {})
+    ).applied
+    assert await model.OpenTrades.exists()
+    assert await model.Trades.exists()
+    assert await model.TradeExecutions.all().count() == 1
+    assert not await model.ClosedTrades.exists()
+
+
+@pytest.mark.asyncio
+async def test_operator_stop_values_unsellable_remainder(stopped_trade_db):
+    await model.OpenTrades.filter(symbol="BTC/USDC").update(
+        amount=0.01,
+        cost=1.0,
+        unsellable_amount=0.01,
+        unsellable_reason="minimum_notional",
+    )
+    assert (await stopped_trade_db.receive_stop_signal_result("BTC/USDC", {})).applied
+    closed = await model.ClosedTrades.get(symbol="BTC/USDC")
+    assert closed.amount == pytest.approx(0.01)
+    assert closed.cost == pytest.approx(1.0)
+    assert closed.profit == pytest.approx(0.2)
+
+
+@pytest.mark.asyncio
+async def test_operator_stop_fails_closed_on_partial_read_error(
+    stopped_trade_db, monkeypatch
+):
+    orders = stopped_trade_db
+    fail_on_error_seen: list[bool] = []
+
+    async def raise_unavailable(
+        _symbol: str, *, fail_on_error: bool = False
+    ) -> tuple[float, float]:
+        fail_on_error_seen.append(fail_on_error)
+        raise TradeStateUnavailableError("partial sell read unavailable")
+
+    monkeypatch.setattr(orders.trades, "get_partial_sell_execution", raise_unavailable)
+
+    assert not (await orders.receive_stop_signal_result("BTC/USDC", {})).applied
+    assert fail_on_error_seen
+    assert fail_on_error_seen[0] is True
+    assert await model.OpenTrades.exists()
+    assert await model.Trades.exists()
+    assert await model.TradeExecutions.filter(side="buy").count() == 1
+    assert not await model.ClosedTrades.exists()
 
 
 def _trade(**overrides: Any) -> dict[str, Any]:

@@ -329,12 +329,21 @@ All mutating order endpoints use `POST`.
 | --- | --- | --- |
 | `POST` | `/orders/sell/{symbol}` | Trigger a manual sell for a symbol. |
 | `POST` | `/orders/buy/{symbol}/{ordersize}` | Trigger a manual buy / additional safety order. |
-| `POST` | `/orders/stop/{symbol}` | Stop an active trade. |
+| `POST` | `/orders/stop/{symbol}` | Close a DCA trade's ledger at its latest tracked market price, without selling coins. |
 | `POST` | `/orders/buy/manual` | Append a manual buy row without placing an exchange order. |
 
 The sell, buy, and stop endpoints retain their legacy `result` field and also
 return a typed `mutation` object. Its `status` is one of `applied`,
 `deduplicated`, `rejected`, `stale`, `indeterminate`, or `quarantined`.
+
+Stop records a closed trade with reason `manual_stop`, preserves its execution
+history, and includes earlier partial-sale proceeds in P&L. The remaining coins
+are valued at the latest tracked price, with a `valuation_only` ledger entry;
+no sell order or hypothetical sell fee is created. Coins remain on the exchange
+for the operator to manage. Pending take-profit orders must be safely canceled
+or reconciled first. Missing or invalid prices reject the stop and retain the
+open trade. Previously stopped trades whose history was deleted are not rebuilt.
+
 For confirmed buy and sell requests, clients should send an
 `X-Moonwalker-Operation-Id` header containing 1-64 letters, numbers, or the
 characters `._:-`. Reuse the exact same value only when retrying the same

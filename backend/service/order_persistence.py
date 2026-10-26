@@ -968,29 +968,3 @@ async def persist_unsellable_remainder(
         _persist_unsellable_remainder,
         f"persisting unsellable remainder for {symbol}",
     )
-
-
-async def persist_stopped_trade(
-    symbol: str,
-    *,
-    campaign_context: CampaignPersistenceContext | None = None,
-) -> None:
-    """Delete open-trade state for a stopped symbol."""
-
-    async def _persist_stop() -> None:
-        async with in_transaction() as conn:
-            open_trade = (
-                await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
-            )
-            await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
-            await model.Trades.filter(symbol=symbol).using_db(conn).delete()
-            if open_trade and open_trade.deal_id:
-                await (
-                    model.TradeExecutions.filter(
-                        deal_id=open_trade.deal_id,
-                    )
-                    .using_db(conn)
-                    .delete()
-                )
-
-    await run_sqlite_write_with_retry(_persist_stop, f"stopping symbol {symbol}")

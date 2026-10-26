@@ -610,15 +610,38 @@ class Trades:
             await self._clear_order_cache()
         return bool(updated)
 
-    async def get_partial_sell_execution(self, symbol: str) -> tuple[float, float]:
-        """Return accumulated partial sell totals (amount, proceeds)."""
-        open_trade_rows = await self._execute_db(
-            model.OpenTrades.filter(symbol=symbol)
-            .limit(1)
-            .values("sold_amount", "sold_proceeds"),
-            f"Error reading partial sell execution for {symbol}.",
-            [],
-        )
+    async def get_partial_sell_execution(
+        self,
+        symbol: str,
+        *,
+        fail_on_error: bool = False,
+    ) -> tuple[float, float]:
+        """Return accumulated partial sell totals (amount, proceeds).
+
+        When ``fail_on_error`` is set, a database failure propagates as a
+        ``TradeStateUnavailableError`` instead of falling back to zero totals,
+        so a caller that must trust the partial bookkeeping can fail closed
+        rather than commit wrong P&L on an unreadable ledger.
+        """
+        if fail_on_error:
+            try:
+                open_trade_rows = (
+                    await model.OpenTrades.filter(symbol=symbol)
+                    .limit(1)
+                    .values("sold_amount", "sold_proceeds")
+                )
+            except BaseORMException as exc:
+                raise TradeStateUnavailableError(
+                    f"Could not read partial sell execution for {symbol}."
+                ) from exc
+        else:
+            open_trade_rows = await self._execute_db(
+                model.OpenTrades.filter(symbol=symbol)
+                .limit(1)
+                .values("sold_amount", "sold_proceeds"),
+                f"Error reading partial sell execution for {symbol}.",
+                [],
+            )
         open_trade = open_trade_rows[0] if open_trade_rows else None
         totals = self._normalize_partial_sell_execution(open_trade)
         return totals["sold_amount"], totals["sold_proceeds"]

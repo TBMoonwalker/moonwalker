@@ -1,6 +1,7 @@
 """Order orchestration for exchange buy/sell actions."""
 
 import json
+import math
 import sqlite3
 from datetime import datetime
 from typing import Any, TypeGuard
@@ -49,7 +50,6 @@ from service.order_persistence import (
     persist_closed_trade,
     persist_manual_buy_add,
     persist_partial_sell_execution,
-    persist_stopped_trade,
 )
 from service.order_requests import normalize_order_symbol, parse_manual_buy_add_request
 from service.placement_intents import (
@@ -1548,22 +1548,34 @@ class Orders:
         )
 
     async def __calculate_closed_trade_stats(
-        self, order_status: SoldCheckStatus
+        self,
+        order_status: SoldCheckStatus,
+        *,
+        partial_amount: float | None = None,
+        partial_proceeds: float | None = None,
     ) -> dict[str, Any]:
-        """Build closed-trade payload and monitoring payload."""
+        """Build closed-trade payload and monitoring payload.
+
+        When the partial totals are supplied, they are used as the trusted
+        bookkeeping and no second read is performed. A stop passes totals it
+        read through a fail-closed path, so a transient read error aborts the
+        close instead of silently falling back to zero proceeds.
+        """
         symbol = order_status["symbol"]
         open_timestamp = await self.__resolve_open_timestamp(symbol)
         so_count = await self.__resolve_so_count(symbol)
-        partial_amount, partial_proceeds = await self.trades.get_partial_sell_execution(
-            symbol
-        )
+        if partial_amount is None or partial_proceeds is None:
+            (
+                partial_amount,
+                partial_proceeds,
+            ) = await self.trades.get_partial_sell_execution(symbol)
 
         return build_closed_trade_payloads(
             order_status,
             so_count=so_count,
             open_timestamp_ms=open_timestamp,
-            partial_amount=partial_amount,
-            partial_proceeds=partial_proceeds,
+            partial_amount=partial_amount or 0.0,
+            partial_proceeds=partial_proceeds or 0.0,
         )
 
     async def __resolve_open_timestamp(self, symbol: str) -> float:
@@ -2244,7 +2256,7 @@ class Orders:
         symbol: str,
         config: dict[str, Any] | None = None,
     ) -> bool:
-        """Stop one symbol with the symbol prelocked."""
+        """Close the ledger at its current market mark without selling inventory."""
         logging.info("Incoming stop order")
         symbol = normalize_order_symbol(symbol)
         lifecycle_mutation_coordinator.assert_prelocked(symbol)
@@ -2257,11 +2269,52 @@ class Orders:
             )
             if not canceled:
                 return False
-            await persist_stopped_trade(symbol)
+            # Cancellation can record another partial fill. Reload under the
+            # lifecycle lock so only the remaining coins receive the market mark.
+            trade = await self._load_authoritative_trade(symbol)
+            if trade is None:
+                return False
+            price = float(trade.get("current_price") or 0.0)
+            amount = float(trade["sellable_amount"])
+            cost = float(trade["total_cost"])
+            if (
+                not all(math.isfinite(value) for value in (price, amount, cost))
+                or price <= 0
+                or amount < 0
+                or cost <= 0
+            ):
+                logging.warning("Cannot value stopped trade for %s.", symbol)
+                return False
+            # A stop must trust the already-sold proceeds: read them fail-closed
+            # so a transient error aborts the close instead of committing wrong
+            # P&L on silently swallowed zero totals (the persist reuses a retrying
+            # write, so a read failure must not be tolerated here).
+            (
+                partial_amount,
+                partial_proceeds,
+            ) = await self.trades.get_partial_sell_execution(symbol, fail_on_error=True)
+            close_context = await self.__calculate_closed_trade_stats(
+                {
+                    "symbol": symbol,
+                    "campaign_id": trade.get("campaign_id"),
+                    "total_cost": cost,
+                    "total_amount": amount,
+                    "price": price,
+                    "close_reason": "manual_stop",
+                    "metadata_json": json.dumps(
+                        {"valuation_only": True, "source": "manual_stop"}
+                    ),
+                },
+                partial_amount=partial_amount,
+                partial_proceeds=partial_proceeds,
+            )
+            for execution in close_context["payload"]["sell_executions"]:
+                execution["order_type"] = "manual_stop"
+            await persist_closed_trade(symbol, close_context["payload"])
             await self.trades.invalidate_trade_caches()
             return True
         except (
-            ConfigurationError,
+            BaseORMException,
             RuntimeError,
             TypeError,
             ValueError,
@@ -2272,6 +2325,7 @@ class Orders:
                 "Cannot stop trade for %s. See trade logs for errors. Cause: %s",
                 symbol,
                 e,
+                exc_info=True,
             )
             return False
 
