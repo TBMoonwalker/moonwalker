@@ -4,6 +4,8 @@ import {
     createChart,
     type HistogramData,
     type LineData,
+    type ITimeScaleApi,
+    type Time,
     type UTCTimestamp,
 } from 'lightweight-charts'
 
@@ -118,4 +120,38 @@ export function renderIndicatorSeries(
     })
     line.setData(normalizedIndicatorValues(series, timeOffsetSeconds))
     return line
+}
+
+/** Link one chart group; dispose before removing any of its charts. */
+export function synchronizeTimeScales(
+    charts: ReadonlyArray<{
+        timeScale(): Pick<ITimeScaleApi<Time>,
+            'subscribeVisibleTimeRangeChange' | 'unsubscribeVisibleTimeRangeChange' | 'setVisibleRange'>
+    }>,
+): () => void {
+    let synchronizing = false
+    let active = true
+    const scales = charts.map(chart => chart.timeScale())
+    const subscriptions = scales.map(source => {
+        const handler: Parameters<typeof source.subscribeVisibleTimeRangeChange>[0] = range => {
+            if (!active || !range || synchronizing) return
+            synchronizing = true
+            try {
+                for (const target of scales) {
+                    if (target !== source) target.setVisibleRange(range)
+                }
+            } finally {
+                synchronizing = false
+            }
+        }
+        source.subscribeVisibleTimeRangeChange(handler)
+        return { source, handler }
+    })
+    return () => {
+        if (!active) return
+        active = false
+        for (const { source, handler } of subscriptions) {
+            source.unsubscribeVisibleTimeRangeChange(handler)
+        }
+    }
 }

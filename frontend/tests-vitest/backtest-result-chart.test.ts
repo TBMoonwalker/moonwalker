@@ -52,6 +52,7 @@ function createFakeChart() {
         setVisibleLogicalRange: vi.fn(),
         width: vi.fn(() => 300),
         subscribeVisibleTimeRangeChange: vi.fn(),
+        unsubscribeVisibleTimeRangeChange: vi.fn(),
         setVisibleRange: vi.fn(),
     }
     return {
@@ -208,6 +209,13 @@ describe('BacktestResultChart viewport lifecycle', () => {
 
         await paintNextFrame()
         expect(createdCharts[0].remove).toHaveBeenCalledOnce()
+        const unsubscribe = createdCharts[0].timeScaleApi.unsubscribeVisibleTimeRangeChange
+        expect(unsubscribe).toHaveBeenCalledExactlyOnceWith(
+            createdCharts[0].timeScaleApi.subscribeVisibleTimeRangeChange.mock.calls[0][0],
+        )
+        expect(unsubscribe.mock.invocationCallOrder[0]).toBeLessThan(
+            createdCharts[0].remove.mock.invocationCallOrder[0],
+        )
         expect(createdCharts[0].timeScaleApi.fitContent).not.toHaveBeenCalled()
 
         await paintNextFrame()
@@ -241,6 +249,13 @@ describe('BacktestResultChart viewport lifecycle', () => {
         await paintNextFrame()
 
         expect(createdCharts[0].remove).toHaveBeenCalledOnce()
+        const unsubscribe = createdCharts[0].timeScaleApi.unsubscribeVisibleTimeRangeChange
+        expect(unsubscribe).toHaveBeenCalledExactlyOnceWith(
+            createdCharts[0].timeScaleApi.subscribeVisibleTimeRangeChange.mock.calls[0][0],
+        )
+        expect(unsubscribe.mock.invocationCallOrder[0]).toBeLessThan(
+            createdCharts[0].remove.mock.invocationCallOrder[0],
+        )
         expect(createdCharts[0].timeScaleApi.fitContent).not.toHaveBeenCalled()
     })
 

@@ -75,6 +75,7 @@ import {
     getIndicatorPanes,
     getPriceIndicatorSeries,
     renderIndicatorSeries,
+    synchronizeTimeScales,
     withDistinctIndicatorColors,
     type IndicatorPane,
 } from '../helpers/tradingViewIndicators'
@@ -149,7 +150,7 @@ const ohlcvStore = useOhlcvStore()
 const indicatorChartRefs = new Map<string, HTMLElement>()
 let chart: ReturnType<typeof createChart> | null = null
 let indicatorCharts: Array<ReturnType<typeof createChart>> = []
-let isSynchronizingTimeScale = false
+let stopTimeScaleSynchronization: (() => void) | null = null
 
 const displayIndicators = computed<BacktestIndicatorSeries[]>(() =>
     withDistinctIndicatorColors(replayIndicators.value),
@@ -239,6 +240,8 @@ function chartOptions() {
 }
 
 function removeCharts(): void {
+    stopTimeScaleSynchronization?.()
+    stopTimeScaleSynchronization = null
     if (chart) {
         chart.remove()
         chart = null
@@ -249,22 +252,6 @@ function removeCharts(): void {
     indicatorCharts = []
 }
 
-function synchronizeTimeScales(charts: Array<ReturnType<typeof createChart>>): void {
-    for (const sourceChart of charts) {
-        sourceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-            if (!range || isSynchronizingTimeScale) {
-                return
-            }
-            isSynchronizingTimeScale = true
-            for (const targetChart of charts) {
-                if (targetChart !== sourceChart) {
-                    targetChart.timeScale().setVisibleRange(range)
-                }
-            }
-            isSynchronizingTimeScale = false
-        })
-    }
-}
 
 async function loadReplayIndicators(
     timeframe: TimeframeChoice,
@@ -483,6 +470,7 @@ async function initChart(): Promise<void> {
             time: (Number(entry.time) + localOffsetSeconds) as UTCTimestamp,
         }))
         await nextAnimationFrame()
+        if (chart !== activeChart) return
         candlestickSeries.setData(localTickerData)
 
         for (const series of priceIndicators.value) {
@@ -633,7 +621,8 @@ async function initChart(): Promise<void> {
         }
 
         await nextAnimationFrame()
-        synchronizeTimeScales([activeChart, ...indicatorCharts])
+        if (chart !== activeChart) return
+        stopTimeScaleSynchronization = synchronizeTimeScales([activeChart, ...indicatorCharts])
         activeChart.timeScale().fitContent()
     } catch (error) {
         loadError.value = error instanceof Error
