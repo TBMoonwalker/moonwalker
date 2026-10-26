@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import Mock
 
 import app as app_module
 import pytest
@@ -255,7 +256,6 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
     )
     monkeypatch.setattr(app_module, "runtime_state", app_module.RuntimeState())
     monkeypatch.setattr(app_module, "start_redis", lambda: object())
-    monkeypatch.setattr(app_module, "stop_redis", lambda _proc: None)
     monkeypatch.setattr(app_module, "redis_client", _FakeRedisClient())
     monkeypatch.setattr(
         app_module,
@@ -513,10 +513,11 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
             events.append("redis:close")
 
     state = app_module.RuntimeState()
+    shared_redis_process = Mock()
 
     async def ordered_startup() -> None:
         events.append("startup")
-        state.redis_proc = object()
+        state.redis_proc = shared_redis_process
         state.watcher_queue = asyncio.Queue()
         state.database = OrderedDatabase()
         state.config_service = OrderedConfig()
@@ -533,9 +534,6 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
     async def stop_statistics_fanout() -> None:
         events.append("statistics-fanout:stop")
 
-    def stop_redis_process(_process) -> None:
-        events.append("redis-process:stop")
-
     monkeypatch.setattr(app_module, "runtime_state", state)
     monkeypatch.setattr(app_module, "startup", ordered_startup)
     monkeypatch.setattr(app_module, "ai_work_queue", OrderedQueue("ai-queue"))
@@ -546,7 +544,6 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
     )
     monkeypatch.setattr(app_module, "ai_provider_client", OrderedProvider())
     monkeypatch.setattr(app_module, "redis_client", OrderedRedis())
-    monkeypatch.setattr(app_module, "stop_redis", stop_redis_process)
     monkeypatch.setattr(
         app_module,
         "recover_pending_outcome_attributions",
@@ -587,11 +584,13 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
         "database:shutdown",
         "provider:close",
         "redis:close",
-        "redis-process:stop",
     ]
     assert [event for event in events if event in ordered_shutdown_events] == (
         ordered_shutdown_events
     )
+    shared_redis_process.terminate.assert_not_called()
+    shared_redis_process.kill.assert_not_called()
+    shared_redis_process.wait.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,5 @@
-"""Redis client and local subprocess lifecycle helpers."""
+"""Redis client and startup for the shared local server."""
 
-import atexit
 import os
 import socket
 import subprocess
@@ -20,29 +19,15 @@ def _is_redis_running(host: str = "localhost", port: int = 6379) -> bool:
         return False
 
 
-def stop_redis(proc: subprocess.Popen | None) -> None:
-    """Terminate a spawned Redis process and wait to reap it."""
-    if proc is None:
-        return
-    if proc.poll() is not None:
-        # Ensure already-exited children are reaped.
-        proc.wait()
-        return
-    proc.terminate()
-    try:
-        proc.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=2)
-
-
 def start_redis() -> subprocess.Popen | None:
-    """Start a local Redis server when no Redis instance is already available."""
+    """Reuse or launch Redis; its lifetime is independent of any one instance."""
     if _is_redis_running():
         return None
 
     proc = subprocess.Popen(
         ["redis-server", "--save", "", "--appendonly", "no"],
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -53,8 +38,8 @@ def start_redis() -> subprocess.Popen | None:
         proc.wait()
         return None
 
-    # Ensure spawned Redis stops when Python exits.
-    atexit.register(stop_redis, proc)
+    # Other Moonwalker installations may share this server. Never register
+    # application-exit cleanup; a supervisor or the operator owns its lifetime.
     return proc
 
 

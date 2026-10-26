@@ -42,7 +42,7 @@ from service.origin_policy import (
     parse_allowed_hosts,
     parse_allowed_origins,
 )
-from service.redis import redis_client, start_redis, stop_redis
+from service.redis import redis_client, start_redis
 from service.replay_repair_queue import replay_repair_queue
 from service.runtime_services import (
     RuntimeServices,
@@ -415,13 +415,8 @@ async def shutdown() -> None:
     await attempt("AI provider", ai_provider_client.close)
     await attempt("Redis client", redis_client.aclose)
 
-    if runtime_state.redis_proc is not None:
-        redis_proc = runtime_state.redis_proc
-        await attempt(
-            "Redis process",
-            lambda: asyncio.to_thread(stop_redis, redis_proc),
-        )
-        runtime_state.redis_proc = None
+    # Close this instance's client above, but leave the shared server running.
+    runtime_state.redis_proc = None
     runtime_state.watcher_queue = None
 
     if failures:
