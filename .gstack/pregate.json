@@ -24,6 +24,7 @@
     "docs/dependencies.md": [],
     "VERSION": [],
     "CHANGELOG.md": [],
+    "PRODUCT.md": [],
     "backend/**": [
       "backend/tests/test_accumulation_accounting.py",
       "backend/tests/test_accumulation_adjustment.py",
