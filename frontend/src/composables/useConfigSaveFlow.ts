@@ -24,6 +24,7 @@ interface UseConfigSaveFlowOptions<TPayload> {
     isLoading: Ref<boolean>
     message: MessageApiLike
     onSaved?: () => Promise<void> | void
+    configRevision?: Ref<number | null>
     surfaceMessages?: boolean
     syncBaselineState: () => void
 }
@@ -160,12 +161,22 @@ export function useConfigSaveFlow<TPayload>(
         saveErrorMessage.value = null
 
         try {
+            if (options.configRevision && options.configRevision.value === null) {
+                const message = 'Configuration revision is unavailable. Reload before saving.'
+                setSaveError(message)
+                return { status: 'blocked', message }
+            }
             const response = await axios.post(
                 options.apiUrl('/config/multiple'),
                 options.buildPayload(),
+                options.configRevision ? { headers: { 'X-Moonwalker-Config-Revision': String(options.configRevision.value) } } : undefined,
             )
 
             if (response.status >= 200 && response.status < 300) {
+                if (options.configRevision) {
+                    options.configRevision.value = typeof response.data?.config_revision === 'number'
+                        ? response.data.config_revision : null
+                }
                 options.syncBaselineState()
                 saveState.value = 'saved'
                 saveErrorMessage.value = null

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
@@ -14,6 +15,7 @@ from litestar.exceptions import SerializationException, WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
 from litestar.params import FromQuery
 from service.accumulation import runtime as accumulation_runtime
+from service.accumulation.activity import ActivityChanged, activity_page
 from service.accumulation.catalog import list_accumulation_strategies
 from service.accumulation.runtime import AccumulationRuntime
 from service.accumulation.state import AccumulationConflictError
@@ -23,6 +25,8 @@ from service.accumulation.status import (
     list_accumulation_status,
 )
 from service.runtime_services import get_active_accumulation_runtime
+from tortoise import Tortoise
+from tortoise.exceptions import OperationalError
 
 
 def _runtime(*, repair: bool = False) -> AccumulationRuntime | None:
@@ -191,6 +195,74 @@ async def get_performance() -> Any:
     return await runtime.performance()
 
 
+@get(path="/accumulation/activity")
+async def get_activity(cursor: FromQuery[str | None] = None) -> Any:
+    """Return a stable page of cumulative orders and declared CSV imports."""
+    runtime = _runtime()
+    if runtime is None:
+        return _unavailable()
+    try:
+        return await activity_page(
+            getattr(runtime, "current_account_scope", ""), cursor
+        )
+    except ActivityChanged as exc:
+        return json_response({"error": str(exc), "code": "activity_changed"}, 409)
+    except ValueError as exc:
+        return json_response({"error": str(exc), "code": "invalid_request"}, 400)
+    except OperationalError:
+        return json_response(
+            {"error": "Activity history is unavailable.", "code": "unavailable"}, 503
+        )
+
+
+@websocket_stream(path="/accumulation/performance/stream", warn_on_data_discard=False)
+async def stream_performance() -> AsyncGenerator[str, None]:
+    """Push shared valuation snapshots and the activity revision to clients."""
+    failure_logged = False
+    last_scope: str | None = None
+    scope_initialized = False
+    account_generation = 0
+    try:
+        while True:
+            runtime = _runtime()
+            if runtime is None:
+                yield json.dumps({"type": "unavailable"})
+                return
+            try:
+                performance = await runtime.performance()
+                scope = getattr(runtime, "current_account_scope", None)
+                if scope_initialized and scope != last_scope:
+                    account_generation += 1
+                last_scope = scope
+                scope_initialized = True
+                try:
+                    rows = await Tortoise.get_connection("default").execute_query_dict(
+                        "SELECT revision FROM accumulation_history_revision WHERE id = 1"
+                    )
+                    revision = rows[0]["revision"] if rows else None
+                except OperationalError:
+                    revision = None
+                yield json.dumps(
+                    {
+                        "type": "snapshot",
+                        "performance": performance,
+                        "activity_revision": revision,
+                        "account_generation": account_generation,
+                    }
+                )
+                failure_logged = False
+            except Exception:  # noqa: BLE001 - isolate transient stream failures.
+                if not failure_logged:
+                    logging.getLogger(__name__).exception(
+                        "Accumulation performance stream failed"
+                    )
+                    failure_logged = True
+                yield json.dumps({"type": "unavailable"})
+            await asyncio.sleep(2)
+    except (asyncio.CancelledError, WebSocketDisconnect):
+        return
+
+
 @websocket_stream(path="/accumulation/stream", warn_on_data_discard=False)
 async def stream_status(
     symbol: FromQuery[str | None] = None,
@@ -240,7 +312,9 @@ async def stream_status(
 
 route_handlers = [
     stream_status,
+    stream_performance,
     get_performance,
+    get_activity,
     list_activations,
     get_activation,
     submit_command,

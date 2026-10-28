@@ -61,13 +61,15 @@ export type ClosedTradeRow = {
   cost: number | string
   tp_price: number | string
   avg_price: number | string
-  profit: number | string
-  profit_percent: number | string
+  profit: number | string | null
+  profit_percent: number | string | null
   so_count: number
   open_date: string
   duration: string
   close_date: string
   close_reason?: string | null
+  valuation_quantity?: number | null
+  valuation_price?: number | null
   precision: number
   key: number
 }
@@ -246,6 +248,7 @@ export const useTradesStore = defineStore('trades', {
     },
     setClosedTrades(raw: any[]) {
       this.closedTrades = raw.map((val: any) => {
+        const unverifiedStop = val.close_reason === 'manual_stop' && val.valuation_quantity == null
         const amountPrecision = isFloat(val.amount)
           ? val.amount.toString().split('.')[1].length
           : 0
@@ -260,8 +263,8 @@ export const useTradesStore = defineStore('trades', {
           cost: formatDecimal(val.cost, 2),
           tp_price: formatDecimal(Number(val.tp_price ?? 0), 2, 8),
           avg_price: formatDecimal(Number(val.avg_price ?? 0), 2, 8),
-          profit: formatDecimal(val.profit, 2),
-          profit_percent: formatDecimal(val.profit_percent, 2),
+          profit: unverifiedStop || val.profit == null ? null : formatDecimal(val.profit, 2),
+          profit_percent: unverifiedStop || val.profit_percent == null ? null : formatDecimal(val.profit_percent, 2),
           amount: val.amount.toFixed(amountPrecision),
           key: val.id,
           open_date: String(val.open_date ?? ''),

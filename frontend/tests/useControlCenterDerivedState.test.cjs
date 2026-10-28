@@ -134,3 +134,25 @@ test('derived state exposes stale trust when another client saved a newer config
         '2026-04-06T09:05:00Z',
     )
 })
+
+test('refreshing the live snapshot preserves the stale warning for an older draft', () => {
+    const editorRevision = ref(3)
+    const snapshot = ref({ config_revision: 3 })
+    const harness = createDerivedStateHarness({
+        editorRevision,
+        hasUnsavedChanges: () => true,
+        snapshotStore: {
+            hasKnownNewerSnapshot: ref(false),
+            isHydrated: ref(true),
+            latestKnownUpdatedAt: ref(null),
+            loadError: ref(null),
+            loadState: ref('ready'),
+            snapshot,
+        },
+    })
+    assert.equal(harness.derivedState.configTrustState.value.kind, 'trusted')
+    snapshot.value = { config_revision: 4 }
+    assert.equal(harness.derivedState.configTrustState.value.kind, 'stale_with_draft_conflict')
+    editorRevision.value = 4
+    assert.equal(harness.derivedState.configTrustState.value.kind, 'trusted')
+})

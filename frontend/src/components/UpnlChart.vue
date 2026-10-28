@@ -2,7 +2,7 @@
   <div class="chart-wrap performance-chart">
     <n-spin :show="isLoading" size="small">
       <v-chart
-        v-if="performanceComplete && !isLoading && !showEmptyState && visiblePoints.length > 0"
+        v-if="performanceComplete && upnlStore.historyVerified && !isLoading && !showEmptyState && visiblePoints.length > 0"
         class="chart"
         :option="option"
         autoresize
@@ -205,7 +205,7 @@ onMounted(async () => {
     showEmptyState.value = data.value.length === 0
   } catch {
     showEmptyState.value = data.value.length === 0
-    emptyStateText.value = 'No profit history yet'
+    emptyStateText.value = 'Profit history is unavailable.'
   } finally {
     isLoading.value = false
   }

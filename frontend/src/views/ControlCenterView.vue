@@ -73,6 +73,7 @@ const {
     clearSelectedBackup,
     confirmDiscardUnsavedChanges,
     currency,
+    configRevision,
     dca,
     dcaFormRef,
     exchange,
@@ -207,6 +208,7 @@ const {
     viewState,
     visibleBlockers,
 } = useControlCenterDerivedState({
+    editorRevision: configRevision,
     hasUnsavedChanges,
     loadRescueMessage,
     requestedMode: () => route.query.mode,
@@ -282,7 +284,7 @@ const {
     visibleBlockers,
 })
 const {
-    advancedSections,
+    advancedSections: allAdvancedSections,
     dirtySummary,
     formattedTrustTimestamp,
     isStaleConfigTrustState,
@@ -302,6 +304,9 @@ const {
     transitionIntent,
     viewState,
 })
+const advancedSections = computed(() => configSnapshotStore.snapshot.value?.trade_mode === 'accumulation' && !autopilot.value.enabled
+    ? allAdvancedSections.value.filter(section => section.target !== 'autopilot')
+    : allAdvancedSections.value)
 const {
     handleBackupDownloadAction,
     handleMonitoringTestAction,

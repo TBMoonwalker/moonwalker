@@ -10,7 +10,7 @@
                     <n-statistic :class="hasStatisticsData && performanceComplete ? profit_class : undefined" :value="hasStatisticsData && performanceComplete ? formatFixed2(profit_overall) : 'Unavailable'" />
                     <div v-if="hasStatisticsData && performanceComplete" class="stat-detail">Realized {{ formatFixed2(profit_overall - upnl) }} · Unrealized {{ formatFixed2(upnl) }}</div>
                     <div v-if="includesCsvDeclarations" class="stat-detail">Includes CSV-declared purchase costs and fees.</div>
-                    <div v-if="!performanceComplete" class="stat-detail">Accumulation returns are not included in the legacy performance totals.</div>
+                    <div v-if="!performanceComplete" class="stat-detail">Complete performance is unavailable because some returns lack verified evidence.</div>
                 </div>
                 <template v-if="exposure">
                     <template v-if="budgetAllocation">

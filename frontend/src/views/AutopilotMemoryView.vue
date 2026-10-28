@@ -16,8 +16,10 @@ import {
 import { splitTradeSymbol } from '../helpers/openTrades'
 import type { AutopilotMemorySnapshot } from '../autopilot/types'
 import { useAutopilotMemoryFeed } from '../composables/useAutopilotMemoryFeed'
+import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
 
 const router = useRouter()
+const config = useSharedConfigSnapshot()
 const { data, error, loading, refresh } = useAutopilotMemoryFeed()
 const selectedSymbol = ref<string | null>(null)
 
@@ -68,6 +70,12 @@ function formatTrustBoardSymbol(symbol: string): string {
 
 <template>
     <div class="page-shell autopilot-memory-page operator-console-page">
+        <template v-if="config.snapshot.value?.trade_mode === 'accumulation'">
+            <h1>Autopilot Memory is unavailable in Accumulation</h1>
+            <p>Autopilot is used by Dynamic DCA.</p>
+            <n-button @click="router.push({ name: 'trades' })">Trading overview</n-button>
+        </template>
+        <template v-else-if="['dynamic_dca', 'classic_dca', 'sidestep'].includes(String(config.snapshot.value?.trade_mode))">
         <header class="operator-page-heading">
             <h1>Autopilot Memory</h1>
             <p>Review the evidence behind Autopilot's symbol decisions.</p>
@@ -315,6 +323,8 @@ function formatTrustBoardSymbol(symbol: string): string {
                 </template>
             </n-flex>
         </n-card>
+        </template>
+        <p v-else>Trading mode is unavailable. Refresh configuration to continue.</p>
     </div>
 </template>
 

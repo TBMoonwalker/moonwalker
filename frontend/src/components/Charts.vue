@@ -1,6 +1,6 @@
 <template>
     <div class="chart-wrap performance-chart">
-        <p v-if="historyIsPartial">Realized history covers Dynamic DCA only; accumulation history has incomplete evidence.</p>
+        <p v-if="historyIsPartial">Realized history is incomplete because some returns lack verified evidence.</p>
         <n-spin :show="isLoading" size="small">
             <v-chart v-if="!isLoading && !showNoProfit" class="chart" :option="option"
                 autoresize />
@@ -30,7 +30,7 @@ const { scheme } = storeToRefs(themeStore)
 const profit_store = useProfitDatastore()
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
-const historyIsPartial = computed(() => (statistics_data.data.value as any)?.profit_history_scope === 'dynamic_dca_only')
+const historyIsPartial = computed(() => ['dynamic_dca_only', 'incomplete'].includes((statistics_data.data.value as any)?.profit_history_scope))
 const profit_store_refs = storeToRefs(profit_store)
 const chart_data = ref({
     labels: [] as string[],

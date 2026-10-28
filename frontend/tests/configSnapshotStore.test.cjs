@@ -213,6 +213,18 @@ test('shared config snapshot store distinguishes unchanged, stale, and unknown f
     })
 })
 
+test('a newer configuration revision is stale even if its timestamp moves backwards', async () => {
+    const snapshotStore = useSharedConfigSnapshot()
+    snapshotStore.applySnapshot({ dry_run: true, config_revision: 7 }, '2026-03-27T09:00:00Z')
+    global.fetch = async () => createJsonResponse({
+        updated_at: '2026-03-26T09:00:00Z', config_revision: 8,
+    })
+    assert.equal((await snapshotStore.checkFreshness()).status, 'stale')
+    assert.equal(snapshotStore.hasKnownNewerSnapshot.value, true)
+    snapshotStore.applySnapshot({ dry_run: true, config_revision: 8 }, '2026-03-26T09:00:00Z')
+    assert.equal(snapshotStore.hasKnownNewerSnapshot.value, false)
+})
+
 test('shared config snapshot store coalesces overlapping forced refreshes', async () => {
     const snapshotStore = useSharedConfigSnapshot()
     let resolveConfigFetch

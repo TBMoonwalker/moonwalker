@@ -408,6 +408,13 @@ class Trades:
                 orders = await query.limit(size).values()
             else:
                 orders = await query.offset(page).limit(size).values()
+            for order in orders:
+                if (
+                    order.get("close_reason") == "manual_stop"
+                    and order.get("valuation_quantity") is None
+                ):
+                    order["profit"] = None
+                    order["profit_percent"] = None
             return orders
         except BaseORMException as e:
             # Broad catch to keep closed trades endpoint responsive.
@@ -423,13 +430,22 @@ class Trades:
             normalized_deal_id = str(UUID(str(deal_id)))
         except (TypeError, ValueError):
             return []
-        return await self._execute_db(
+        rows = await self._execute_db(
             model.TradeExecutions.filter(deal_id=normalized_deal_id)
             .order_by("timestamp", "id")
             .values(),
             f"Error getting trade executions for {normalized_deal_id}.",
             [],
         )
+        return [
+            row
+            for row in rows
+            if not (
+                row.get("role") == "final_sell"
+                and row.get("order_type") == "manual_stop"
+                and '"valuation_only": true' in (row.get("metadata_json") or "")
+            )
+        ]
 
     async def is_open_deal(self, deal_id: str) -> bool:
         """Return whether a deal still has an active open-trade row."""

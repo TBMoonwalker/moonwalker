@@ -98,18 +98,18 @@ async def test_operator_stop_records_market_value_without_selling(
     assert closed.deal_id == "stop-deal"
     assert closed.amount == pytest.approx(2.0)
     assert closed.cost == pytest.approx(200.0)
-    assert closed.tp_price == pytest.approx(price)
-    assert closed.profit == pytest.approx(2 * price - 200)
-    assert closed.profit_percent == pytest.approx(price - 100)
+    assert closed.tp_price is None
+    assert closed.profit is None
+    assert closed.profit_percent is None
+    assert closed.valuation_quantity == pytest.approx(2)
+    assert closed.valuation_price == pytest.approx(price)
+    from service.realized_trades import has_unverified_manual_stop_profit
+
+    assert not await has_unverified_manual_stop_profit()
     assert not await model.OpenTrades.exists()
     assert not await model.Trades.exists()
     assert await model.TradeExecutions.filter(side="buy").count() == 1
-    mark = await model.TradeExecutions.get(side="sell")
-    assert mark.price == pytest.approx(price)
-    assert mark.order_id is None
-    assert mark.order_type == "manual_stop"
-    assert mark.fee == 0.0
-    assert '"valuation_only": true' in mark.metadata_json
+    assert not await model.TradeExecutions.filter(side="sell").exists()
     orders.exchange.create_spot_sell.assert_not_awaited()
     orders.monitoring.notify_trade.assert_not_awaited()
     assert not (await orders.receive_stop_signal_result("BTC/USDC", {})).applied
@@ -137,12 +137,92 @@ async def test_operator_stop_includes_fill_during_tp_cancellation(
     closed = await model.ClosedTrades.get(symbol="BTC/USDC")
     assert closed.amount == pytest.approx(2.0)
     assert closed.cost == pytest.approx(200.0)
-    assert closed.profit == pytest.approx(55 + 1.5 * 120 - 200)
-    assert closed.tp_price == pytest.approx(117.5)
+    assert closed.profit is None
+    assert closed.profit_percent is None
+    assert closed.valuation_quantity == pytest.approx(1.5)
+    assert closed.valuation_price == pytest.approx(120)
+    from service.realized_trades import has_unverified_manual_stop_profit
+
+    assert await has_unverified_manual_stop_profit()
+    assert closed.tp_price == pytest.approx(110)
     assert await model.TradeExecutions.filter(role="partial_sell").count() == 1
-    assert (await model.TradeExecutions.get(role="final_sell")).amount == pytest.approx(
-        1.5
+    assert not await model.TradeExecutions.filter(role="final_sell").exists()
+
+
+@pytest.mark.asyncio
+async def test_legacy_manual_stop_profit_is_not_exposed_as_realized(stopped_trade_db):
+    from service.realized_trades import (
+        has_unverified_manual_stop_profit,
+        realized_closed_trades,
     )
+
+    await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_reason="manual_stop", profit=40, profit_percent=20
+    )
+    await model.ClosedTrades.create(symbol="ETH/USDC", profit=5)
+    assert await has_unverified_manual_stop_profit()
+    assert await realized_closed_trades().values_list("profit", flat=True) == [5]
+    rows = await stopped_trade_db.trades.get_closed_trades()
+    legacy = next(row for row in rows if row["symbol"] == "BTC/USDC")
+    assert legacy["profit"] is None and legacy["profit_percent"] is None
+
+    from controller.statistics import profit_statistics
+    from httpx import ASGITransport, AsyncClient
+    from litestar import Litestar
+
+    app = Litestar(route_handlers=[profit_statistics], openapi_config=None)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://localhost"
+    ) as client:
+        response = await client.get("/statistic/profit/0/daily")
+    assert response.status_code == 409
+    assert "incomplete" in response.text
+
+
+@pytest.mark.asyncio
+async def test_legacy_stop_permanently_marks_existing_profit_snapshots_unverified(
+    stopped_trade_db,
+    monkeypatch,
+):
+    from datetime import datetime, timedelta, timezone
+
+    from controller.statistics import profit_overall_timeline
+    from httpx import ASGITransport, AsyncClient
+    from litestar import Litestar
+    from service.database import Database
+
+    legacy = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_reason="manual_stop", profit=40
+    )
+    snapshot = await model.UpnlHistory.create(
+        timestamp=datetime.now(timezone.utc), profit_overall=40
+    )
+    database = Database()
+    database.db_url = "sqlite://fixture"
+    await database._ensure_manual_stop_valuation()
+    await legacy.delete()
+    await snapshot.refresh_from_db()
+    assert snapshot.profit_overall == 40
+    assert not snapshot.performance_verified
+
+    app = Litestar(route_handlers=[profit_overall_timeline], openapi_config=None)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://localhost"
+    ) as client:
+        response = await client.get("/statistic/profit-overall/timeline")
+    assert response.status_code == 409
+    await model.UpnlHistory.filter(id=snapshot.id).update(
+        timestamp=datetime.now(timezone.utc) - timedelta(days=366)
+    )
+    monkeypatch.setattr(
+        "controller.statistics.statistic",
+        SimpleNamespace(get_profit_overall_timeline=AsyncMock(return_value=[])),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://localhost"
+    ) as client:
+        response = await client.get("/statistic/profit-overall/timeline")
+    assert response.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -161,7 +241,7 @@ async def test_operator_stop_rejects_invalid_valuation(stopped_trade_db, price):
 @pytest.mark.asyncio
 async def test_operator_stop_rolls_back_failed_closure(stopped_trade_db, monkeypatch):
     monkeypatch.setattr(
-        model.TradeExecutions,
+        model.ClosedTrades,
         "create",
         AsyncMock(side_effect=IntegrityError("write failed")),
     )
@@ -202,7 +282,9 @@ async def test_operator_stop_values_unsellable_remainder(stopped_trade_db):
     closed = await model.ClosedTrades.get(symbol="BTC/USDC")
     assert closed.amount == pytest.approx(0.01)
     assert closed.cost == pytest.approx(1.0)
-    assert closed.profit == pytest.approx(0.2)
+    assert closed.profit is None
+    assert closed.valuation_quantity == pytest.approx(0.01)
+    assert closed.valuation_price == pytest.approx(120)
 
 
 @pytest.mark.asyncio

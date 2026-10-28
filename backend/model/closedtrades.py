@@ -10,6 +10,7 @@ class ClosedTrades(Model):
     symbol = fields.CharField(max_length=50)
     deal_id = fields.CharField(max_length=36, null=True, unique=True)
     campaign_id = fields.CharField(max_length=36, null=True)
+    lifecycle_mode = fields.CharField(max_length=32, null=True)
     execution_history_complete = fields.BooleanField(default=False)
     so_count = fields.IntField(null=True)
     profit = fields.FloatField(null=True)
@@ -22,6 +23,8 @@ class ClosedTrades(Model):
     close_date = fields.TextField(null=True)
     duration = fields.TextField(null=True)
     close_reason = fields.TextField(null=True)
+    valuation_quantity = fields.FloatField(null=True)
+    valuation_price = fields.FloatField(null=True)
 
     class Meta:
         table = "closedtrades"

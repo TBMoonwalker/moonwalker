@@ -73,6 +73,7 @@ export function useConfigEditorAssembly(
 ) {
     const isLoading = ref(true)
     const showAdvancedGeneral = ref(false)
+    const configRevision = ref<number | null>(null)
 
     const pageState = useConfigPageState({
         defaults: CONFIG_SUBMIT_PAYLOAD_DEFAULTS,
@@ -121,6 +122,7 @@ export function useConfigEditorAssembly(
                 defaults: CONFIG_SUBMIT_PAYLOAD_DEFAULTS,
             }),
         changedSectionLabels: persistableState.changedSectionLabels,
+        configRevision,
         changedSections: persistableState.changedSections,
         isDirty: persistableState.isDirty,
         isLoading,
@@ -210,6 +212,7 @@ export function useConfigEditorAssembly(
             })
             await options.load?.onAfterLoad?.()
         },
+        onRevisionLoaded: revision => { configRevision.value = revision },
         resetSaveState: saveFlow.resetSaveState,
         setSaveError: saveFlow.setSaveError,
         surfaceMessages: options.surfaceMessages?.load,
@@ -237,6 +240,7 @@ export function useConfigEditorAssembly(
         ...backupRestoreFlow,
         ...monitoringFlow,
         fetchDefaultValues,
+        configRevision,
         initializeClientTimezoneOptions,
         isLoading,
         rules,

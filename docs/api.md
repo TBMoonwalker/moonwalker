@@ -33,6 +33,13 @@ runtime and multiple concurrent dashboard clients.
 | `GET` | `/config/backup/export?include_trade_data=true` | Export full backup payload including trade data. |
 | `POST` | `/config/backup/restore` | Restore config-only or full backup payloads. |
 
+Configuration editors must read `config_revision` from `GET /config/all` and
+send it as the decimal `X-Moonwalker-Config-Revision` header on either write
+endpoint. Successful writes return the new `config_revision`. A missing, invalid
+or stale revision returns HTTP 409; reload the form and reconcile changes before
+retrying. Older API clients must be updated to send the header. Configuration
+restores and operational configuration changes also invalidate older revisions.
+
 Notes:
 - Every HTTP and WebSocket request must use a trusted private/loopback Host or an
   explicitly allowed Host. Unsafe browser requests (`POST`, `PUT`, `PATCH`, and
@@ -108,6 +115,8 @@ fall back to live trading. Demo and live ownership scopes remain separate.
 | `POST` | `/accumulation/entry/commands` | Correct, explicitly retry or abandon a staged entry. |
 | `POST` | `/accumulation/repair` | Reconcile an existing order, retire unplaced intent, acknowledge recorded settlement, rebind or declare ownership, restore an inventory link, or record a paused correction. |
 | `GET` | `/accumulation/performance` | Read exact coverage-aware returns and fresh bid valuation, grouped by quote. |
+| `WS` | `/accumulation/performance/stream` | Stream shared valuation snapshots and the current activity revision. |
+| `GET` | `/accumulation/activity` | Read a bounded page of cumulative order summaries and CSV declarations for the active account. |
 | `POST` | `/accumulation/replay` | Compare a saved accumulation version with equal-funded buy-and-hold and fixed-interval DCA using supplied completed candles. No wallet or order actions. |
 | `GET` | `/accumulation/strategies?limit=50&after_id=0` | Read a bounded catalog page of compatible immutable versions, template defaults and supported timeframes. |
 | `POST` | `/accumulation/strategies` | Retired standalone dip writer; returns `410`. Create shared strategies through Strategy Builder. |
@@ -224,6 +233,32 @@ recovery-only sessions because those permit database-only status reads and
 explicit reconciliation. Dashboard totals combine verified native returns only
 when every group uses the configured quote; no FX conversion is guessed.
 
+The same snapshot includes `holdings`, with symbol, net quantity, remaining
+cost, average remaining cost per coin, bid value, unrealized return, completeness
+and basis provenance. Amounts are decimal strings; unavailable amounts are
+`null`. Average cost is calculated with 512-digit decimal precision and is
+unavailable when quantity is zero or the basis is unknown. Values and returns
+use the same evidence and bid snapshot as the
+quote-currency totals.
+
+`GET /accumulation/activity` returns up to 20 records and a `next_cursor`.
+Order records summarize the latest cumulative checkpoint for an exchange order;
+CSV records describe declarations, not exchange fills. Results are scoped to
+the active account and ordered by update time. Pass the cursor unchanged to get
+the next page. The snapshot expires after five minutes or a server restart; any
+activity correction, insertion or deletion also invalidates it. A stale cursor
+returns HTTP 409 and the client must restart the history. UTC timestamps are
+returned and can be displayed in the client's timezone.
+Each activity record's `price_per_coin` divides its recorded quote amount by
+its quantity. For exchange orders, this is the cumulative execution price before
+fees; for CSV declarations it is declared basis per net coin. It is `null` when
+the required amounts are unknown or not positive.
+The performance stream sends `snapshot` messages containing `performance` and
+`activity_revision`; an `unavailable` message indicates a temporary failure.
+Dashboard clients retain the last snapshot during reconnects and stop showing
+bid-based values after its validity deadline. A changed activity revision
+causes the activity list to reload automatically.
+
 Read responses include zero-inventory registrations and STOPPED records. Quantity,
 cost, contributions, proceeds and fee amounts remain exact decimal strings;
 unknown values remain `null`. Fee totals with pending reports are incomplete, and
@@ -336,13 +371,25 @@ The sell, buy, and stop endpoints retain their legacy `result` field and also
 return a typed `mutation` object. Its `status` is one of `applied`,
 `deduplicated`, `rejected`, `stale`, `indeterminate`, or `quarantined`.
 
-Stop records a closed trade with reason `manual_stop`, preserves its execution
-history, and includes earlier partial-sale proceeds in P&L. The remaining coins
-are valued at the latest tracked price, with a `valuation_only` ledger entry;
-no sell order or hypothetical sell fee is created. Coins remain on the exchange
+Stop records a closed trade with reason `manual_stop` and preserves actual
+execution history, including earlier partial-sale proceeds. Realized P&L is
+unavailable because the existing partial-sale ledger does not establish complete
+fee evidence. The
+remaining coins' quantity and latest tracked price are stored separately as
+`valuation_quantity` and `valuation_price`; they are not sell executions or
+realized P&L. No sell order or hypothetical sell fee is created. Coins remain on the exchange
 for the operator to manage. Pending take-profit orders must be safely canceled
 or reconciled first. Missing or invalid prices reject the stop and retain the
 open trade. Previously stopped trades whose history was deleted are not rebuilt.
+Legacy manual-stop summaries without a separate valuation are withheld from
+realized profit. When such records are present during migration or restore,
+existing profit snapshots are marked unverified and the overall timeline returns
+HTTP 409 when unverified snapshots fall in its one-year window; snapshot values
+are retained for reconciliation. If an old stop was deleted before backup or
+migration, its effect on old snapshots cannot be identified from the remaining
+records. A partial-sale stop
+with unverified fees also makes period profit history unavailable (HTTP 409) and
+disables profit-based capital stretch.
 
 For confirmed buy and sell requests, clients should send an
 `X-Moonwalker-Operation-Id` header containing 1-64 letters, numbers, or the
@@ -471,6 +518,13 @@ closed-trade count, and the currently featured symbol when available.
 | --- | --- | --- |
 | `GET` | `/analytics/overview` | Return closed-trade analytics plus AI Trust coverage, warning quality, recent predictions, outcome review, and read-only local calibration diagnostics. |
 
+The optional `mode=dynamic_dca` or `mode=unknown` filter scopes the closed-trade
+analytics to the last two years. `unattributed_trades` counts closed records in
+that period whose lifecycle mode is unknown. AI Trust remains independently
+scoped across modes. Omitting `mode` retains the unfiltered response. Older
+closed records are attributed to accumulation only when matching deal,
+activation and order evidence is available; other records remain unclassified.
+
 ## Market Data
 
 | Method | Path | Purpose |
@@ -553,6 +607,13 @@ last completed close, or the fresh ask when `price_basis` is `ask`. Evidence mus
 match the activation, current revision, pinned strategy, wait reason and candle
 validity window; otherwise `wait_condition` is null. These fields never authorize
 an order or change the trading strategy.
+
+For `WAIT_CONDITIONS`, graph strategies can include `strategy_conditions`: the
+evaluated condition tree with all/any groups, comparison operands and outcomes
+from that completed candle. A null comparison outcome means an operand was
+unavailable. Large trees may be truncated; the root outcome remains authoritative.
+The next candle recalculates these values, and passing the graph alone does not
+guarantee a buy.
 
 
 ## Backtest

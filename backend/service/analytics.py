@@ -20,7 +20,7 @@ ANALYTICS_LOOKBACK_YEARS = 2
 class Analytics:
     """On-demand aggregation over closed trades."""
 
-    async def get_overview(self) -> dict[str, Any]:
+    async def get_overview(self, mode: str | None = None) -> dict[str, Any]:
         """Return a complete analytics overview from closed trades.
 
         Aggregates summary, heatmap, per-symbol, duration extremes, drawdown,
@@ -29,14 +29,55 @@ class Analytics:
         cutoff = datetime.now(UTC) - timedelta(days=ANALYTICS_LOOKBACK_YEARS * 365)
 
         rows = await model.ClosedTrades.filter(close_date__gte=cutoff.isoformat())
+        excluded_manual_stops = sum(
+            1
+            for row in rows
+            if row.close_reason == "manual_stop"
+            and (row.valuation_quantity is None or row.profit is None)
+            and (
+                mode is None
+                or mode == "dynamic_dca"
+                and row.lifecycle_mode == "classic_dca"
+                or mode == "unknown"
+                and row.lifecycle_mode not in {"classic_dca", "accumulation"}
+            )
+        )
+        rows = [
+            row
+            for row in rows
+            if not (
+                row.close_reason == "manual_stop"
+                and (row.valuation_quantity is None or row.profit is None)
+            )
+        ]
+        supported_modes = {"classic_dca", "accumulation"}
+        unattributed = sum(
+            getattr(row, "lifecycle_mode", None) not in supported_modes for row in rows
+        )
+        if mode == "dynamic_dca":
+            rows = [
+                row
+                for row in rows
+                if getattr(row, "lifecycle_mode", None) == "classic_dca"
+            ]
+        elif mode == "unknown":
+            rows = [
+                row
+                for row in rows
+                if getattr(row, "lifecycle_mode", None) not in supported_modes
+            ]
 
         if not rows:
             overview = self._empty()
             overview["ai_trust"] = await build_analytics_payload()
+            overview["unattributed_trades"] = unattributed
+            overview["unverified_manual_stops"] = excluded_manual_stops
             return overview
 
         overview = compute_stats_from_trades(rows)
         overview["ai_trust"] = await build_analytics_payload()
+        overview["unattributed_trades"] = unattributed
+        overview["unverified_manual_stops"] = excluded_manual_stops
         return overview
 
     @staticmethod

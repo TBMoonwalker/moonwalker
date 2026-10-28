@@ -1,5 +1,6 @@
 """Accumulation restore preserves ownership and never replays external effects."""
 
+import asyncio
 import copy
 import json
 from types import SimpleNamespace
@@ -21,7 +22,11 @@ async def backup_db(tmp_path, monkeypatch):
         db_url=f"sqlite://{tmp_path / 'backup.sqlite'}", modules={"models": ["model"]}
     )
     await Tortoise.generate_schemas()
-    config = SimpleNamespace(reload=AsyncMock(), snapshot=lambda: {})
+    config = SimpleNamespace(
+        reload=AsyncMock(),
+        snapshot=lambda: {},
+        _acquire_write_lock=AsyncMock(return_value=asyncio.Lock()),
+    )
     monkeypatch.setattr(
         "service.backup_restore.Config.instance", AsyncMock(return_value=config)
     )

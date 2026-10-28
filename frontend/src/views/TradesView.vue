@@ -271,7 +271,7 @@ const admissionToneClass = computed(() =>
           <span class="admission-copy">{{ admissionStatusCopy }}</span>
         </div>
       </div>
-      <div class="status-autopilot">
+      <div v-if="['dynamic_dca', 'classic_dca', 'sidestep'].includes(String(configSnapshotStore.snapshot.value?.trade_mode))" class="status-autopilot">
         <h3>Autopilot</h3>
         <div class="status-autopilot-value" :class="autopilotTone">{{ autopilotModeLabel }}</div>
         <p v-if="autopilotSummary">{{ autopilotSummary }}</p>
@@ -279,6 +279,18 @@ const admissionToneClass = computed(() =>
         <p v-if="!statisticsState.hasReceivedData.value || !autopilotPayload">Waiting for live status</p>
         <RouterLink :to="{ name: 'controlCenterAutopilot' }">Open Autopilot ↗</RouterLink>
       </div>
+      <div v-else-if="configSnapshotStore.snapshot.value?.trade_mode === 'accumulation'" class="status-autopilot">
+        <h3>Accumulation</h3>
+        <p v-if="accumulation.available.value && accumulation.portfolio.value">
+          {{ accumulation.portfolio.value.holding_count }} managed holdings.
+          <span v-if="accumulation.portfolio.value.unverified_holding_count">
+            {{ accumulation.portfolio.value.unverified_holding_count }} need ownership review.
+          </span>
+        </p>
+        <p v-else>Waiting for accumulation status.</p>
+        <RouterLink :to="{ name: 'stats' }">View accumulation statistics ↗</RouterLink>
+      </div>
+      <div v-else class="status-autopilot"><p>Trading mode unavailable.</p></div>
     </section>
 
     <div class="overview-middle">

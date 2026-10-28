@@ -3,6 +3,8 @@ import { defineStore } from 'pinia'
 import { fetchJson } from '../api/client'
 
 export interface AnalyticsOverview {
+   unattributed_trades?: number
+   unverified_manual_stops?: number
    summary: {
      total_trades: number
      profit_trades: number
@@ -160,17 +162,22 @@ export const useAnalyticsStore = defineStore('analytics', () => {
    const data = ref<AnalyticsOverview | null>(null)
    const loading = ref(false)
    const error = ref<string | null>(null)
+   let requestId = 0
 
-   async function load() {
+   async function load(mode?: 'dynamic_dca' | 'unknown') {
+     const current = ++requestId
      loading.value = true
      error.value = null
+     data.value = null
      try {
-       data.value = await fetchJson<AnalyticsOverview>('/analytics/overview')
+       const result = await fetchJson<AnalyticsOverview>(`/analytics/overview${mode ? `?mode=${mode}` : ''}`)
+       if (current === requestId) data.value = result
       } catch (err: any) {
+       if (current !== requestId) return
        error.value = err.message || 'Failed to load analytics'
        data.value = null
       } finally {
-       loading.value = false
+       if (current === requestId) loading.value = false
       }
    }
 

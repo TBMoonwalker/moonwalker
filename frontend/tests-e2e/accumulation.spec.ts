@@ -359,15 +359,17 @@ test('selects accumulation and an exact initial pin in Configuration before entr
     exchange: 'binance', timeframe: '1h', key: 'test-only', secret: 'test-only', currency: 'USDC', market: 'spot',
     max_bots: 2, bo: 10, tp: 1, capital_max_fund: 100, history_lookback_time: '180d',
     dca: true, dry_run: true, mstc: 4, sos: 2, trading_paused: true, trade_mode: 'dynamic_dca',
-    accumulation_available: true, accumulation_strategy_version_id: null,
+    accumulation_available: true, accumulation_strategy_version_id: null, config_revision: 0,
   }
   const saves: Record<string, { value: unknown; type: string }>[] = []
   await page.route('**/config/all', route => route.fulfill({ json: configured }))
   await page.route('**/config/multiple', async route => {
+    expect(route.request().headers()['x-moonwalker-config-revision']).toBe(String(configured.config_revision))
     const payload = route.request().postDataJSON()
     saves.push(payload)
     for (const [key, value] of Object.entries(payload)) configured[key] = (value as { value: unknown }).value
-    return route.fulfill({ json: { message: 'Config updated' } })
+    configured.config_revision = Number(configured.config_revision) + 1
+    return route.fulfill({ json: { message: 'Config updated', config_revision: configured.config_revision } })
   })
   await page.route('**/accumulation/strategies**', route => route.fulfill({ json: {
     versions: [{ id: 17, name: 'Patient dip', version: 1, parameters: { timeframe: '4h' } }], next_after_id: null,

@@ -193,6 +193,9 @@ async def test_get_profit_rows_since_logs_traceback_and_returns_empty_on_orm_err
     captured: dict[str, object] = {}
 
     class _FailingFilter:
+        def filter(self, **_kwargs):
+            return self
+
         async def values_list(self, *_args, **_kwargs):
             raise _FakeOrmError("boom")
 
@@ -203,9 +206,9 @@ async def test_get_profit_rows_since_logs_traceback_and_returns_empty_on_orm_err
         captured["exc_info"] = kwargs.get("exc_info")
 
     monkeypatch.setattr(
-        model.ClosedTrades,
-        "filter",
-        lambda **_kwargs: _FailingFilter(),
+        statistic_module,
+        "realized_closed_trades",
+        lambda: _FailingFilter(),
     )
     monkeypatch.setattr(statistic_module.logging, "error", fake_error)
 

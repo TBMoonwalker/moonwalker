@@ -4014,7 +4014,11 @@ async def test_archive_backup_round_trip_retains_exact_record_and_empty_registra
     monkeypatch.setattr(
         "service.backup_restore.Config.instance",
         AsyncMock(
-            return_value=SimpleNamespace(reload=AsyncMock(), snapshot=lambda: {})
+            return_value=SimpleNamespace(
+                reload=AsyncMock(),
+                snapshot=lambda: {},
+                _acquire_write_lock=AsyncMock(return_value=asyncio.Lock()),
+            )
         ),
     )
     monkeypatch.setattr(

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import helper
-from model import AppConfig
+from model import AppConfig, ConfigRevision
 from redis.exceptions import AuthenticationError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -26,9 +26,38 @@ from service.redis import CONFIG_CHANNEL, redis_client
 from service.signal_settings import serialize_signal_settings
 from service.strategy_capability import filter_supported_strategies
 from service.strategy_catalog import PUBLIC_BUILTIN_SLUGS
+from tortoise.expressions import F
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
+RUNTIME_STATUS_KEYS = frozenset(
+    {
+        "ai_trust_runtime_status",
+        "ai_trust_runtime_provider_status",
+        "ai_trust_runtime_updated_at",
+    }
+)
+
+
+class StaleConfigRevision(ValueError):
+    """A configuration editor is based on an older persisted generation."""
+
+
+async def bump_config_revision(conn: Any, expected: int | None = None) -> int:
+    """Increment the revision in the same transaction as a configuration write."""
+    await ConfigRevision.get_or_create(id=1, defaults={"revision": 0}, using_db=conn)
+    query = ConfigRevision.filter(id=1)
+    if expected is not None:
+        query = query.filter(revision=expected)
+    changed = await query.using_db(conn).update(revision=F("revision") + 1)
+    if changed != 1:
+        raise StaleConfigRevision(
+            "Configuration changed since this form was loaded. Reload before saving."
+        )
+    row = await ConfigRevision.get(id=1).using_db(conn)
+    return int(row.revision)
+
+
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 REMOVED_CONFIG_KEY_REPLACEMENTS = {
     "autopilot_max_fund": ("capital_max_fund", "v1.4.0.0"),
@@ -500,6 +529,13 @@ class Config:
             self._write_lock = asyncio.Lock()
         return self._write_lock
 
+    async def snapshot_with_revision(self) -> tuple[dict[str, Any], int]:
+        """Read the runtime configuration and its persisted generation together."""
+        lock = await self._acquire_write_lock()
+        async with lock:
+            row = await ConfigRevision.filter(id=1).first()
+            return self.public_snapshot(), int(row.revision) if row else 0
+
     async def set(self, key: str, value: Any) -> bool:
         """Set a configuration value in the database and notify subscribers.
 
@@ -536,6 +572,7 @@ class Config:
         )
 
         async with in_transaction() as conn:
+            await bump_config_revision(conn)
             if action.persist:
                 await AppConfig.update_or_create(
                     using_db=conn,
@@ -566,6 +603,7 @@ class Config:
         updates: dict[str, Any],
         *,
         notify_subscribers: bool = True,
+        expected_revision: int | None = None,
     ) -> bool:
         """Update multiple configuration keys in the database at once.
 
@@ -587,6 +625,7 @@ class Config:
                     updates,
                     notify_subscribers=notify_subscribers,
                     mode_change_admitted=admitted,
+                    expected_revision=expected_revision,
                 )
 
     async def _batch_set_locked(
@@ -595,6 +634,7 @@ class Config:
         *,
         notify_subscribers: bool = True,
         mode_change_admitted: bool = False,
+        expected_revision: int | None = None,
     ) -> bool:
         """Persist several config keys. The caller must hold the write lock."""
         actions: list[ConfigUpdateAction] = []
@@ -609,6 +649,10 @@ class Config:
         )
 
         async with in_transaction() as conn:
+            if expected_revision is not None or any(
+                action.key not in RUNTIME_STATUS_KEYS for action in actions
+            ):
+                await bump_config_revision(conn, expected_revision)
             for action in actions:
                 if action.persist:
                     await AppConfig.update_or_create(

@@ -2308,8 +2308,16 @@ class Orders:
                 partial_amount=partial_amount,
                 partial_proceeds=partial_proceeds,
             )
-            for execution in close_context["payload"]["sell_executions"]:
-                execution["order_type"] = "manual_stop"
+            payload = close_context["payload"]
+            payload["valuation_quantity"] = amount
+            payload["valuation_price"] = price
+            payload["sell_executions"] = []
+            # Existing partial-sale totals are gross and do not prove fee coverage.
+            payload["profit"] = None
+            payload["profit_percent"] = None
+            payload["tp_price"] = (
+                partial_proceeds / partial_amount if partial_amount > 0 else None
+            )
             await persist_closed_trade(symbol, close_context["payload"])
             await self.trades.invalidate_trade_caches()
             return True

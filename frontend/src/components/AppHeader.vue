@@ -90,7 +90,7 @@ function icon(component: Component) {
   return () => h(NIcon, null, { default: () => h(component) })
 }
 
-const workspaceOptions: MenuOption[] = [
+const workspaceOptions = computed<MenuOption[]>(() => [
   { label: 'Overview', key: 'trades', icon: icon(GridOutline) },
   { label: 'Statistics', key: 'stats', icon: icon(BarChartOutline) },
   { label: 'Backtest', key: 'backtest', icon: icon(FlaskOutline) },
@@ -99,7 +99,7 @@ const workspaceOptions: MenuOption[] = [
     key: 'controlCenterAutopilot',
     icon: icon(AnalyticsOutline),
   },
-]
+].filter(item => item.key !== 'controlCenterAutopilot' || ['dynamic_dca', 'classic_dca', 'sidestep'].includes(String(configSnapshotStore.snapshot.value?.trade_mode))))
 const operationOptions: MenuOption[] = [
   { label: 'Configuration', key: 'controlCenter', icon: icon(SettingsOutline) },
   { label: 'Strategy Builder', key: 'strategyBuilder', icon: icon(AnalyticsOutline) },

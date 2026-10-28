@@ -114,4 +114,5 @@ export interface ControlCenterViewState {
 
 export interface ConfigFreshnessPayload {
     updated_at: string | null
+    config_revision?: number
 }

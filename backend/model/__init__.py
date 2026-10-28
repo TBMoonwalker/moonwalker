@@ -22,6 +22,7 @@ from .autopilotmemorystate import AutopilotMemoryState as AutopilotMemoryState
 from .autopilotsymbolmemory import AutopilotSymbolMemory as AutopilotSymbolMemory
 from .closedtrades import ClosedTrades as ClosedTrades
 from .configmigration import ConfigMigration as ConfigMigration
+from .configrevision import ConfigRevision as ConfigRevision
 from .listings import Listings as Listings
 from .opentrades import OpenTrades as OpenTrades
 from .placementintent import PlacementIntent as PlacementIntent
@@ -55,6 +56,7 @@ __all__ = [
     "AutopilotSymbolMemory",
     "ClosedTrades",
     "ConfigMigration",
+    "ConfigRevision",
     "Listings",
     "OpenTrades",
     "PlacementIntent",
@@ -86,6 +88,7 @@ if __name__ == "__main__":
         "AutopilotSymbolMemory",
         "AppConfig",
         "ConfigMigration",
+        "ConfigRevision",
         "AthCache",
         "Trades",
         "OpenTrades",

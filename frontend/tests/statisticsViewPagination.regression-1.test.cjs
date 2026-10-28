@@ -188,7 +188,7 @@ test('shared viewport changes reduce pagination slots on mobile', () => {
 
 test('onActivated refreshes analytics for kept-alive route visits', () => {
     assert.match(source, /onActivated\(\(\) => \{/)
-    assert.match(source, /void analytics\.load\(\)/)
+    assert.match(source, /void analytics\.load\(mode\)/)
 })
 
 test('statistics does not own a window resize listener', () => {

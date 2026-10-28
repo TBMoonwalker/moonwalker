@@ -25,6 +25,12 @@ Most settings are updated via `PUT /config/single/{key}` or
 through `POST /config/live/activate` so the backend can enforce readiness
 checks.
 
+Configuration API clients must send the `config_revision` returned by
+`/config/all` in the `X-Moonwalker-Config-Revision` header with each generic
+configuration write. A stale or missing revision is rejected with HTTP 409;
+reload and reconcile the pending edits before retrying. Update older scripts
+and clients to use this contract when upgrading the server.
+
 Configuration also fans out browser-local invalidation after save, restore,
 live activation, and trading pause changes. Clean tabs can refresh quietly, while tabs with unsaved
 drafts keep the draft and show an explicit stale-config warning instead of
@@ -244,6 +250,8 @@ limit using realized closed profit:
 - Stretch uses `ClosedTrades.profit` only, not uPNL.
 - Negative realized profit never reduces `capital_max_fund`.
 - `autopilot_profit_stretch_max = 0` means no stretch is added.
+- Unverified legacy manual stops or partial-sale stops with incomplete fee
+  evidence disable profit-based stretch until that uncertainty is resolved.
 
 Example:
 

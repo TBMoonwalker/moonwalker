@@ -21,6 +21,7 @@ from service.accumulation.backup import (
 from service.config import (
     Config,
     build_removed_config_key_message,
+    bump_config_revision,
     is_removed_config_key,
     resolve_history_lookback_days,
 )
@@ -171,6 +172,7 @@ class BackupService:
 
         async def _restore() -> None:
             async with in_transaction() as conn:
+                await bump_config_revision(conn)
                 await model.AppConfig.all().using_db(conn).delete()
                 for row in config_rows:
                     await model.AppConfig.create(using_db=conn, **row)
@@ -204,6 +206,18 @@ class BackupService:
                             ),
                             conn,
                         )
+                if (
+                    await model.ClosedTrades.filter(
+                        close_reason="manual_stop", valuation_quantity__isnull=True
+                    )
+                    .using_db(conn)
+                    .exists()
+                ):
+                    await (
+                        model.UpnlHistory.all()
+                        .using_db(conn)
+                        .update(performance_verified=False)
+                    )
                 accumulation_symbols = {
                     row["symbol"]
                     for row in validated_trade_data["accumulation_activations"]
@@ -234,10 +248,11 @@ class BackupService:
                             conn,
                         )
 
-        await run_sqlite_write_with_retry(_restore, "restoring backup")
-
         config = await Config.instance()
-        await config.reload()
+        lock = await config._acquire_write_lock()
+        async with lock:
+            await run_sqlite_write_with_retry(_restore, "restoring backup")
+            await config.reload()
 
         if validated_trade_data:
             refreshed, failed = await self._refresh_required_history(config.snapshot())

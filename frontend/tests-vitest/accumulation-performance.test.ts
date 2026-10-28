@@ -21,7 +21,7 @@ describe('accumulation performance coverage', () => {
     expect(wrapper.text()).toContain('7.00')
     statistics.setRaw(JSON.stringify({ ...data, performance_complete: false }))
     await flushPromises()
-    expect(wrapper.text()).toContain('Accumulation returns are not included')
+    expect(wrapper.text()).toContain('some returns lack verified evidence')
     expect(wrapper.find('.profit-summary').text()).toContain('Unavailable')
     expect(wrapper.find('.profit-summary').text()).not.toContain('7.00')
     expect(wrapper.find('.exposure-totals').text()).toContain('Portfolio value Unavailable')

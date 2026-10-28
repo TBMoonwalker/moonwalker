@@ -15,6 +15,10 @@ from service.capital_budget_logic import (
     calculate_effective_capital_limit,
 )
 from service.green_phase import AVAILABLE_QUOTE_UNSET, GreenPhaseService
+from service.realized_trades import (
+    has_unverified_manual_stop_profit,
+    realized_closed_trades,
+)
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
 
@@ -89,8 +93,10 @@ class Autopilot:
         ):
             return 0.0
         try:
+            if await has_unverified_manual_stop_profit():
+                return 0.0
             result = (
-                await model.ClosedTrades.all()
+                await realized_closed_trades()
                 .annotate(total=Sum("profit"))
                 .values_list(
                     "total",
