@@ -85,6 +85,8 @@ for adoption and retry behavior.
    close using the latest completed candle's dip depth and known spacing rules.
    The strategy-filter status is shown separately. This is not a buy signal:
    indicators, spacing, lifecycle and funding are rechecked at the next close.
+   When available, the condition tree shows the evaluated comparisons and their
+   values for the completed candle; an unavailable value cannot confirm a match.
 2. Use the row's **More** actions to pause or resume the registration. Pause
    blocks new buys while retaining managed coins and settling outstanding work.
    Use the top-bar global pause to block new buys across Moonwalker.

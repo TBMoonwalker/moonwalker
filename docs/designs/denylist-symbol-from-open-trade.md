@@ -15,10 +15,10 @@ normalizes it to a base token, reads the current list, de-duplicates, and writes
 under the shared configuration write lock. This prevents concurrent append
 requests from different dashboard clients from overwriting each other.
 
-Full configuration saves remain whole-list replacements. A lock serializes
-writes but does not merge the intent of a stale form with a newer append.
-The existing stale-draft controls help expose that conflict; callers must not
-assume all full-list replacement races are eliminated.
+Full configuration saves remain whole-list replacements. Generic configuration
+writes require the revision from the loaded snapshot. A denylist append advances
+that revision, so an older form save is rejected instead of overwriting the new
+entry; reload and reconcile the draft before retrying.
 
 The authoritative implementation is
 [Config](../../backend/service/config.py), with the request handler in

@@ -21,7 +21,7 @@ const headerSource = fs.readFileSync(
 )
 
 test('main dashboard Autopilot navigation uses an explicit action', () => {
-    assert.match(tradesViewSource, /<div class="status-autopilot">/)
+    assert.match(tradesViewSource, /class="status-autopilot"/)
     assert.match(tradesViewSource, /:to="\{ name: 'controlCenterAutopilot' \}"/)
     assert.match(tradesViewSource, />\s*Open Autopilot ↗\s*<\/RouterLink>/)
     assert.doesNotMatch(tradesViewSource, /class="stat-cell autopilot-cell autopilot-link"/)

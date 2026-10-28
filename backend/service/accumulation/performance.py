@@ -12,6 +12,7 @@ from typing import Any
 import ccxt.async_support as ccxt
 import model
 from service.accumulation.accounting import _inventory as holding_inventory
+from service.accumulation.commands import ENTRY_ACTIONS
 from service.accumulation.contracts import canonical_decimal
 from service.accumulation.csv_accounting import csv_inventory_origins
 from service.accumulation.imports import CSV_RETURN_BASIS, RETURN_BASES
@@ -147,8 +148,18 @@ async def _token(conn: Any) -> str:
         .order_by("id")
         .values("id", "accumulation_inventory_json")
     )
+    pending = (
+        await model.AccumulationLifecycleOperation.filter(
+            status="pending", action__in=list(ENTRY_ACTIONS)
+        )
+        .using_db(conn)
+        .order_by("id")
+        .values("id", "activation_id", "action")
+    )
     return hashlib.sha256(
-        json.dumps([holdings, owners, archives], sort_keys=True, default=str).encode()
+        json.dumps(
+            [holdings, owners, archives, pending], sort_keys=True, default=str
+        ).encode()
     ).hexdigest()
 
 
@@ -329,6 +340,7 @@ async def _historical_state(conn: Any) -> tuple[list[dict[str, Any]], str]:
                     "deal_id": deal_id,
                     "quantity": quantity,
                     "cost": cost,
+                    "contributed": deal["principal"],
                     "realized": realized,
                     "complete": bool(complete),
                     "owned": owned,
@@ -463,6 +475,9 @@ async def ensure_return_totals() -> None:
         and str(row.activation_id) not in invalid
         and any(owner == str(row.activation_id) for owner, _ in transfers)
     }
+    repair.update(
+        row.activation_id for row in cached_rows if row.contributed_quote is None
+    )
     if set(owners) <= cached and not repair:
         return
     async with _REBUILD_LOCK:
@@ -479,6 +494,11 @@ async def ensure_return_totals() -> None:
                 and str(row.activation_id) not in invalid
                 and any(owner == str(row.activation_id) for owner, _ in transfers)
             }
+            repair.update(
+                row.activation_id
+                for row in cached_rows
+                if row.contributed_quote is None
+            )
             missing = [
                 row for row in owners if row.id not in cached or row.id in repair
             ]
@@ -519,6 +539,16 @@ async def ensure_return_totals() -> None:
                         activation=owner,
                         defaults={
                             "realized_quote": format(realized, "f"),
+                            "contributed_quote": format(
+                                sum(
+                                    (
+                                        row.get("contributed", Decimal(0))
+                                        for row in selected
+                                    ),
+                                    Decimal(0),
+                                ),
+                                "f",
+                            ),
                             "provenance_complete": complete,
                             "history_complete": history_complete,
                             "last_quantity": last_quantity,
@@ -539,19 +569,19 @@ async def ensure_return_totals() -> None:
 async def _checkpoint_summaries(conn: Any) -> dict[str, dict[str, Any]]:
     """Read one latest row and lifetime completeness flags per registration.
 
-    SQLite computes the window over the ledger, but only O(registrations) rows
-    cross into Python. Ordering matches the former ORM query including id ties.
+    Indexed lookups avoid sorting the entire ledger in SQLite's temporary memory.
+    Ordering matches the former ORM query including id ties.
     """
     rows = await conn.execute_query_dict(
-        "SELECT activation_id, inventory_json, deal_id, incomplete_fees, unsettled "
-        "FROM (SELECT activation_id, inventory_json, deal_id, "
-        "MAX(CASE WHEN fees_complete = 0 THEN 1 ELSE 0 END) "
-        "OVER (PARTITION BY activation_id) AS incomplete_fees, "
-        "MAX(CASE WHEN terminal = 0 THEN 1 ELSE 0 END) "
-        "OVER (PARTITION BY activation_id) AS unsettled, "
-        "ROW_NUMBER() OVER (PARTITION BY activation_id "
-        "ORDER BY updated_at DESC, id DESC) AS position "
-        "FROM accumulation_fill_checkpoints) WHERE position = 1"
+        "SELECT a.id AS activation_id, c.inventory_json, c.deal_id, "
+        "EXISTS(SELECT 1 FROM accumulation_fill_checkpoints f "
+        "WHERE f.activation_id = a.id AND f.fees_complete = 0) AS incomplete_fees, "
+        "EXISTS(SELECT 1 FROM accumulation_fill_checkpoints t "
+        "WHERE t.activation_id = a.id AND t.terminal = 0) AS unsettled "
+        "FROM accumulation_activations a JOIN accumulation_fill_checkpoints c "
+        "ON c.id = (SELECT id FROM accumulation_fill_checkpoints latest "
+        "WHERE latest.activation_id = a.id "
+        "ORDER BY updated_at DESC, id DESC LIMIT 1)"
     )
     return {str(row["activation_id"]): row for row in rows}
 
@@ -559,6 +589,13 @@ async def _checkpoint_summaries(conn: Any) -> dict[str, dict[str, Any]]:
 async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
     """Routine work returns O(registrations) rows, never lifetime fills."""
     owners = await model.AccumulationActivation.all().using_db(conn)
+    pending_entries = set(
+        await model.AccumulationLifecycleOperation.filter(
+            status="pending", action__in=list(ENTRY_ACTIONS)
+        )
+        .using_db(conn)
+        .values_list("activation_id", flat=True)
+    )
     holdings = {
         row.symbol: row
         for row in await model.OpenTrades.filter(
@@ -642,8 +679,14 @@ async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
         result.append(
             {
                 "symbol": owner.symbol,
+                "pending_entry": owner.id in pending_entries and holding is None,
                 "quantity": quantity,
                 "cost": cost,
+                "contributed": Decimal(cached.contributed_quote)
+                if cached is not None
+                and cached.contributed_quote is not None
+                and complete
+                else None,
                 "realized": Decimal(cached.realized_quote)
                 if cached is not None and complete
                 else None,
@@ -652,20 +695,26 @@ async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
                 "scope": owner.account_scope,
                 "live": live,
                 "history_complete": bool(cached and cached.history_complete),
+                "basis_provenance": declared_basis
+                and CSV_RETURN_BASIS
+                or (holding.accumulation_basis_provenance if holding else None),
             }
         )
     for holding in holdings.values():
         result.append(
             {
                 "symbol": holding.symbol,
+                "pending_entry": False,
                 "quantity": None,
                 "cost": None,
+                "contributed": None,
                 "realized": None,
                 "complete": False,
                 "owned": False,
                 "scope": None,
                 "live": True,
                 "history_complete": False,
+                "basis_provenance": None,
             }
         )
     return result, await _token(conn)
@@ -722,6 +771,11 @@ async def accumulation_performance(adapter: Any) -> dict[str, Any]:
         scope = await adapter.account_scope(config)
     except (ValueError, OSError, TimeoutError, ccxt.BaseError):
         config, scope = None, None
+    history_complete = (
+        history_complete
+        and scope is not None
+        and all(row["scope"] == scope for row in rows)
+    )
     symbols = sorted(
         {
             row["symbol"]
@@ -744,17 +798,26 @@ async def accumulation_performance(adapter: Any) -> dict[str, Any]:
     except ValueError:
         stable = False
     now = adapter.clock_ms()
-    valid_until = now + 2000
+    # The two-second cache interval controls refresh frequency, not bid age.
+    # Keep the snapshot usable until the oldest included bid reaches its limit.
+    valid_until = now + 10000
     groups: dict[str, Any] = {}
+    holdings: list[dict[str, Any]] = []
     with localcontext() as context:
         context.prec = 512
         for row in rows:
+            holding_value: str | None = None
+            holding_unrealized: str | None = None
             group = groups.setdefault(
                 row["symbol"].split("/")[1],
                 {
                     "market_value": Decimal(0),
                     "unrealized": Decimal(0),
                     "realized": Decimal(0),
+                    "remaining_cost": Decimal(0),
+                    "basis_complete": stable,
+                    "contributed": Decimal(0),
+                    "contributed_complete": stable,
                     "complete": stable,
                     "realized_complete": stable,
                     "valuation_complete": stable,
@@ -762,19 +825,36 @@ async def accumulation_performance(adapter: Any) -> dict[str, Any]:
                     "live_holding_count": 0,
                 },
             )
-            complete = stable and row["complete"]
+            scope_matches = scope is not None and row["scope"] == scope
+            complete = stable and scope_matches and row["complete"]
+            if not scope_matches:
+                group["basis_complete"] = False
+                group["valuation_complete"] = False
+            if complete and row["contributed"] is not None:
+                group["contributed"] += row["contributed"]
+            else:
+                group["contributed_complete"] = False
             if not complete:
                 group["realized_complete"] = False
             if row["realized"] is not None:
                 group["realized"] += row["realized"]
             if row["live"]:
                 group["live_holding_count"] += 1
+                if (
+                    stable
+                    and row["owned"]
+                    and scope_matches
+                    and row["cost"] is not None
+                ):
+                    group["remaining_cost"] += Decimal(canonical_decimal(row["cost"]))
+                else:
+                    group["basis_complete"] = False
                 mark = marks.get(row["symbol"])
                 try:
                     if (
                         not stable
                         or not row["owned"]
-                        or row["scope"] != scope
+                        or not scope_matches
                         or row["quantity"] is None
                         or not isinstance(mark, dict)
                         or type(mark.get("observed_at_ms")) is not int
@@ -784,16 +864,55 @@ async def accumulation_performance(adapter: Any) -> dict[str, Any]:
                     value = Decimal(canonical_decimal(row["quantity"])) * Decimal(
                         canonical_decimal(mark["bid"], positive=True)
                     )
+                    holding_value = _money(value)
                     group["market_value"] += value
                     valid_until = min(valid_until, mark["observed_at_ms"] + 10000)
                     if complete and row["cost"] is not None:
                         group["unrealized"] += value - Decimal(row["cost"])
+                        holding_unrealized = _money(value - Decimal(row["cost"]))
                 except (ValueError, TypeError, KeyError):
                     group["valuation_complete"] = False
                     complete = False
             if not complete:
                 group["unknown_deal_count"] += 1
                 group["complete"] = False
+            if row["live"]:
+                average_cost = None
+                if (
+                    row["owned"]
+                    and stable
+                    and scope is not None
+                    and row["scope"] == scope
+                    and row["quantity"] is not None
+                    and row["cost"] is not None
+                ):
+                    quantity = Decimal(canonical_decimal(row["quantity"]))
+                    if quantity > 0:
+                        average_cost = _money(
+                            Decimal(canonical_decimal(row["cost"])) / quantity
+                        )
+                holdings.append(
+                    {
+                        "symbol": row["symbol"],
+                        "quantity": row["quantity"]
+                        if row["owned"]
+                        and stable
+                        and scope is not None
+                        and row["scope"] == scope
+                        else None,
+                        "remaining_cost": row["cost"]
+                        if row["owned"]
+                        and stable
+                        and scope is not None
+                        and row["scope"] == scope
+                        else None,
+                        "average_cost": average_cost,
+                        "market_value": holding_value,
+                        "unrealized": holding_unrealized,
+                        "complete": bool(complete),
+                        "basis_provenance": row["basis_provenance"],
+                    }
+                )
         output = []
         for quote, group in sorted(groups.items()):
             output.append(
@@ -802,6 +921,12 @@ async def accumulation_performance(adapter: Any) -> dict[str, Any]:
                     "complete": group["complete"],
                     "unknown_deal_count": group["unknown_deal_count"],
                     "live_holding_count": group["live_holding_count"],
+                    "remaining_cost": _money(group["remaining_cost"])
+                    if group["basis_complete"]
+                    else None,
+                    "contributed_quote": _money(group["contributed"])
+                    if group["contributed_complete"]
+                    else None,
                     "market_value": _money(group["market_value"])
                     if group["valuation_complete"]
                     else None,
@@ -822,7 +947,13 @@ async def accumulation_performance(adapter: Any) -> dict[str, Any]:
         "valid_until_ms": valid_until,
         "basis": "fresh_bid_before_future_sale_fees",
         "includes_csv_declarations": includes_csv,
+        "pending_entry_count": sum(
+            1 for row in rows if row["pending_entry"] and row["scope"] == scope
+        )
+        if stable and scope is not None
+        else None,
         "by_quote": output,
+        "holdings": holdings,
         "history_complete": stable and history_complete,
         "realized_by_date": history if stable and history_complete else [],
         "reason": None if stable else "ledger_changed_during_valuation",

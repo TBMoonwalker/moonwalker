@@ -251,7 +251,11 @@ def aggregate_frame(frame: pd.DataFrame, base: str, target: str) -> pd.DataFrame
 
 
 def evaluate_conditions(
-    ir: dict[str, Any], frame: pd.DataFrame, timeframe: str
+    ir: dict[str, Any],
+    frame: pd.DataFrame,
+    timeframe: str,
+    *,
+    explanation: dict[str, Any] | None = None,
 ) -> bool:
     """Evaluate the same pure graph on closed snapshots in either trading mode."""
     required = graph_history(ir, timeframe)
@@ -338,4 +342,73 @@ def evaluate_conditions(
         memo[key] = result
         return result
 
-    return value(ir["root"]) is True
+    matched = value(ir["root"]) is True
+    if explanation is not None:
+        remaining = 256
+
+        def describe(key: str) -> dict[str, Any]:
+            nonlocal remaining
+            if remaining == 0:
+                return {
+                    "label": "Additional conditions omitted",
+                    "kind": "truncated",
+                    "matched": None,
+                }
+            remaining -= 1
+            node = by_id[key]
+            kind = node["type"]
+            result: dict[str, Any] = {
+                "label": str(node.get("label") or key),
+                "kind": kind,
+                "matched": value(key) is True,
+            }
+            inputs = [edge for edge in edges if edge["target"] == key]
+            if kind in {"all", "any"}:
+                children = []
+                for edge in inputs:
+                    children.append(describe(edge["source"]))
+                    if remaining == 0:
+                        children.append(
+                            {
+                                "label": "Additional conditions omitted",
+                                "kind": "truncated",
+                                "matched": None,
+                            }
+                        )
+                        break
+                result["children"] = children
+            elif kind == "comparison":
+                ports = {
+                    {"left": "value1", "right": "value2"}.get(
+                        edge.get("target_input")
+                        or edge.get("targetInput")
+                        or edge.get("input"),
+                        edge.get("target_input")
+                        or edge.get("targetInput")
+                        or edge.get("input"),
+                    ): edge["source"]
+                    for edge in inputs
+                }
+                result["comparison"] = (node.get("params") or {}).get(
+                    "comparison", "equals"
+                )
+                for port in ("value1", "value2"):
+                    source = ports.get(port)
+                    raw = value(source) if source else None
+                    result[port] = {
+                        "label": str(by_id[source].get("label") or source)
+                        if source
+                        else "Unknown",
+                        "value": raw
+                        if isinstance(raw, (int, float)) and math.isfinite(raw)
+                        else None,
+                    }
+                if (
+                    result["value1"]["value"] is None
+                    or result["value2"]["value"] is None
+                ):
+                    result["matched"] = None
+            return result
+
+        explanation.update(describe(ir["root"]))
+    return matched

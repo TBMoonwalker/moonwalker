@@ -1,5 +1,6 @@
 """CSV acquisition basis survives real aggregation and live DCA valuation."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -168,7 +169,11 @@ async def test_backup_restore_preserves_csv_cost_provenance(
         row.pop("cost_includes_fees")
     else:
         row["cost_includes_fees"] = flag
-    config = SimpleNamespace(reload=AsyncMock(), snapshot=lambda: {})
+    config = SimpleNamespace(
+        reload=AsyncMock(),
+        snapshot=lambda: {},
+        _acquire_write_lock=AsyncMock(return_value=asyncio.Lock()),
+    )
     monkeypatch.setattr(Config, "instance", AsyncMock(return_value=config))
     monkeypatch.setattr(
         backup, "_refresh_required_history", AsyncMock(return_value=([], []))

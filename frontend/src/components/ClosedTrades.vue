@@ -109,6 +109,7 @@ const {
 })
 
 function row_classes(row: ClosedTradeRow) {
+    if (row.profit_percent == null) return ''
     if (Math.sign(Number(row.profit_percent)) >= 0) {
         return 'green'
     } else {
@@ -248,6 +249,9 @@ function renderSymbolCell(rowData: ClosedTradeRow, index: number) {
             h('span', { class: 'trade-cell-sub' }, `#${index + 1}`),
             h('span', { class: 'trade-cell-sub' }, formatCloseReason(rowData.close_reason)),
         ]),
+        rowData.close_reason === 'manual_stop' && rowData.valuation_quantity != null && rowData.valuation_price != null
+            ? h('span', { class: 'trade-cell-sub' }, `Unsold: ${formatAssetAmount(rowData.valuation_quantity)} at ${formatFixed(rowData.valuation_price)} (market valuation)`)
+            : null,
     ])
 }
 
@@ -290,7 +294,7 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             key: 'profit',
             render: (rowData) => {
                 return renderCellStack(
-                    formatFixed(rowData.profit),
+                    rowData.profit == null ? 'Unavailable' : formatFixed(rowData.profit),
                     undefined,
                     'trade-cell-main profit',
                 )
@@ -312,6 +316,7 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             key: 'profit_percent',
             className: 'profit',
             render: (rowData) => {
+                if (rowData.profit_percent == null) return renderCellStack('Unavailable')
                 if (isMobile.value) {
                     return renderCellStack(
                         `${formatFixed(rowData.profit_percent)}%`,

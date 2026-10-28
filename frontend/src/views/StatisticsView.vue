@@ -3,6 +3,8 @@ import {
    computed,
    h,
    onActivated,
+   onDeactivated,
+   onUnmounted,
    shallowReactive,
    ref,
    watch,
@@ -12,8 +14,19 @@ import Heatmap from '../components/Heatmap.vue'
 import { useViewport } from '../composables/useViewport'
 import { useAnalyticsStore } from '../stores/analytics'
 import type { AiTrustPrediction, AnalyticsOverview } from '../stores/analytics'
+import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
+import AccumulationStatistics from '../components/AccumulationStatistics.vue'
 
 const analytics = useAnalyticsStore()
+const config = useSharedConfigSnapshot()
+const selectedReport = ref<'dynamic_dca' | 'accumulation' | 'unknown' | null>(null)
+const liveMode = computed(() => {
+   const mode = config.snapshot.value?.trade_mode
+   if (mode === 'accumulation') return 'accumulation'
+   if (mode === 'dynamic_dca' || mode === 'classic_dca' || mode === 'sidestep') return 'dynamic_dca'
+   return null
+})
+const reportMode = computed(() => selectedReport.value ?? liveMode.value)
 const activeTab = ref('symbols')
 const { isMobile } = useViewport()
 const SYMBOL_PAGE_SIZE = 10
@@ -96,9 +109,46 @@ function syncPaginationSlots() {
 
 watch(isMobile, syncPaginationSlots, { immediate: true })
 
+const modeFreshness = ref<'checking' | 'fresh' | 'unknown'>('checking')
+let modeTimer: ReturnType<typeof setInterval> | undefined
+let modeActive = false
+let checkingMode = false
+async function refreshLiveMode() {
+   if (checkingMode || !modeActive || document.hidden) return
+   checkingMode = true
+   try {
+      if (!config.snapshot.value) await config.ensureLoaded()
+      const freshness = await config.checkFreshness()
+      if (freshness.status === 'unknown') {
+         modeFreshness.value = 'unknown'
+      } else {
+         if (freshness.status === 'stale' && modeActive) await config.refresh()
+         modeFreshness.value = 'fresh'
+      }
+   } catch {
+      modeFreshness.value = 'unknown'
+   } finally {
+      checkingMode = false
+   }
+}
+function stopModeRefresh() {
+   modeActive = false
+   if (modeTimer) clearInterval(modeTimer)
+   modeTimer = undefined
+   window.removeEventListener('focus', refreshLiveMode)
+   window.removeEventListener('online', refreshLiveMode)
+}
 onActivated(() => {
-   void analytics.load()
+   modeActive = true
+   void refreshLiveMode()
+   if (reportMode.value === 'dynamic_dca' || reportMode.value === 'unknown') void analytics.load(reportMode.value)
+   modeTimer = setInterval(() => { void refreshLiveMode() }, 15000)
+   window.addEventListener('focus', refreshLiveMode)
+   window.addEventListener('online', refreshLiveMode)
 })
+onDeactivated(stopModeRefresh)
+onUnmounted(stopModeRefresh)
+watch(reportMode, mode => { if (mode === 'dynamic_dca' || mode === 'unknown') void analytics.load(mode) }, { immediate: true })
 
 const d = computed(() => analytics.data)
 const summary = computed(
@@ -521,8 +571,19 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
    <div class="page-shell stats-page operator-console-page">
       <header class="operator-page-heading">
         <h1>Statistics</h1>
-        <p>Closed-trade performance, activity, and AI trust in one view.</p>
+        <p>Live mode: {{ liveMode === 'accumulation' ? 'Accumulation' : liveMode === 'dynamic_dca' ? 'Dynamic DCA' : 'Unavailable' }}</p>
+        <p v-if="modeFreshness === 'unknown'" role="status">Live mode may be out of date. Reconnecting to the instance.</p>
+        <div role="group" aria-label="Statistics history">
+          <n-button :type="reportMode === 'accumulation' ? 'primary' : 'default'" :aria-pressed="reportMode === 'accumulation'" @click="selectedReport = 'accumulation'">Accumulation</n-button>
+          <n-button :type="reportMode === 'dynamic_dca' ? 'primary' : 'default'" :aria-pressed="reportMode === 'dynamic_dca'" @click="selectedReport = 'dynamic_dca'">Dynamic DCA history</n-button>
+          <n-button :type="reportMode === 'unknown' ? 'primary' : 'default'" :aria-pressed="reportMode === 'unknown'" @click="selectedReport = 'unknown'">Unclassified history</n-button>
+        </div>
       </header>
+      <AccumulationStatistics v-if="reportMode === 'accumulation'" />
+      <p v-else-if="!reportMode">Trading mode is unavailable. Refresh configuration to view its statistics.</p>
+      <template v-else>
+      <p>Viewing {{ reportMode === 'unknown' ? 'unclassified' : 'Dynamic DCA' }} history · last two years. {{ reportMode === 'dynamic_dca' && d?.unattributed_trades ? `${d.unattributed_trades} closed trades have unknown mode and are excluded.` : '' }}</p>
+      <p v-if="d?.unverified_manual_stops">{{ d.unverified_manual_stops }} manual stops lack verified realized profit and are excluded from these statistics.</p>
       <!-- Empty / error state -->
       <template v-if="!summary">
         <n-flex class="page-section" vertical>
@@ -533,7 +594,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                 <template v-else-if="analytics.error">
                    <n-alert type="error" :show-icon="false">
                      {{ analytics.error }}
-                     <n-button size="small" strong secondary type="primary" @click="analytics.load">Retry</n-button>
+                     <n-button size="small" strong secondary type="primary" @click="analytics.load(reportMode === 'unknown' ? 'unknown' : 'dynamic_dca')">Retry</n-button>
                    </n-alert>
                 </template>
                 <template v-else>No closed trades yet. Statistics will appear after your first trade closes.</template>
@@ -609,7 +670,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
             <n-flex vertical :size="12">
               <div class="ai-trust-header">
                 <div>
-                  <n-text depth="3" class="stats-kicker">AI Trust Cockpit</n-text>
+                  <n-text depth="3" class="stats-kicker">AI Trust Cockpit · all modes</n-text>
                   <div class="ai-trust-status">{{ aiTrustStatusText }}</div>
                 </div>
                 <n-tag
@@ -892,6 +953,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
             </n-tabs>
           </n-card>
         </n-flex>
+      </template>
       </template>
     </div>
  </template>

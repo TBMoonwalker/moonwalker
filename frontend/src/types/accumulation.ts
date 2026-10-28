@@ -112,7 +112,18 @@ export interface AccumulationWaitCondition {
   price_basis?: 'ask'
   next_close_ms: number
   levels: AccumulationPriceLevel[]
+  strategy_conditions?: AccumulationConditionNode
   indicative?: { level: AccumulationPriceLevel; conditions_match: boolean }
+}
+
+export interface AccumulationConditionNode {
+  label: string
+  kind: string
+  matched: boolean | null
+  children?: AccumulationConditionNode[]
+  comparison?: string
+  value1?: { label: string; value: number | null }
+  value2?: { label: string; value: number | null }
 }
 
 export interface AccumulationPriceLevel {

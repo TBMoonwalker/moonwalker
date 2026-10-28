@@ -29,6 +29,14 @@ async def record_return_delta(
             await model.AccumulationFillCheckpoint.filter(activation=activation)
             .using_db(connection)
             .exists()
+        ) or (
+            await model.AccumulationLifecycleOperation.filter(
+                activation=activation,
+                status="applied",
+                request_json__contains='"_csv_deal_id"',
+            )
+            .using_db(connection)
+            .exists()
         ):
             return  # Portable/older history requires one maintenance rebuild first.
         totals = await model.AccumulationReturnTotals.create(
@@ -39,6 +47,14 @@ async def record_return_delta(
         inventory.quantity,
         inventory.remaining_cost,
     )
+    if side == "buy" and totals.contributed_quote is not None:
+        with localcontext() as context:
+            context.prec = 512
+            totals.contributed_quote = format(
+                Decimal(totals.contributed_quote)
+                + Decimal(canonical_decimal(delta["quote_cost"])),
+                "f",
+            )
     if side == "sell":
         if delta["allocated_basis"] is None:
             totals.provenance_complete = False

@@ -290,6 +290,10 @@ async def test_database_init_surfaces_actionable_sqlite_corruption(
     monkeypatch.setattr(Database, "_ensure_accumulation_return_schema", _noop)
     monkeypatch.setattr(Database, "_ensure_accumulation_initial_entry_schema", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_cost_provenance", _noop)
+    monkeypatch.setattr(Database, "_ensure_closed_trade_mode", _noop)
+    monkeypatch.setattr(Database, "_ensure_accumulation_history_revision", _noop)
+    monkeypatch.setattr(Database, "_ensure_accumulation_contributions", _noop)
+    monkeypatch.setattr(Database, "_ensure_manual_stop_valuation", _noop)
     monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_malformed)
     monkeypatch.setattr(Database, "_backfill_trade_replay_candles", _noop)
@@ -338,6 +342,10 @@ async def test_database_init_reraises_non_corruption_failures(
     monkeypatch.setattr(Database, "_ensure_accumulation_return_schema", _noop)
     monkeypatch.setattr(Database, "_ensure_accumulation_initial_entry_schema", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_cost_provenance", _noop)
+    monkeypatch.setattr(Database, "_ensure_closed_trade_mode", _noop)
+    monkeypatch.setattr(Database, "_ensure_accumulation_history_revision", _noop)
+    monkeypatch.setattr(Database, "_ensure_accumulation_contributions", _noop)
+    monkeypatch.setattr(Database, "_ensure_manual_stop_valuation", _noop)
     monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_generic)
     monkeypatch.setattr(Database, "_backfill_trade_replay_candles", _noop)
@@ -389,6 +397,10 @@ async def test_database_init_surfaces_index_rebuild_guidance_for_index_only_corr
     monkeypatch.setattr(Database, "_ensure_accumulation_return_schema", _noop)
     monkeypatch.setattr(Database, "_ensure_accumulation_initial_entry_schema", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_cost_provenance", _noop)
+    monkeypatch.setattr(Database, "_ensure_closed_trade_mode", _noop)
+    monkeypatch.setattr(Database, "_ensure_accumulation_history_revision", _noop)
+    monkeypatch.setattr(Database, "_ensure_accumulation_contributions", _noop)
+    monkeypatch.setattr(Database, "_ensure_manual_stop_valuation", _noop)
     monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_malformed)
     monkeypatch.setattr(Database, "_backfill_trade_replay_candles", _noop)
@@ -501,6 +513,24 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "_ensure_trade_cost_provenance",
         _record("ensure_trade_cost_provenance"),
     )
+    monkeypatch.setattr(
+        Database, "_ensure_closed_trade_mode", _record("ensure_closed_trade_mode")
+    )
+    monkeypatch.setattr(
+        Database,
+        "_ensure_accumulation_history_revision",
+        _record("ensure_accumulation_history_revision"),
+    )
+    monkeypatch.setattr(
+        Database,
+        "_ensure_accumulation_contributions",
+        _record("ensure_accumulation_contributions"),
+    )
+    monkeypatch.setattr(
+        Database,
+        "_ensure_manual_stop_valuation",
+        _record("ensure_manual_stop_valuation"),
+    )
     await database.init()
 
     assert calls == [
@@ -523,6 +553,10 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "ensure_accumulation_initial_entry_schema",
         "ensure_trade_ledger_columns",
         "ensure_trade_cost_provenance",
+        "ensure_closed_trade_mode",
+        "ensure_accumulation_history_revision",
+        "ensure_accumulation_contributions",
+        "ensure_manual_stop_valuation",
         "repair_index_only_corruption_if_needed",
         "backfill_trade_ledger_rows",
     ]

@@ -39,6 +39,24 @@ const wsHealthcheckIntervalMs = ref(DEFAULT_WS_HEALTHCHECK_INTERVAL_MS)
 const wsStaleTimeoutMs = ref(DEFAULT_WS_STALE_TIMEOUT_MS)
 const wsReconnectDebounceMs = ref(DEFAULT_WS_RECONNECT_DEBOUNCE_MS)
 const configSnapshotStore = useSharedConfigSnapshot()
+let configRefreshTimer: number | undefined
+let checkingConfig = false
+const refreshSharedConfig = async () => {
+  if (checkingConfig || document.hidden || !navigator.onLine) return
+  checkingConfig = true
+  try {
+    if (!configSnapshotStore.snapshot.value) {
+      await configSnapshotStore.ensureLoaded()
+      return
+    }
+    const freshness = await configSnapshotStore.checkFreshness()
+    if (freshness.status === 'stale') await configSnapshotStore.refresh()
+  } catch {
+    // Keep the last known snapshot until connectivity returns.
+  } finally {
+    checkingConfig = false
+  }
+}
 
 const buildWsUrl = (path: string): string => {
   const url = new URL(path, MOONWALKER_API_ORIGIN)
@@ -180,6 +198,7 @@ const managedSockets = [
 ]
 
 const onActiveAgain = () => {
+  void refreshSharedConfig()
   if (!wsWatchdogEnabled.value) {
     return
   }
@@ -217,6 +236,7 @@ const runHealthcheck = () => {
 }
 
 onUnmounted(() => {
+  if (configRefreshTimer !== undefined) window.clearInterval(configRefreshTimer)
   if (healthcheckTimer !== null) {
     window.clearTimeout(healthcheckTimer)
   }
@@ -233,6 +253,7 @@ onMounted(() => {
     console.debug('[ws] using default watchdog config', error)
   })
   runHealthcheck()
+  configRefreshTimer = window.setInterval(() => { void refreshSharedConfig() }, 15000)
   window.addEventListener('focus', onActiveAgain)
   window.addEventListener('online', onActiveAgain)
   document.addEventListener('visibilitychange', visibilityHandler)

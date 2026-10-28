@@ -101,6 +101,28 @@ def test_shared_preset_validates_and_rejects_uptrend():
     assert evaluate_conditions(graph, candle_frame(candles(trend=-0.5)), "1h")
 
 
+def test_explanation_uses_same_graph_result_and_comparison_values():
+    graph = regime_accumulation_graph()
+    frame = candle_frame(candles(trend=-0.1))
+    explanation = {}
+    result = evaluate_conditions(graph, frame, "1h", explanation=explanation)
+    assert result == evaluate_conditions(graph, frame, "1h")
+    assert explanation["matched"] is result
+    assert explanation["kind"] == "all"
+    discount = next(
+        child
+        for child in explanation["children"]
+        if child["label"] == "discount at least one atr"
+    )
+    expected = indicator_series(
+        frame.iloc[-1240:],
+        {"indicator": "ema_distance_atr", "length": 20, "atr_length": 14},
+    ).iloc[-1]
+    assert discount["value1"]["value"] == pytest.approx(expected)
+    assert discount["value2"]["value"] == 1.0
+    assert discount["matched"] == (expected >= 1.0)
+
+
 def test_prefix_causality_and_gap_fail_closed():
     graph = regime_accumulation_graph()
     frame = candle_frame(candles(1400, -0.2))

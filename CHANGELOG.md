@@ -2,6 +2,29 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.4.1.0] - 2026-10-28
+
+### Added
+- Follow accumulated coins, purchase costs and recorded order activity in a
+  dedicated statistics view that updates live.
+- See the conditions an accumulation strategy is waiting for, including its
+  current indicator values and candle-close requirements.
+
+### Changed
+- Tailor configuration, statistics and navigation to the active trading mode,
+  and protect configuration changes from conflicting dashboard edits.
+
+### Fixed
+- Keep accumulation statistics responsive and reduce temporary memory use
+  when the recorded order history grows.
+- Stop a DCA trade at its latest tracked market price instead of deleting its
+  trade history. The remaining coins are valued at the current price as a
+  separately recorded market valuation, without a sell order or fee. Actual
+  partial-sale records remain in the execution history; realized profit is
+  unavailable when their fees cannot be verified.
+  A fill that lands while the take-profit order is being canceled is included,
+  and a missing or invalid price keeps the open trade.
+
 ## [5.4.0.0] - 2026-10-26
 
 ### Changed

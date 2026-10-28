@@ -140,6 +140,12 @@ Main REST statistics endpoint:
 These websocket streams refresh every 5 seconds and broadcast shared payloads
 to all connected dashboard clients.
 
+Accumulation also uses `WS /accumulation/stream` for holding status and
+`WS /accumulation/performance/stream` for Statistics. The latter shares
+valuation snapshots and activity revisions so clients can refresh history
+when it changes. See the [API reference](api.md#accumulation) for freshness
+and recovery-only limitations.
+
 ## Backup And Restore
 
 Backup and restore is available in Utilities:

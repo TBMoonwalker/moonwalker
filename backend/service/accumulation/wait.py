@@ -70,6 +70,8 @@ def accumulation_wait_condition(
             "next_close_ms": market.close_ms + parameters.interval_ms,
             "levels": levels,
         }
+        if reason == "WAIT_CONDITIONS" and market.condition_explanation:
+            result["strategy_conditions"] = market.condition_explanation
 
         if reason == "WAIT_BASELINE":
             # A next-bar estimate uses the latest close as the decline boundary.

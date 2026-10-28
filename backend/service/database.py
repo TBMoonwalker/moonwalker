@@ -909,8 +909,163 @@ class Database:
                     description="Distinguish fee-inclusive acquisition costs from legacy fee estimates.",
                     apply=self._ensure_trade_cost_provenance,
                 ),
+                MigrationDefinition(
+                    version="2026-10-27-017-closed-trade-mode",
+                    phase="schema",
+                    description="Add nullable closed-trade lifecycle attribution.",
+                    apply=self._ensure_closed_trade_mode,
+                ),
+                MigrationDefinition(
+                    version="2026-10-27-018-accumulation-history-revision",
+                    phase="schema",
+                    description="Track changes to mutable accumulation activity records.",
+                    apply=self._ensure_accumulation_history_revision,
+                ),
+                MigrationDefinition(
+                    version="2026-10-27-019-accumulation-contributions",
+                    phase="schema",
+                    description="Add rebuildable lifetime contribution totals.",
+                    apply=self._ensure_accumulation_contributions,
+                ),
+                MigrationDefinition(
+                    version="2026-10-28-020-manual-stop-valuation",
+                    phase="schema",
+                    description="Separate unsold market valuation from realized returns.",
+                    apply=self._ensure_manual_stop_valuation,
+                ),
             )
         )
+
+    async def _ensure_manual_stop_valuation(self) -> None:
+        """Add optional unsold valuation fields without rewriting past closes."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query("PRAGMA table_info('closedtrades')")
+        statements = _plan_additive_column_statements(
+            "closedtrades",
+            {row["name"] for row in columns},
+            (("valuation_quantity", "REAL NULL"), ("valuation_price", "REAL NULL")),
+        )
+        if statements:
+            await connection.execute_script("\n".join(statements))
+
+        _, snapshot_columns = await connection.execute_query(
+            "PRAGMA table_info('upnl_history')"
+        )
+        snapshot_statements = _plan_additive_column_statements(
+            "upnl_history",
+            {row["name"] for row in snapshot_columns},
+            (("performance_verified", "INTEGER NOT NULL DEFAULT 1"),),
+        )
+        if snapshot_statements:
+            await connection.execute_script("\n".join(snapshot_statements))
+        await connection.execute_query(
+            "UPDATE upnl_history SET performance_verified = 0 WHERE EXISTS "
+            "(SELECT 1 FROM closedtrades WHERE close_reason = 'manual_stop' "
+            "AND valuation_quantity IS NULL)"
+        )
+
+    async def _ensure_accumulation_contributions(self) -> None:
+        """Mark existing contribution caches for a verified historical rebuild."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query(
+            "PRAGMA table_info('accumulation_return_totals')"
+        )
+        statements = _plan_additive_column_statements(
+            "accumulation_return_totals",
+            {row["name"] for row in columns},
+            (("contributed_quote", "TEXT NULL"),),
+        )
+        if statements:
+            await connection.execute_script("\n".join(statements))
+
+    async def _ensure_accumulation_history_revision(self) -> None:
+        """Track activity mutations so paginated snapshots fail closed on changes."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        await connection.execute_script("""
+            CREATE TABLE IF NOT EXISTS accumulation_history_revision (
+                id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL
+            );
+            INSERT OR IGNORE INTO accumulation_history_revision VALUES (1, 0);
+            CREATE INDEX IF NOT EXISTS idx_accumulation_checkpoint_activity
+              ON accumulation_fill_checkpoints (updated_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_accumulation_operation_activity
+              ON accumulation_lifecycle_operations (updated_at DESC, id DESC);
+        """)
+        for table in (
+            "accumulation_fill_checkpoints",
+            "accumulation_lifecycle_operations",
+        ):
+            for operation in ("INSERT", "UPDATE", "DELETE"):
+                name = f"history_revision_{table}_{operation.lower()}"
+                await connection.execute_script(
+                    f"CREATE TRIGGER IF NOT EXISTS {name} AFTER {operation} ON {table} "
+                    "BEGIN UPDATE accumulation_history_revision "
+                    "SET revision = revision + 1 WHERE id = 1; END;"
+                )
+        for table, columns in (
+            ("accumulation_activations", "symbol, account_scope"),
+            ("placement_intents", "symbol, side"),
+        ):
+            changed = " OR ".join(
+                f"OLD.{column.strip()} IS NOT NEW.{column.strip()}"
+                for column in columns.split(",")
+            )
+            await connection.execute_script(
+                f"CREATE TRIGGER IF NOT EXISTS history_revision_{table}_identity "
+                f"AFTER UPDATE OF {columns} ON {table} WHEN {changed} "
+                "BEGIN UPDATE accumulation_history_revision "
+                "SET revision = revision + 1 WHERE id = 1; END;"
+            )
+
+    async def _ensure_closed_trade_mode(self) -> None:
+        """Keep legacy closures unattributed unless evidence proves their mode."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query("PRAGMA table_info('closedtrades')")
+        statements = _plan_additive_column_statements(
+            "closedtrades",
+            {row["name"] for row in columns},
+            (("lifecycle_mode", "TEXT NULL"),),
+        )
+        if statements:
+            await connection.execute_script("\n".join(statements))
+        await connection.execute_query(
+            "CREATE INDEX IF NOT EXISTS idx_accumulation_checkpoint_deal_id "
+            "ON accumulation_fill_checkpoints (deal_id)"
+        )
+        # A deal identity and matching activation and placement symbols are
+        # durable accumulation evidence. Never infer DCA from missing evidence.
+        await connection.execute_query("""
+            UPDATE closedtrades AS closed SET lifecycle_mode = 'accumulation'
+            WHERE closed.lifecycle_mode IS NULL AND closed.deal_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM accumulation_fill_checkpoints AS checkpoint
+                JOIN accumulation_activations AS activation
+                  ON activation.id = checkpoint.activation_id
+                JOIN placement_intents AS placement
+                  ON placement.id = checkpoint.placement_id
+                WHERE checkpoint.deal_id = closed.deal_id
+                  AND activation.symbol = closed.symbol
+                  AND placement.symbol = closed.symbol
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM accumulation_fill_checkpoints AS checkpoint
+                JOIN accumulation_activations AS activation
+                  ON activation.id = checkpoint.activation_id
+                JOIN placement_intents AS placement
+                  ON placement.id = checkpoint.placement_id
+                WHERE checkpoint.deal_id = closed.deal_id
+                  AND (activation.symbol != closed.symbol
+                       OR placement.symbol != closed.symbol)
+              )
+        """)
 
     async def _ensure_trade_cost_provenance(self) -> None:
         """Add provenance without rewriting quantities, costs or historical fees."""

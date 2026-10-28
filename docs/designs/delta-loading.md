@@ -3,10 +3,11 @@
 ## Current behavior
 
 The overall/uPNL chart and daily, monthly, and yearly profit charts keep their
-last fetched data in browser storage. On reload, they can display that data
-while requesting a fresh snapshot in the background. Failed refreshes retain
-the cached view. Cached data is a last-known view, not evidence that the
-connection is healthy.
+last fetched data in browser storage. Period charts can display cached data
+while refreshing. The overall timeline is withheld until a successful server
+refresh verifies it; a failed refresh makes that timeline unavailable even if
+cached data remains stored. Cached data is a last-known view, not evidence that
+the connection is healthy.
 
 The profit tab panes stay mounted when switching tabs, avoiding chart
 re-creation. The overall timeline query is already bounded to approximately

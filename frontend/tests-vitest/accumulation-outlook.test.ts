@@ -159,6 +159,27 @@ describe('accumulation operator outlook', () => {
     expect(card.text()).toContain('Next close:')
   })
 
+  it('shows condition values and alternatives only for fresh evidence', () => {
+    const detail = row({ runtime_wait_reason: 'WAIT_CONDITIONS', wait_condition: {
+      reason: 'WAIT_CONDITIONS', timeframe: '4h', observed_close_ms: 1000,
+      observed_price: '100', next_close_ms: 14401000, levels: [],
+      strategy_conditions: { label: 'Buy conditions', kind: 'all', matched: false, children: [
+        { label: 'Market regime', kind: 'any', matched: true, children: [
+          { label: 'Downtrend', kind: 'comparison', matched: true, comparison: 'less_than', value1: { label: 'Slope', value: -0.4 }, value2: { label: 'Threshold', value: -0.1 } },
+          { label: 'Sideways', kind: 'comparison', matched: false, comparison: 'less_than', value1: { label: 'ADX', value: 34 }, value2: { label: 'Threshold', value: 20 } },
+        ] },
+        { label: 'Discount', kind: 'comparison', matched: false, comparison: 'greater_or_equal', value1: { label: 'EMA discount / ATR', value: 0.9777 }, value2: { label: 'Threshold', value: 1 } },
+      ] },
+    } })
+    const card = mount(AccumulationOutlook, { props: { detail, fresh: true } })
+    expect(card.text()).toContain('At least one required')
+    expect(card.text()).toContain('EMA discount / ATR: 0.9777 ≥ Threshold: 1')
+    expect(card.text()).toContain('Not met')
+    expect(card.text()).toContain('does not guarantee a buy')
+    const stale = mount(AccumulationOutlook, { props: { detail, fresh: false } })
+    expect(stale.text()).not.toContain('EMA discount / ATR')
+  })
+
   it('does not show cached price levels when the snapshot is stale', () => {
     const wrapper = mount(AccumulationOutlook, { props: { detail: row({ runtime_wait_reason: 'WAIT_DEPTH', wait_condition: {
       reason: 'WAIT_DEPTH', timeframe: '1h', observed_close_ms: 1000, observed_price: '100', next_close_ms: 3601000,

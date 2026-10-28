@@ -11,6 +11,7 @@ from controller import accumulation as controller
 from httpx import ASGITransport, AsyncClient
 from litestar import Litestar
 from litestar.middleware import DefineMiddleware
+from service.accumulation.activity import ActivityChanged
 from service.accumulation.commands import AccumulationCommandResult
 from service.accumulation.imports import parse_accumulation_csv
 from service.accumulation.state import AccumulationConflictError
@@ -69,6 +70,74 @@ def runtime(monkeypatch):
     )
     monkeypatch.setattr(controller, "get_active_accumulation_runtime", lambda: owner)
     return owner
+
+
+@pytest.mark.asyncio
+async def test_activity_endpoint_reports_snapshot_conflicts(
+    api_client, runtime, monkeypatch
+):
+    runtime.current_account_scope = "account-1"
+    page = AsyncMock(return_value={"items": [], "next_cursor": None})
+    monkeypatch.setattr(controller, "activity_page", page)
+    response = await api_client.get("/accumulation/activity")
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+    page.assert_awaited_once_with("account-1", None)
+    page.side_effect = ActivityChanged("Activity changed. Restart the history.")
+    response = await api_client.get("/accumulation/activity?cursor=old")
+    assert response.status_code == 409
+    assert response.json()["code"] == "activity_changed"
+    page.side_effect = ValueError("Invalid activity cursor.")
+    response = await api_client.get("/accumulation/activity?cursor=bad")
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_performance_stream_pushes_snapshot_and_activity_revision(
+    runtime, monkeypatch
+):
+    runtime.performance.side_effect = [
+        {"holdings": [], "by_quote": []},
+        {"holdings": [{"symbol": "BTC/USDC"}], "by_quote": []},
+    ]
+    monkeypatch.setattr(controller.asyncio, "sleep", AsyncMock())
+    connection = SimpleNamespace(
+        execute_query_dict=AsyncMock(return_value=[{"revision": 7}])
+    )
+    monkeypatch.setattr(controller.Tortoise, "get_connection", lambda _: connection)
+    stream = controller.stream_performance.fn()
+    message = json.loads(await anext(stream))
+    assert message == {
+        "type": "snapshot",
+        "performance": {"holdings": [], "by_quote": []},
+        "activity_revision": 7,
+        "account_generation": 0,
+    }
+    runtime.performance.assert_awaited_once()
+    runtime.current_account_scope = "another-account"
+    next_message = json.loads(await anext(stream))
+    assert next_message["performance"]["holdings"] == [{"symbol": "BTC/USDC"}]
+    assert next_message["account_generation"] == 1
+    assert "another-account" not in json.dumps(next_message)
+    assert runtime.performance.await_count == 2
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_performance_stream_recovers_after_transient_errors(runtime, monkeypatch):
+    runtime.performance.side_effect = [
+        RuntimeError("unavailable"),
+        RuntimeError("still unavailable"),
+        {"holdings": [], "by_quote": []},
+    ]
+    monkeypatch.setattr(controller.asyncio, "sleep", AsyncMock())
+    connection = SimpleNamespace(execute_query_dict=AsyncMock(return_value=[]))
+    monkeypatch.setattr(controller.Tortoise, "get_connection", lambda _: connection)
+    stream = controller.stream_performance.fn()
+    assert json.loads(await anext(stream))["type"] == "unavailable"
+    assert json.loads(await anext(stream))["type"] == "unavailable"
+    assert json.loads(await anext(stream))["type"] == "snapshot"
+    await stream.aclose()
 
 
 @pytest.mark.asyncio

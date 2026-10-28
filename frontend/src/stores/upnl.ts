@@ -37,6 +37,7 @@ export const useUpnlDatastore = defineStore('upnl', () => {
   )
   const loadedAt = ref<number | null>(null)
   const isLoading = ref(false)
+  const historyVerified = ref(false)
   let pendingLoad: Promise<UpnlPoint[]> | null = null
 
   function hasFreshCache(): boolean {
@@ -58,6 +59,7 @@ export const useUpnlDatastore = defineStore('upnl', () => {
    pendingLoad = fetchJson<UpnlPoint[]>('/statistic/profit-overall/timeline')
     .then((payload) => {
      data.value = payload
+     historyVerified.value = true
      loadedAt.value = Date.now()
      // Persist the authoritative snapshot so the next reload paints from cache.
      writeJSON(UPNL_TIMELINE_STORAGE_KEY, {
@@ -65,6 +67,10 @@ export const useUpnlDatastore = defineStore('upnl', () => {
         storedAt: Date.now(),
       })
      return payload
+    })
+    .catch((error) => {
+     historyVerified.value = false
+     throw error
     })
     .finally(() => {
      isLoading.value = false
@@ -74,5 +80,5 @@ export const useUpnlDatastore = defineStore('upnl', () => {
    return pendingLoad
   }
 
-  return { data, loadedAt, isLoading, load_upnl_history_data }
+  return { data, loadedAt, isLoading, historyVerified, load_upnl_history_data }
  })

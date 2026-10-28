@@ -3,14 +3,18 @@
 import asyncio
 import json
 from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
 from typing import Any
 
 import helper
-from litestar.exceptions import WebSocketDisconnect
+import model
+from litestar.exceptions import HTTPException, WebSocketDisconnect
 from litestar.handlers import get, websocket_stream
 from litestar.params import FromPath
 from service.config import Config
+from service.realized_trades import has_unverified_manual_stop_profit
 from service.runtime_services import runtime_service_proxy
+from service.statistic import PROFIT_TIMELINE_HORIZON
 from service.websocket_fanout import WebSocketFanout
 
 logging = helper.LoggerFactory.get_logger(
@@ -118,6 +122,11 @@ async def profit_statistics(
     Example:
         {"result": "..."} or {"result": ""}
     """
+    if await has_unverified_manual_stop_profit():
+        raise HTTPException(
+            status_code=409,
+            detail="Profit history is incomplete because a manual stop has unverified proceeds or fees.",
+        )
     response = await statistic.get_profits_overall(timestamp, period)
     if response is None:
         return {"result": ""}
@@ -127,6 +136,14 @@ async def profit_statistics(
 @get(path="/statistic/profit-overall/timeline")
 async def profit_overall_timeline() -> list[dict[str, Any]]:
     """Get last-12-month profit-overall timeline with adaptive resolution."""
+    if await model.UpnlHistory.filter(
+        performance_verified=False,
+        timestamp__gte=datetime.now(timezone.utc) - PROFIT_TIMELINE_HORIZON,
+    ).exists():
+        raise HTTPException(
+            status_code=409,
+            detail="Profit history contains unverified manual-stop valuations.",
+        )
     return await statistic.get_profit_overall_timeline()
 
 

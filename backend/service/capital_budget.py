@@ -22,6 +22,10 @@ from service.capital_budget_logic import (
     has_capital_budget_config,
     resolve_capital_max_fund,
 )
+from service.realized_trades import (
+    has_unverified_manual_stop_profit,
+    realized_closed_trades,
+)
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
 from tortoise.transactions import in_transaction
@@ -385,13 +389,15 @@ class CapitalBudgetService:
                     )
 
             closed_profit_rows = (
-                await model.ClosedTrades.all()
+                await realized_closed_trades()
                 .annotate(total=Sum("profit"))
                 .values_list("total", flat=True)
             )
             closed_profit = float(
                 (closed_profit_rows[0] if closed_profit_rows else 0.0) or 0.0
             )
+            if await has_unverified_manual_stop_profit():
+                closed_profit = 0.0
             active_operation_ids = self._active_operation_ids()
             durable_pending_quote = sum(
                 value

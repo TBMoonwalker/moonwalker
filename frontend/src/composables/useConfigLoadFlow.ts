@@ -44,6 +44,7 @@ interface UseConfigLoadFlowOptions {
     isLoading: Ref<boolean>
     message: MessageApiLike
     onAfterLoad?: () => Promise<void> | void
+    onRevisionLoaded?: (revision: number | null) => void
     resetSaveState: () => void
     setSaveError: (message: string) => void
     surfaceMessages?: boolean
@@ -75,6 +76,10 @@ export function useConfigLoadFlow(options: UseConfigLoadFlowOptions) {
             }
 
             const defaults = options.buildDefaults()
+            options.onRevisionLoaded?.(
+                typeof payload.config_revision === 'number' && Number.isSafeInteger(payload.config_revision)
+                    ? payload.config_revision : null,
+            )
             const loadedConfig = buildLoadedConfigState(payload, defaults)
 
             Object.assign(options.general.value, loadedConfig.general)

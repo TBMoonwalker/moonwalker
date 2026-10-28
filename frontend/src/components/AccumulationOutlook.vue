@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AccumulationConditionTree from './AccumulationConditionTree.vue'
 import { computed } from 'vue'
 import type { AccumulationDetail } from '../types/accumulation'
 import { accumulationOutlook, accumulationIndicativeCondition } from '../helpers/accumulationPresentation'
@@ -59,6 +60,13 @@ function movement(value: string) {
           </ul>
           <p v-if="condition.reason === 'WAIT_BASELINE' && !indicative">No price target yet. Waiting for the next completed candle to evaluate a new buy signal; a buy is not guaranteed.</p>
           <p v-else-if="!condition.levels.length && !indicative">{{ outlook.description }}</p>
+          <div v-if="condition.reason === 'WAIT_CONDITIONS' && condition.strategy_conditions" class="strategy-conditions">
+            <p>Strategy checks at the latest completed {{ condition.timeframe }} close:</p>
+            <ul aria-label="Strategy condition results">
+              <AccumulationConditionTree :node="condition.strategy_conditions" />
+            </ul>
+            <p class="wait-note">All required checks are evaluated again at the next close. Passing them does not guarantee a buy.</p>
+          </div>
           <p v-if="!condition.levels.length">Next close: {{ new Date(condition.next_close_ms).toISOString().replace('T', ' ').slice(0, 16) }} UTC</p>
           <div v-if="recoveryLevels.length" class="recovery-condition">
             <h4>Recovery needed before another dip buy</h4>
@@ -94,6 +102,8 @@ p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--mw-color-text-sec
 .recovery-condition { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--mw-color-border); }
 .recovery-condition h4 { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: var(--mw-color-text-secondary); }
 .wait-note, .wait-levels .wait-note { margin-top: 8px; font-size: 14px; color: var(--mw-color-text-secondary); }
+.strategy-conditions { margin-top: 12px; font-size: 14px; }
+.strategy-conditions > ul { padding: 0; margin: 8px 0 0; list-style: none; }
 .compact { border-top: 0; margin-bottom: 16px; }
 .compact .outlook-now { padding-top: 0; gap: 12px; }
 .compact h3 { margin-top: 0; font-size: 16px; }

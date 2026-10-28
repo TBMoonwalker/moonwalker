@@ -14,11 +14,16 @@ from service.config import Config
 from service.database import run_sqlite_write_with_retry
 from service.green_phase import AVAILABLE_QUOTE_UNSET
 from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
+from service.realized_trades import (
+    has_unverified_manual_stop_profit,
+    realized_closed_trades,
+)
 from service.trades import Trades
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
 
 logging = helper.LoggerFactory.get_logger("logs/statistics.log", "statistic")
+PROFIT_TIMELINE_HORIZON = timedelta(days=365)
 
 
 class Statistic:
@@ -36,7 +41,7 @@ class Statistic:
             "day": timedelta(days=1),
             "week": timedelta(days=7),
             "month": timedelta(days=30),
-            "year": timedelta(days=365),
+            "year": PROFIT_TIMELINE_HORIZON,
         }
 
     @staticmethod
@@ -108,9 +113,11 @@ class Statistic:
     ) -> list[tuple[Any, Any]]:
         """Return closed-trade profit rows since the given date boundary."""
         try:
-            return await model.ClosedTrades.filter(
-                close_date__gt=begin_datetime
-            ).values_list("close_date", "profit")
+            return (
+                await realized_closed_trades()
+                .filter(close_date__gt=begin_datetime)
+                .values_list("close_date", "profit")
+            )
         except BaseORMException:
             self._log_orm_error(error_message)
             return []
@@ -325,7 +332,7 @@ class Statistic:
 
         open_trade_snapshot_task = self._get_open_trade_profit_snapshot()
         closed_profit_task = self._get_sum_value(
-            model.ClosedTrades,
+            realized_closed_trades(),
             "profit",
             "Error getting profit: %s",
         )
@@ -371,8 +378,15 @@ class Statistic:
                     logging.warning(
                         "Accumulation valuation unavailable; retaining Dynamic DCA subtotals."
                     )
+        manual_stop_incomplete = await has_unverified_manual_stop_profit()
+        if manual_stop_incomplete:
+            profit_data["performance_complete"] = False
         profit_data["performance_scope"] = (
-            "all_trades" if profit_data["performance_complete"] else "dynamic_dca_only"
+            "incomplete"
+            if manual_stop_incomplete
+            else "all_trades"
+            if profit_data["performance_complete"]
+            else "dynamic_dca_only"
         )
 
         profit_data["upnl"] = upnl_value
@@ -393,6 +407,8 @@ class Statistic:
             profit_data["profit_history_scope"] = (
                 "all_verified_executions" if history_complete else "dynamic_dca_only"
             )
+            if manual_stop_incomplete:
+                profit_data["profit_history_scope"] = "incomplete"
         except (ValueError, OSError, TimeoutError):
             profit_data["profit_history_scope"] = "dynamic_dca_only"
         profit_data["profit_overall_timestamp"] = datetime.now(timezone.utc).strftime(
@@ -534,7 +550,7 @@ class Statistic:
         upnl_data: list[dict[str, Any]] = []
         try:
             rows = (
-                await model.UpnlHistory.all()
+                await model.UpnlHistory.filter(performance_verified=True)
                 .order_by("timestamp")
                 .values_list("timestamp", "profit_overall", "funds_locked")
             )
@@ -565,7 +581,9 @@ class Statistic:
         year_start = now - self.timeline_horizons["year"]
         try:
             rows = (
-                await model.UpnlHistory.filter(timestamp__gte=year_start)
+                await model.UpnlHistory.filter(
+                    timestamp__gte=year_start, performance_verified=True
+                )
                 .order_by("timestamp")
                 .values_list("timestamp", "profit_overall", "funds_locked")
             )

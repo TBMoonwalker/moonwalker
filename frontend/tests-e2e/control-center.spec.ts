@@ -18,6 +18,8 @@ const completeDryRunConfig = {
   dry_run: true,
   mstc: 4,
   trading_paused: false,
+  trade_mode: 'dynamic_dca',
+  config_revision: 0,
   config_updated_at: '2026-07-25T12:00:00Z',
 }
 
@@ -226,10 +228,10 @@ test.beforeEach(async ({ page }) => {
   })
   await page.route('**/config/freshness', async (route) => {
     await route.fulfill({
-      json: { updated_at: completeDryRunConfig.config_updated_at },
+      json: { updated_at: completeDryRunConfig.config_updated_at, config_revision: 0 },
     })
   })
-  await page.route('**/analytics/overview', async (route) => {
+  await page.route('**/analytics/overview**', async (route) => {
     await route.fulfill({ json: analyticsOverview })
   })
   await page.route('**/strategies**', async (route) => {
@@ -524,6 +526,97 @@ test('keeps statistics usable at mobile, tablet, and desktop widths', async ({
   expect((pageBox?.x ?? 0) + (pageBox?.width ?? 0)).toBeLessThanOrEqual(
     viewport?.width ?? 0,
   )
+})
+
+test('shows accumulation holdings and restarts changed activity', async ({ page, isMobile }) => {
+  await page.route('**/config/all', route => route.fulfill({ json: { ...completeDryRunConfig, trade_mode: 'accumulation', dca: true, market: 'spot', accumulation_available: true, accumulation_strategy_version_id: 17 } }))
+  await page.routeWebSocket('**/accumulation/performance/stream', socket => socket.send(JSON.stringify({ type: 'snapshot', activity_revision: 1, performance: {
+    observed_at_ms: Date.now(), valid_until_ms: Date.now() + 10000, includes_csv_declarations: false,
+    holdings: [{ symbol: 'BTC/USDC', quantity: '1', remaining_cost: '100', average_cost: '100', market_value: '110', unrealized: '10', complete: true, basis_provenance: 'exchange_fills' }],
+    by_quote: [{ quote: 'USDC', contributed_quote: '100', remaining_cost: '100', market_value: '110', realized: '0', unrealized: '10', total_return: '10', complete: true, live_holding_count: 1, unknown_deal_count: 0 }],
+  } })))
+  let activityLoads = 0
+  await page.route('**/accumulation/activity**', route => {
+    if (route.request().url().includes('cursor=')) return route.fulfill({ status: 409, json: { error: 'Activity changed.' } })
+    activityLoads++
+    return route.fulfill({ json: { items: [{ kind: 'order', id: 1, updated_at: '2026-01-01T00:00:00Z', symbol: 'BTC/USDC', side: 'buy', quantity: '1', quote_cost: '100', price_per_coin: '100', fees_complete: true, terminal: true }], next_cursor: 'next' } })
+  })
+  await page.goto('/stats')
+  await expect(page.getByText('Live mode: Accumulation')).toBeVisible()
+  if (isMobile) {
+    const summary = page.locator('.mobile-holdings summary').first()
+    await expect(summary).toContainText('BTC/USDC')
+    await expect(summary).toContainText('1.0000')
+    await summary.click()
+    await expect(page.locator('.mobile-holdings')).toContainText('Average cost per coin: 100.00')
+  } else {
+    await expect(page.getByRole('columnheader', { name: 'Average cost per coin' })).toBeVisible()
+  }
+  await expect(page.getByText('buy order summary')).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: 'Price per coin' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: '1.0000' }).last()).toBeVisible()
+  const beforeReload = activityLoads
+  await page.getByRole('button', { name: 'Load older activity' }).click()
+  await expect.poll(() => activityLoads).toBeGreaterThan(beforeReload)
+  await expect(page.getByText('buy order summary')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Restart history' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: /View managed holdings and order history/ })).toHaveCount(0)
+  const width = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }))
+  expect(width.scroll).toBeLessThanOrEqual(width.client + 1)
+})
+
+test('two clients retain their selected history independently across refresh', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'two-client desktop workflow')
+  const second = await page.context().newPage()
+  const config = { ...completeDryRunConfig, trade_mode: 'accumulation', dca: true, market: 'spot', accumulation_available: true, accumulation_strategy_version_id: 17 }
+  for (const client of [page, second]) {
+    await client.route('**/config/all', route => route.fulfill({ json: config }))
+    await client.route('**/analytics/overview**', route => route.fulfill({ json: analyticsOverview }))
+    await client.route('**/accumulation/activity**', route => route.fulfill({ json: { items: [], next_cursor: null } }))
+    await client.routeWebSocket('**/accumulation/performance/stream', socket => socket.send(JSON.stringify({ type: 'snapshot', activity_revision: 1, performance: {
+      observed_at_ms: Date.now(), valid_until_ms: Date.now() + 10000, includes_csv_declarations: false, holdings: [], by_quote: [],
+    } })))
+    await client.goto('/stats')
+    await expect(client.getByText('Live mode: Accumulation')).toBeVisible()
+  }
+  await page.getByRole('button', { name: 'Dynamic DCA history' }).click()
+  await expect(page.getByText(/Viewing Dynamic DCA history/)).toBeVisible()
+  await expect(second.getByRole('heading', { name: 'Accumulation', exact: true })).toBeVisible()
+  await second.reload()
+  await expect(second.getByRole('heading', { name: 'Accumulation', exact: true })).toBeVisible()
+  await expect(page.getByText(/Viewing Dynamic DCA history/)).toBeVisible()
+  await expect(page.getByText('Live mode: Accumulation')).toBeVisible()
+  await second.close()
+})
+
+test('two clients preserve a draft when a stale configuration save conflicts', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'two-client desktop workflow')
+  const second = await page.context().newPage()
+  const config = { ...completeDryRunConfig }
+  let saves = 0
+  for (const client of [page, second]) {
+    await client.route('**/config/all', route => route.fulfill({ json: config }))
+    await client.route('**/config/freshness', route => route.fulfill({ json: { updated_at: config.config_updated_at, config_revision: 0 } }))
+    await client.route('**/config/multiple', route => {
+      if (route.request().headers()['x-moonwalker-config-revision'] !== String(config.config_revision)) {
+        return route.fulfill({ status: 409, json: { message: 'Configuration changed since this form was loaded.' } })
+      }
+      config.config_revision += 1
+      saves += 1
+      return route.fulfill({ json: { message: 'Config updated', config_revision: config.config_revision } })
+    })
+    await client.goto('/control-center?mode=setup&target=dca')
+    await expect(client.getByPlaceholder('BO', { exact: true })).toBeVisible()
+  }
+  await page.getByPlaceholder('BO', { exact: true }).fill('12')
+  await second.getByPlaceholder('BO', { exact: true }).fill('15')
+  await second.getByRole('button', { name: 'Save changes', exact: true }).first().click()
+  await expect.poll(() => saves).toBe(1)
+  await page.getByRole('button', { name: 'Save changes', exact: true }).first().click()
+  await expect(page.getByPlaceholder('BO', { exact: true })).toHaveValue('12')
+  await expect(page.getByText(/Configuration changed since this form was loaded/i).first()).toBeVisible()
+  expect(saves).toBe(1)
+  await second.close()
 })
 
 test('surfaces every typed sell failure from the mounted Open Trades UI', async ({

@@ -21,6 +21,7 @@ from service.green_phase_logic import (
     to_float,
     to_int,
 )
+from service.realized_trades import completed_sale_trades
 
 logging = helper.LoggerFactory.get_logger("logs/green_phase.log", "green_phase")
 AVAILABLE_QUOTE_UNSET = object()
@@ -134,7 +135,7 @@ class GreenPhaseService:
 
         now = datetime.now(timezone.utc)
         rows = (
-            await model.ClosedTrades.all()
+            await completed_sale_trades()
             .order_by("-id")
             .limit(self.MAX_ANALYSIS_ROWS)
             .values_list("close_date", "profit")

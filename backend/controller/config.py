@@ -525,7 +525,8 @@ async def get_config() -> Any:
         JSON response containing the full configuration cache.
     """
     config = await Config.instance()
-    snapshot = _get_public_config_snapshot(config)
+    snapshot, revision = await config.snapshot_with_revision()
+    snapshot["config_revision"] = revision
     try:
         snapshot["strategies"] = await list_strategy_options()
         snapshot["strategy_details"] = await list_strategy_summaries()
@@ -555,8 +556,11 @@ async def _get_latest_config_updated_at() -> str | None:
 @get(path="/config/freshness")
 async def get_config_freshness() -> Any:
     """Return the latest config update timestamp for stale-client detection."""
+    config = await Config.instance()
+    _, revision = await config.snapshot_with_revision()
     return {
         "updated_at": await _get_latest_config_updated_at(),
+        "config_revision": revision,
     }
 
 
@@ -606,18 +610,21 @@ async def update_config_key(key: FromPath[str], request: Request[Any, Any, Any])
     if validation_error is not None or prepared_updates is None:
         return validation_error
 
-    # Save to DB and trigger Pub/Sub
+    revision, revision_error = _expected_config_revision(request)
+    if revision_error is not None:
+        return revision_error
     try:
-        if len(prepared_updates) == 1 and key in prepared_updates:
-            success = await config.set(key, prepared_updates[key])
-        else:
-            success = await config.batch_set(prepared_updates)
+        success = await config.batch_set(prepared_updates, expected_revision=revision)
     except TradeModeConfigError as exc:
         return _config_update_conflict(exc)
     except ValueError as exc:
         return _config_update_conflict(str(exc))
     if success:
-        return {"message": f"Config '{key}' updated", "value": value}
+        return {
+            "message": f"Config '{key}' updated",
+            "value": value,
+            "config_revision": revision + 1,
+        }
     return _config_update_failed_response()
 
 
@@ -644,16 +651,30 @@ async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
     if validation_error is not None or prepared_updates is None:
         return validation_error
 
+    revision, revision_error = _expected_config_revision(request)
+    if revision_error is not None:
+        return revision_error
     try:
-        success = await config.batch_set(prepared_updates)
+        success = await config.batch_set(prepared_updates, expected_revision=revision)
     except TradeModeConfigError as exc:
         return _config_update_conflict(exc)
     except ValueError as exc:
         return _config_update_conflict(str(exc))
 
     if success:
-        return {"message": "Config updated"}
+        return {"message": "Config updated", "config_revision": revision + 1}
     return _config_update_failed_response()
+
+
+def _expected_config_revision(request: Request[Any, Any, Any]) -> tuple[int, Any]:
+    """Require an editor generation; older clients must reload or upgrade."""
+    value = request.headers.get("x-moonwalker-config-revision", "")
+    if not value.isascii() or not value.isdecimal() or len(value) > 18:
+        message = (
+            "Configuration revision missing or invalid. Reload or upgrade your client."
+        )
+        return 0, json_response({"error": message, "message": message}, 409)
+    return int(value), None
 
 
 @post(path="/config/live/activate")

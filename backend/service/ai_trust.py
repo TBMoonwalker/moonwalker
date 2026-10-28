@@ -27,6 +27,7 @@ from service.ai_trust_calibration import (
 )
 from service.ai_work_queue import ai_work_queue
 from service.config import Config
+from service.realized_trades import completed_sale_trades
 from tortoise.expressions import Subquery
 
 logging = helper.LoggerFactory.get_logger("logs/ai_trust.log", "ai_trust")
@@ -1177,7 +1178,7 @@ async def attribute_closed_outcome(deal_id: str | None) -> None:
     if not normalized_deal_id:
         return
     closed_trade = await model.ClosedTrades.filter(deal_id=normalized_deal_id).first()
-    if closed_trade is None:
+    if closed_trade is None or closed_trade.close_reason == "manual_stop":
         return
     bad_entry, reasons, duration_hours = _bad_entry_label(closed_trade)
     updated = await model.AiTrustPrediction.filter(deal_id=normalized_deal_id).update(
@@ -1316,7 +1317,8 @@ async def schedule_outcome_attribution(deal_id: str | None) -> bool:
 async def recover_pending_outcome_attributions() -> int:
     """Requeue durable outcome work implied by persisted predictions and closes."""
     closed_deal_subquery = (
-        model.ClosedTrades.exclude(deal_id=None)
+        completed_sale_trades()
+        .exclude(deal_id=None)
         .exclude(deal_id="")
         .values_list("deal_id", flat=True)
     )

@@ -389,6 +389,13 @@ stays null, with a separate known subtotal. Order reporting retains cumulative
 per-order quantities, costs, fees and inventory checkpoints, including fully
 closed holdings; it is not a list of assumed incremental fills.
 
+In Statistics, the accumulation report shows managed coin quantities, remaining
+basis and current bid values, followed by a paginated activity list. Activity
+separately labels cumulative exchange-order summaries and CSV declarations. If
+an order is corrected or other activity changes while paging, the list reloads
+automatically. The report selector changes the view only; the live
+trading mode remains unchanged.
+
 The `/accumulation/performance` API uses bids at most ten seconds old, before
 future sale fees. The dashboard has no separate valuation refresh control.
 A shared cache lasts at most two seconds and expires before its marks. No legacy
@@ -415,6 +422,10 @@ valuation and admission do not materialize lifetime fills; they use compact
 registration totals and indexed coverage/latest-checkpoint queries. Regression
 fixtures exercise 10, 1000 and 100000 retained execution and zero-fill rows, with
 bounded routine result sets. Registry/history pages are capped at 100 records.
+The quote-currency summary includes lifetime contributed quote amounts before
+fees and current remaining basis. Contributions include verified CSV declarations;
+incomplete accounting evidence makes the affected total unavailable. Remaining
+basis is unavailable when managed ownership or basis cannot be verified.
 
 ## Historical strategy comparison
 

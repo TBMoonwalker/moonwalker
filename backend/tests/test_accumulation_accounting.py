@@ -12,16 +12,23 @@ import model
 import pytest
 import pytest_asyncio
 from service.accumulation.accounting import persist_accumulation_order
+from service.accumulation.activity import (
+    ActivityChanged,
+    _price_per_coin,
+    activity_page,
+)
 from service.accumulation.contracts import AccumulationStateError
 from service.accumulation.fill import (
     AccumulationFill,
     AccumulationInventory,
     apply_fill_delta,
 )
+from service.accumulation.imports import parse_accumulation_csv
 from service.accumulation.lifecycle import AccumulationLifecycleService
 from service.accumulation.performance import accumulation_performance
 from service.accumulation.recovery import AccumulationPlacementRecovery
 from service.accumulation.state import AccumulationConflictError
+from service.database import Database
 from service.exchange_capabilities import (
     ExchangeOrderLookupResult,
     ExchangeOrderLookupStatus,
@@ -94,6 +101,160 @@ async def _buy():
     )
     await model.AccumulationAttempt.create(opportunity=opportunity, placement=placement)
     return activation, opportunity, placement
+
+
+@pytest.mark.asyncio
+async def test_activity_pagination_rejects_a_corrected_order(
+    accounting_db, monkeypatch
+):
+    database = Database()
+    database.db_url = accounting_db
+    await database._ensure_accumulation_history_revision()
+    activation, _, _ = await _buy()
+    for index in range(21):
+        placement = await model.PlacementIntent.create(
+            operation_id=f"activity-{index}",
+            symbol=activation.symbol,
+            exchange_name="binance",
+            side="buy",
+            action="buy",
+            order_type="market",
+            state="accepted",
+        )
+        await model.AccumulationFillCheckpoint.create(
+            activation=activation,
+            placement=placement,
+            deal_id=f"deal-{index}",
+            filled="1",
+            quote_cost="10",
+            evidence_json="{}",
+        )
+    first = await activity_page("account-1")
+    assert len(first["items"]) == 20
+    assert all(item["price_per_coin"] == "10" for item in first["items"])
+    assert first["next_cursor"]
+    second = await activity_page("account-1", first["next_cursor"])
+    assert len(second["items"]) == 1
+    assert not second["next_cursor"]
+    assert not (
+        {item["id"] for item in first["items"]}
+        & {item["id"] for item in second["items"]}
+    )
+
+    with pytest.raises(ActivityChanged, match="Account changed"):
+        await activity_page("another-account", first["next_cursor"])
+    with monkeypatch.context() as context:
+        context.setattr("service.accumulation.activity._PROCESS", "new-process")
+        with pytest.raises(ActivityChanged, match="expired"):
+            await activity_page("account-1", first["next_cursor"])
+
+    checkpoint = await model.AccumulationFillCheckpoint.first()
+    assert checkpoint is not None
+    checkpoint.quote_cost = "11"
+    await checkpoint.save()
+    with pytest.raises(ActivityChanged):
+        await activity_page("account-1", first["next_cursor"])
+
+    refreshed = await activity_page("account-1")
+    placement = await model.PlacementIntent.create(
+        operation_id="activity-new",
+        symbol=activation.symbol,
+        exchange_name="binance",
+        side="buy",
+        action="buy",
+        order_type="market",
+        state="accepted",
+    )
+    await model.AccumulationFillCheckpoint.create(
+        activation=activation,
+        placement=placement,
+        deal_id="deal-new",
+        filled="1",
+        quote_cost="10",
+        evidence_json="{}",
+    )
+    with pytest.raises(ActivityChanged):
+        await activity_page("account-1", refreshed["next_cursor"])
+    refreshed = await activity_page("account-1")
+    await checkpoint.delete()
+    with pytest.raises(ActivityChanged):
+        await activity_page("account-1", refreshed["next_cursor"])
+
+
+@pytest.mark.asyncio
+async def test_activity_distinguishes_valid_csv_declarations(accounting_db):
+    database = Database()
+    database.db_url = accounting_db
+    await database._ensure_accumulation_history_revision()
+    activation, _, _ = await _buy()
+    declaration = parse_accumulation_csv(
+        "date;symbol;price;amount\n2026-01-01;BTC/USDC;100;1",
+        "USDC",
+        now_ms=1800000000000,
+    )[0]
+    await model.AccumulationLifecycleOperation.create(
+        operation_id="csv-activity",
+        activation=activation,
+        action="activate",
+        request_json=json.dumps(
+            {
+                "_csv_deal_id": "44444444-4444-4444-4444-444444444444",
+                "source": "csv",
+                "account_scope": "account-1",
+                "imported_inventory": declaration.to_dict(),
+            }
+        ),
+        status="applied",
+        previous_state="validating",
+        previous_paused=True,
+        result_state="enabled",
+        result_revision=1,
+    )
+    page = await activity_page("account-1")
+    assert len(page["items"]) == 1
+    item = page["items"][0]
+    assert item["kind"] == "csv"
+    assert item["quantity"] == "1"
+    assert item["quote_cost"] == "100"
+    assert item["price_per_coin"] == "100"
+    assert item["fees_complete"] is False
+    assert "request_json" not in item
+    assert (await activity_page("another-account"))["items"] == []
+
+    # A restored database has no derived totals. Do not initialize them from a
+    # later fill while ignoring the earlier CSV declaration.
+    from service.accumulation.return_totals import record_return_delta
+
+    await model.AccumulationReturnTotals.filter(activation=activation).delete()
+    await record_return_delta(
+        activation,
+        None,
+        {},
+        side="buy",
+        timestamp_ms=0,
+        connection=Tortoise.get_connection("default"),
+    )
+    assert not await model.AccumulationReturnTotals.filter(
+        activation=activation
+    ).exists()
+
+
+@pytest.mark.parametrize(
+    ("quantity", "cost", "expected"),
+    [
+        ("2", "7", "3.5"),
+        ("0", "7", None),
+        (None, "7", None),
+        ("2", None, None),
+        ("2", "0", None),
+        ("-1", "7", None),
+        ("1", "-7", None),
+    ],
+)
+def test_activity_price_per_coin_rejects_missing_or_invalid_evidence(
+    quantity, cost, expected
+):
+    assert _price_per_coin(quantity, cost) == expected
 
 
 def _order(*, filled="10", cost="100", status="closed", fees=None, side="buy"):
@@ -662,6 +823,27 @@ def _performance_adapter():
 
 
 @pytest.mark.asyncio
+async def test_performance_reports_pending_entry_without_managed_holdings(
+    accounting_db,
+):
+    activation, _, _ = await _buy()
+    await model.AccumulationLifecycleOperation.create(
+        operation_id="pending-entry",
+        activation=activation,
+        action="activate",
+        request_json="{}",
+        status="pending",
+        previous_state="validating",
+        previous_paused=True,
+        result_state="validating",
+        result_revision=1,
+    )
+    report = await accumulation_performance(_performance_adapter())
+    assert report["holdings"] == []
+    assert report["pending_entry_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_performance_exact_partial_sale_and_duplicate_cumulative_evidence(
     accounting_db,
 ):
@@ -673,7 +855,33 @@ async def test_performance_exact_partial_sale_and_duplicate_cumulative_evidence(
     group = report["by_quote"][0]
     assert report["complete"]
     assert Decimal(group["market_value"]) == 120
+    assert Decimal(group["remaining_cost"]) == 101
+    assert Decimal(group["contributed_quote"]) == 100
     assert Decimal(group["unrealized"]) == 19 and Decimal(group["realized"]) == 0
+    holding = report["holdings"][0]
+    assert holding["symbol"] == "BTC/USDC"
+    assert Decimal(holding["quantity"]) == 10
+    assert Decimal(holding["remaining_cost"]) == 101
+    assert Decimal(holding["average_cost"]) == Decimal("10.1")
+    assert Decimal(holding["market_value"]) == Decimal(group["market_value"])
+    adapter.account_scope.return_value = "another-account"
+    other_account = await accumulation_performance(adapter)
+    assert other_account["holdings"][0]["quantity"] is None
+    assert other_account["holdings"][0]["remaining_cost"] is None
+    assert other_account["holdings"][0]["average_cost"] is None
+    assert other_account["by_quote"][0]["contributed_quote"] is None
+    assert other_account["by_quote"][0]["realized"] is None
+    assert not other_account["history_complete"]
+    adapter.account_scope.return_value = "account-1"
+    # Upgraded installations leave existing derived contributions uninitialized.
+    # A rebuild must recover the purchase once and remain stable on refresh.
+    await model.AccumulationReturnTotals.filter(activation=activation).update(
+        contributed_quote=None
+    )
+    rebuilt = await accumulation_performance(adapter)
+    assert Decimal(rebuilt["by_quote"][0]["contributed_quote"]) == 100
+    refreshed = await accumulation_performance(adapter)
+    assert Decimal(refreshed["by_quote"][0]["contributed_quote"]) == 100
     await _sell(activation)
     order = _order(
         side="sell", filled="2", cost="30", fees=[{"currency": "USDC", "cost": "0.3"}]
@@ -684,13 +892,34 @@ async def test_performance_exact_partial_sale_and_duplicate_cumulative_evidence(
     group = report["by_quote"][0]
     assert report["complete"]
     assert Decimal(group["market_value"]) == 96
+    assert Decimal(group["remaining_cost"]) == Decimal("80.8")
+    assert Decimal(group["contributed_quote"]) == 100
     assert Decimal(group["realized"]) == Decimal("9.5")
     assert Decimal(group["unrealized"]) == Decimal("15.2")
+    assert Decimal(report["holdings"][0]["quantity"]) == 8
+    assert Decimal(report["holdings"][0]["market_value"]) == Decimal(
+        group["market_value"]
+    )
     assert Decimal(group["total_return"]) == Decimal("24.7")
     assert report["history_complete"]
     assert sum(Decimal(row["profit"]) for row in report["realized_by_date"]) == Decimal(
         "9.5"
     )
+
+
+@pytest.mark.asyncio
+async def test_performance_validity_outlasts_refresh_and_respects_bid_age(
+    accounting_db,
+):
+    await _buy()
+    await _persist(_order(fees=[{"currency": "USDC", "cost": "1"}]))
+    await _complete()
+    adapter = _performance_adapter()
+    report = await accumulation_performance(adapter)
+    assert report["valid_until_ms"] == 11000
+    adapter.clock_ms = lambda: 9000
+    older = await accumulation_performance(adapter)
+    assert older["valid_until_ms"] == 11000
 
 
 @pytest.mark.asyncio
@@ -715,6 +944,17 @@ async def test_closed_native_performance_survives_holding_deletion(accounting_db
     assert report["history_complete"]
     assert sum(Decimal(row["profit"]) for row in report["realized_by_date"]) == 18
     adapter.mark_quotes.assert_not_awaited()
+    for account_scope in ("another-account", None):
+        adapter.account_scope.return_value = account_scope
+        unavailable = await accumulation_performance(adapter)
+        group = unavailable["by_quote"][0]
+        assert not unavailable["complete"]
+        assert group["remaining_cost"] is None
+        assert group["contributed_quote"] is None
+        assert group["realized"] is None
+        assert group["market_value"] is None
+        assert not unavailable["history_complete"]
+        assert unavailable["realized_by_date"] == []
 
 
 @pytest.mark.asyncio
@@ -800,7 +1040,7 @@ async def test_incomplete_performance_never_fabricates_net_profit(accounting_db,
     assert not report["complete"]
     group = report["by_quote"][0]
     assert group["total_return"] is None
-    if issue in {"missing_mark", "stale", "future", "foreign_account"}:
+    if issue in {"missing_mark", "stale", "future"}:
         assert Decimal(group["realized"]) == 0
     else:
         assert group["realized"] is None
@@ -1506,6 +1746,9 @@ async def test_checkpoint_summary_batches_flags_and_exact_latest_order(
                 updated_at=stamp
             )
     conn = Tortoise.get_connection("default")
+    database = Database()
+    database.db_url = "sqlite://fixture"
+    await database._ensure_accumulation_return_schema()
     execute = conn.execute_query_dict
     queries = []
 
@@ -1516,6 +1759,8 @@ async def test_checkpoint_summary_batches_flags_and_exact_latest_order(
     monkeypatch.setattr(conn, "execute_query_dict", capture)
     summaries = await _checkpoint_summaries(conn)
     assert len(queries) == 1
+    plan = await execute("EXPLAIN QUERY PLAN " + queries[0])
+    assert not any("USE TEMP B-TREE" in row["detail"] for row in plan)
     assert len(summaries) == registrations
     for activation in owners:
         latest = (

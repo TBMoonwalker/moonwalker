@@ -231,6 +231,7 @@ class AccumulationMarket:
     atr: str
     severity: str
     conditions_match: bool = True
+    condition_explanation: dict[str, Any] | None = None
 
 
 def calculate_accumulation_market(
@@ -274,13 +275,16 @@ def calculate_accumulation_market(
         close = _decimal(candles[-1].close)
         severity = max(Decimal(0), (peak - close) / atr)
         conditions_match = True
+        condition_explanation: dict[str, Any] | None = None
         if isinstance(parameters, GraphAccumulationParameters):
             from service.strategy_conditions import candle_frame, evaluate_conditions
 
+            condition_explanation = {}
             conditions_match = evaluate_conditions(
                 parameters.condition_graph or {},
                 candle_frame(candles),
                 parameters.timeframe,
+                explanation=condition_explanation,
             )
         return AccumulationMarket(
             close_ms,
@@ -290,6 +294,7 @@ def calculate_accumulation_market(
             str(atr),
             str(severity),
             conditions_match,
+            condition_explanation or None,
         )
 
 

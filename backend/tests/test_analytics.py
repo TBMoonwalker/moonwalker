@@ -15,6 +15,32 @@ def analytics():
 
 
 @pytest.mark.asyncio
+async def test_mode_scoped_analytics_excludes_unattributed_and_other_modes(
+    tmp_path, analytics
+):
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'modes.sqlite'}", modules={"models": ["model"]}
+    )
+    await Tortoise.generate_schemas()
+    now = datetime.now(UTC).isoformat()
+    await model.ClosedTrades.create(
+        symbol="BTC/USDC", lifecycle_mode="classic_dca", profit=2, close_date=now
+    )
+    await model.ClosedTrades.create(
+        symbol="ETH/USDC", lifecycle_mode="accumulation", profit=9, close_date=now
+    )
+    await model.ClosedTrades.create(symbol="SOL/USDC", profit=4, close_date=now)
+    dca = await analytics.get_overview("dynamic_dca")
+    unknown = await analytics.get_overview("unknown")
+    legacy = await analytics.get_overview()
+    assert dca["summary"]["total_profit"] == 2
+    assert dca["unattributed_trades"] == 1
+    assert unknown["summary"]["total_profit"] == 4
+    assert legacy["summary"]["total_profit"] == 15
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_overview_empty_no_trades(tmp_path, monkeypatch, analytics) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"

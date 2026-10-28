@@ -21,6 +21,7 @@ interface SnapshotStoreLike {
 }
 
 interface UseControlCenterDerivedStateOptions {
+    editorRevision?: Ref<number | null>
     hasUnsavedChanges: () => boolean
     loadRescueMessage: Ref<string | null>
     requestedMode: () => unknown
@@ -65,7 +66,11 @@ export function useControlCenterDerivedState(
     const configTrustState = computed(() =>
         deriveControlCenterConfigTrustState({
             hasKnownNewerSnapshot:
-                options.snapshotStore.hasKnownNewerSnapshot.value,
+                options.snapshotStore.hasKnownNewerSnapshot.value || (
+                    options.editorRevision?.value != null &&
+                    typeof options.snapshotStore.snapshot.value?.config_revision === 'number' &&
+                    options.snapshotStore.snapshot.value.config_revision > options.editorRevision.value
+                ),
             hasUnsavedChanges: options.hasUnsavedChanges(),
             isHydrated: options.snapshotStore.isHydrated.value,
             latestKnownUpdatedAt: options.snapshotStore.latestKnownUpdatedAt.value,

@@ -1,10 +1,11 @@
+import asyncio
 import os
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 import pytest
 import service.config as config_module
-from service.config import Config
+from service.config import Config, StaleConfigRevision
 from service.config_persistence import should_persist_config_value
 from tortoise import Tortoise
 
@@ -16,6 +17,47 @@ class DummyRedis:
     async def publish(self, channel, message) -> int:
         self.messages.append((channel, message))
         return 1
+
+
+@pytest.mark.asyncio
+async def test_config_revision_rejects_concurrent_stale_edits(tmp_path, monkeypatch):
+    db_path = tmp_path / "revision.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+    config = Config()
+    await config.load_all()
+    _, revision = await config.snapshot_with_revision()
+
+    async def save(value):
+        return await config.batch_set(
+            {"timezone": {"value": value, "type": "str"}},
+            expected_revision=revision,
+        )
+
+    results = await asyncio.gather(
+        save("Europe/Vienna"), save("Europe/London"), return_exceptions=True
+    )
+    assert sum(result is True for result in results) == 1
+    assert sum(isinstance(result, StaleConfigRevision) for result in results) == 1
+    _, next_revision = await config.snapshot_with_revision()
+    assert next_revision == revision + 1
+
+    await config.set("timezone", {"value": "UTC", "type": "str"})
+    with pytest.raises(StaleConfigRevision):
+        await save("Europe/Berlin")
+    assert config.get("timezone") == "UTC"
+    _, before_silent_update = await config.snapshot_with_revision()
+    await config.batch_set(
+        {"timezone": {"value": "Europe/Paris", "type": "str"}},
+        notify_subscribers=False,
+    )
+    with pytest.raises(StaleConfigRevision):
+        await config.batch_set(
+            {"timezone": {"value": "UTC", "type": "str"}},
+            expected_revision=before_silent_update,
+        )
+    await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio

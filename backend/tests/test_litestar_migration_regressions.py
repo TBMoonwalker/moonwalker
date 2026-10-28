@@ -29,7 +29,9 @@ class _DummyConfigService:
         self.last_single: tuple[str, Any] | None = None
         self._cache: dict[str, Any] = {"signal": "asap"}
 
-    async def batch_set(self, payload: dict[str, Any]) -> bool:
+    async def batch_set(
+        self, payload: dict[str, Any], *, expected_revision: int | None = None
+    ) -> bool:
         self.last_batch = payload
         for key, value in payload.items():
             self._cache[key] = value.get("value") if isinstance(value, dict) else value
@@ -111,12 +113,25 @@ def test_frontend_routes_serve_index_and_assets(tmp_path: Path, monkeypatch) -> 
 
 def test_statistics_http_endpoints_return_native_json(monkeypatch) -> None:
     """HTTP statistics endpoints should return native JSON values."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
 
     async def _fake_profits_overall(*args: Any, **kwargs: Any) -> dict[str, float]:
         return {"2026-03-01": 1.23}
 
     async def _fake_profit_timeline(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         return [{"timestamp": "2026-03-01 12:00:00", "profit_overall": 1.23}]
+
+    monkeypatch.setattr(
+        statistics_controller,
+        "has_unverified_manual_stop_profit",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        statistics_controller.model.UpnlHistory,
+        "filter",
+        lambda **_kwargs: SimpleNamespace(exists=AsyncMock(return_value=False)),
+    )
 
     monkeypatch.setattr(
         statistics_controller.statistic, "get_profits_overall", _fake_profits_overall
@@ -298,12 +313,82 @@ def test_config_multiple_accepts_2xx_contract(monkeypatch) -> None:
     app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
     payload = {"timezone": {"value": "Europe/London", "type": "str"}}
     with TestClient(app=app) as client:
-        response = client.post("/config/multiple", json=payload)
+        response = client.post(
+            "/config/multiple",
+            json=payload,
+            headers={"X-Moonwalker-Config-Revision": "0"},
+        )
 
     assert 200 <= response.status_code < 300
     assert response.status_code == 201
-    assert response.json() == {"message": "Config updated"}
+    assert response.json() == {"message": "Config updated", "config_revision": 1}
     assert service.last_batch == payload
+
+
+def test_config_multiple_rejects_revisionless_client(monkeypatch) -> None:
+    """An older client cannot silently overwrite a newer configuration."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/config/multiple", json={"timezone": {"value": "UTC", "type": "str"}}
+        )
+    assert response.status_code == 409
+    assert "revision" in response.json()["message"].lower()
+    assert service.last_batch is None
+
+
+@pytest.mark.parametrize("revision", ["-1", "1.0", "9" * 19])
+def test_config_multiple_rejects_invalid_revisions(monkeypatch, revision) -> None:
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/config/multiple",
+            json={"timezone": {"value": "UTC", "type": "str"}},
+            headers={"X-Moonwalker-Config-Revision": revision},
+        )
+    assert response.status_code == 409
+    assert service.last_batch is None
+
+
+def test_config_multiple_reports_a_stale_revision(monkeypatch) -> None:
+    service = _DummyConfigService()
+
+    async def stale(*args: Any, **kwargs: Any) -> bool:
+        raise ValueError("Configuration changed since this form was loaded.")
+
+    monkeypatch.setattr(service, "batch_set", stale)
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/config/multiple",
+            json={"timezone": {"value": "UTC", "type": "str"}},
+            headers={"X-Moonwalker-Config-Revision": "1"},
+        )
+    assert response.status_code == 409
+    assert "changed" in response.json()["message"].lower()
 
 
 def test_config_multiple_rejects_unfunded_recovery_target_policy(
@@ -354,14 +439,19 @@ def test_config_single_accepts_success_contract(monkeypatch) -> None:
     app = Litestar(route_handlers=[config_controller.update_config_key])
     payload = {"value": {"value": "binance", "type": "str"}}
     with TestClient(app=app) as client:
-        response = client.put("/config/single/exchange", json=payload)
+        response = client.put(
+            "/config/single/exchange",
+            json=payload,
+            headers={"X-Moonwalker-Config-Revision": "0"},
+        )
 
     assert response.status_code == 200
     assert response.json() == {
         "message": "Config 'exchange' updated",
         "value": payload["value"],
+        "config_revision": 1,
     }
-    assert service.last_single == ("exchange", payload["value"])
+    assert service.last_batch == {"exchange": payload["value"]}
 
 
 def test_config_multiple_rejects_generic_live_activation(monkeypatch) -> None:
@@ -378,7 +468,11 @@ def test_config_multiple_rejects_generic_live_activation(monkeypatch) -> None:
     app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
     payload = {"dry_run": {"value": False, "type": "bool"}}
     with TestClient(app=app) as client:
-        response = client.post("/config/multiple", json=payload)
+        response = client.post(
+            "/config/multiple",
+            json=payload,
+            headers={"X-Moonwalker-Config-Revision": "0"},
+        )
 
     assert response.status_code == 409
     assert "live activation" in response.json().get("error", "").lower()
@@ -405,10 +499,14 @@ def test_config_multiple_allows_generic_save_when_live_trading_is_active(
         "monitoring_enabled": {"value": True, "type": "bool"},
     }
     with TestClient(app=app) as client:
-        response = client.post("/config/multiple", json=payload)
+        response = client.post(
+            "/config/multiple",
+            json=payload,
+            headers={"X-Moonwalker-Config-Revision": "0"},
+        )
 
     assert response.status_code == 201
-    assert response.json() == {"message": "Config updated"}
+    assert response.json() == {"message": "Config updated", "config_revision": 1}
     assert service.last_batch == payload
 
 

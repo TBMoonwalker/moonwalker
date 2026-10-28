@@ -39,17 +39,20 @@ const loadState = ref<SnapshotLoadState>('idle')
 const loadError = ref<string | null>(null)
 const latestKnownUpdatedAt = ref<string | null>(null)
 const snapshotUpdatedAt = ref<string | null>(null)
+const snapshotRevision = ref<number | null>(null)
+const latestKnownRevision = ref<number | null>(null)
 const lastExternalInvalidationAt = ref<number | null>(null)
 const lastExternalInvalidationOrigin = ref<LocalConfigChangeOrigin | null>(null)
 const lastExternalInvalidationUpdatedAt = ref<string | null>(null)
 const externalInvalidationToken = ref(0)
 const isHydrated = computed(() => snapshot.value !== null)
 const hasKnownNewerSnapshot = computed(
-    () =>
-        compareTimestamps(
-            latestKnownUpdatedAt.value,
-            snapshotUpdatedAt.value,
-        ) > 0,
+    () => {
+        if (latestKnownRevision.value !== null && snapshotRevision.value !== null) {
+            return latestKnownRevision.value > snapshotRevision.value
+        }
+        return compareTimestamps(latestKnownUpdatedAt.value, snapshotUpdatedAt.value) > 0
+    },
 )
 
 let pendingLoad: Promise<SharedConfigPayload | null> | null = null
@@ -112,6 +115,11 @@ function setSnapshotState(
 ): void {
     const resolvedUpdatedAt = updatedAt ?? latestKnownUpdatedAt.value
     snapshot.value = nextSnapshot
+    const revision = nextSnapshot.config_revision
+    snapshotRevision.value = typeof revision === 'number' && Number.isSafeInteger(revision) ? revision : null
+    if (snapshotRevision.value !== null) {
+        latestKnownRevision.value = Math.max(latestKnownRevision.value ?? 0, snapshotRevision.value)
+    }
     snapshotUpdatedAt.value = resolvedUpdatedAt
     setLatestKnownUpdatedAt(resolvedUpdatedAt)
     loadError.value = null
@@ -211,9 +219,16 @@ function ensureInvalidationListeners(): void {
 async function refreshFreshnessMarker(): Promise<string | null> {
     try {
         const freshness = await fetchJson<ConfigFreshnessPayload>('/config/freshness')
+        rememberRevision(freshness.config_revision)
         return setLatestKnownUpdatedAt(freshness.updated_at)
     } catch {
         return latestKnownUpdatedAt.value
+    }
+}
+
+function rememberRevision(revision: unknown): void {
+    if (typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0) {
+        latestKnownRevision.value = Math.max(latestKnownRevision.value ?? 0, revision)
     }
 }
 
@@ -252,8 +267,9 @@ async function checkFreshness(): Promise<{
 }> {
     try {
         const freshness = await fetchJson<ConfigFreshnessPayload>('/config/freshness')
+        rememberRevision(freshness.config_revision)
         const updatedAt = setLatestKnownUpdatedAt(freshness.updated_at)
-        const isStale = compareTimestamps(updatedAt, snapshotUpdatedAt.value) > 0
+        const isStale = hasKnownNewerSnapshot.value
         if (isStale) {
             trackUiEvent('control_center_snapshot_stale')
             return {
@@ -325,6 +341,8 @@ export function resetSharedConfigSnapshotState(): void {
     loadError.value = null
     latestKnownUpdatedAt.value = null
     snapshotUpdatedAt.value = null
+    snapshotRevision.value = null
+    latestKnownRevision.value = null
     lastExternalInvalidationAt.value = null
     lastExternalInvalidationOrigin.value = null
     lastExternalInvalidationUpdatedAt.value = null

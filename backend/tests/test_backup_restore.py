@@ -6,13 +6,46 @@ import pytest
 import service.backup_restore as backup_module
 import service.config as config_module
 from service.backup_restore import BackupService
-from service.config import Config
+from service.config import Config, StaleConfigRevision
 from tortoise import Tortoise
 
 
 class DummyRedis:
     async def publish(self, _channel, _message) -> int:
         return 1
+
+
+@pytest.mark.asyncio
+async def test_restore_marks_legacy_manual_stop_snapshots_unverified(
+    tmp_path, monkeypatch
+) -> None:
+    """Restored old marks cannot silently become verified profit history."""
+    import model
+
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'restore.sqlite'}", modules={"models": ["model"]}
+    )
+    await Tortoise.generate_schemas()
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+    monkeypatch.setattr(Config, "instance", classmethod(_fake_config_instance))
+    Config._instance = None
+    try:
+        await model.ClosedTrades.create(
+            symbol="BTC/USDC", close_reason="manual_stop", profit=40
+        )
+        await model.UpnlHistory.create(
+            timestamp=datetime.now(timezone.utc), profit_overall=40
+        )
+        service = BackupService()
+        backup = await service.export_backup(True)
+        await service.restore_backup(backup, restore_trade_data=True)
+        snapshot = await model.UpnlHistory.get()
+        assert snapshot.profit_overall == 40
+        assert not snapshot.performance_verified
+    finally:
+        Config._instance = None
+        await Tortoise.close_connections()
 
 
 def test_restore_forces_paused_dry_run_config() -> None:
@@ -41,6 +74,31 @@ async def _fake_config_instance(cls) -> Config:
     if cls._instance is None:
         cls._instance = Config()
     return cls._instance
+
+
+@pytest.mark.asyncio
+async def test_restore_invalidates_existing_configuration_draft(tmp_path, monkeypatch):
+    db_path = tmp_path / "revision-restore.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+    monkeypatch.setattr(Config, "instance", classmethod(_fake_config_instance))
+    Config._instance = None
+    config = await Config.instance()
+    await config.set("timezone", {"value": "UTC", "type": "str"})
+    backup = await BackupService().export_backup(False)
+    _, old_revision = await config.snapshot_with_revision()
+
+    await BackupService().restore_backup(backup, restore_trade_data=False)
+
+    with pytest.raises(StaleConfigRevision):
+        await config.batch_set(
+            {"timezone": {"value": "Europe/Vienna", "type": "str"}},
+            expected_revision=old_revision,
+        )
+    assert config.get("timezone") == "UTC"
+    Config._instance = None
+    await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio

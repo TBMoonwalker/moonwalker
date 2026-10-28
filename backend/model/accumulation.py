@@ -212,6 +212,7 @@ class AccumulationReturnTotals(Model):
         on_delete=fields.CASCADE,
     )
     realized_quote = fields.TextField(default="0")
+    contributed_quote = fields.TextField(default="0", null=True)
     last_quantity = fields.TextField(default="0", null=True)
     last_cost = fields.TextField(default="0", null=True)
     provenance_complete = fields.BooleanField(default=True)

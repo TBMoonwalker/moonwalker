@@ -828,6 +828,7 @@ class AccumulationLifecycleService:
                         .update(
                             provenance_complete=inventory.basis_provenance
                             == "csv_declared_fees",
+                            contributed_quote=None,
                             last_quantity=imported.quantity,
                             last_cost=imported.cost,
                         )

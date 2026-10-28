@@ -176,6 +176,8 @@ class ClosedTradeSummaryRecord(TypedDict):
     campaign_id: NotRequired[str | None]
     execution_history_complete: NotRequired[bool]
     close_reason: NotRequired[str | None]
+    valuation_quantity: NotRequired[float | None]
+    valuation_price: NotRequired[float | None]
 
 
 class ClosedTradePersistenceRecord(ClosedTradeSummaryRecord):

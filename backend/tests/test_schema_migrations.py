@@ -7,6 +7,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+import model
 import pytest
 import pytest_asyncio
 from model import SchemaMigration, UnsellableTrades
@@ -22,6 +23,73 @@ from service.schema_migrations import (
 from tortoise import Tortoise
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+
+@pytest.mark.asyncio
+async def test_closed_trade_mode_backfill_requires_matching_deal_evidence(
+    _migration_database,
+) -> None:
+    activation = await model.AccumulationActivation.create(
+        symbol="BTC/USDC", account_scope="test"
+    )
+    placement = await model.PlacementIntent.create(
+        operation_id="backfill",
+        symbol="BTC/USDC",
+        exchange_name="test",
+        side="buy",
+        action="buy",
+        order_type="market",
+        state="accepted",
+    )
+    await model.AccumulationFillCheckpoint.create(
+        activation=activation, placement=placement, deal_id="known", evidence_json="{}"
+    )
+    known = await model.ClosedTrades.create(symbol="BTC/USDC", deal_id="known")
+    wrong_symbol = await model.ClosedTrades.create(symbol="ETH/USDC", deal_id="wrong")
+    unknown = await model.ClosedTrades.create(symbol="SOL/USDC", deal_id="unknown")
+    explicit = await model.ClosedTrades.create(
+        symbol="BTC/USDC", deal_id="explicit", lifecycle_mode="classic_dca"
+    )
+    other = await model.PlacementIntent.create(
+        operation_id="backfill-wrong",
+        symbol="BTC/USDC",
+        exchange_name="test",
+        side="buy",
+        action="buy",
+        order_type="market",
+        state="accepted",
+    )
+    await model.AccumulationFillCheckpoint.create(
+        activation=activation, placement=other, deal_id="wrong", evidence_json="{}"
+    )
+    explicit_placement = await model.PlacementIntent.create(
+        operation_id="backfill-explicit",
+        symbol="BTC/USDC",
+        exchange_name="test",
+        side="buy",
+        action="buy",
+        order_type="market",
+        state="accepted",
+    )
+    await model.AccumulationFillCheckpoint.create(
+        activation=activation,
+        placement=explicit_placement,
+        deal_id="explicit",
+        evidence_json="{}",
+    )
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._ensure_closed_trade_mode()
+    await database._ensure_closed_trade_mode()
+    await known.refresh_from_db()
+    await wrong_symbol.refresh_from_db()
+    await unknown.refresh_from_db()
+    await explicit.refresh_from_db()
+    assert known.lifecycle_mode == "accumulation"
+    assert wrong_symbol.lifecycle_mode is None
+    assert unknown.lifecycle_mode is None
+    assert explicit.lifecycle_mode == "classic_dca"
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -249,13 +317,18 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             ).fetchall()
         }
 
-    assert len(ledger_rows) == 15
+    assert len(ledger_rows) == 19
+    assert ("2026-10-28-020-manual-stop-valuation", "applied") in ledger_rows
+    assert "2026-10-27-019-accumulation-contributions" in {
+        version for version, _ in ledger_rows
+    }
+    assert "2026-10-27-017-closed-trade-mode" in {version for version, _ in ledger_rows}
     assert "2026-10-21-013-accumulation-return-totals" in {
         version for version, _ in ledger_rows
     }
     assert {status for _, status in ledger_rows} == {MIGRATION_STATUS_APPLIED}
     assert accumulation_defaults == ("classic_dca", None, None, None)
-    assert len(accumulation_tables) == 8
+    assert len(accumulation_tables) == 9
     assert open_trade is not None
     assert open_trade[:3] == ("BTC/USDC", 1.0, 100.0)
     assert open_trade[3]
