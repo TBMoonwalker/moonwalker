@@ -108,17 +108,35 @@ class AccumulationRuntime:
         self.entry = AccumulationEntryService(adapter, self.notify)
 
     def _failed(self, symbol: str, stage: str, wait: str, exc: Exception) -> None:
-        """Log controlled failure metadata once; never stringify exchange errors."""
+        """Log a controlled failure once; name our own invariant, never exchange.
+
+        Our ``AccumulationStateError`` invariants carry static, non-secret
+        messages, so the failing invariant is printed and each WARNING reads as a
+        self-explanatory symptom. Exchange, timeout and I/O failures keep their
+        type name only, so no exchange payload can leak into the log.
+        """
+        detail = str(exc)[:200] if isinstance(exc, AccumulationStateError) else ""
         failure = (wait, type(exc).__name__)
         key = (symbol, stage)
         if self._failures.get(key) != failure:
-            logging.warning(
-                "Accumulation failure: symbol=%s stage=%s wait=%s exception=%s",
-                symbol,
-                stage,
-                wait,
-                failure[1],
-            )
+            if detail:
+                logging.warning(
+                    "Accumulation failure: symbol=%s stage=%s wait=%s "
+                    "exception=%s (%s)",
+                    symbol,
+                    stage,
+                    wait,
+                    failure[1],
+                    detail,
+                )
+            else:
+                logging.warning(
+                    "Accumulation failure: symbol=%s stage=%s wait=%s exception=%s",
+                    symbol,
+                    stage,
+                    wait,
+                    failure[1],
+                )
         self._failures[key] = failure
         self.status[symbol] = wait
 
