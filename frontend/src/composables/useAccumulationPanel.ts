@@ -1,5 +1,5 @@
 import { useAccumulationStrategies } from './useAccumulationStrategies'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useWebSocket } from '@vueuse/core'
 import { accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, sendAccumulationCommand } from '../api/accumulation'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
@@ -70,6 +70,12 @@ export function useAccumulationPanel(symbol?: string) {
   let sequence = 0
   let disposed = false
   let pageLoading = false
+  let pageController: AbortController | undefined
+  let detailController: AbortController | undefined
+  let routeActive = true
+  let pageHidden = document.hidden
+  let lifecycle = 0
+  let reloadAfterPage = false
   const streamUrl = ref<string>()
   const streamAvailable = ref(true)
   const stream = useWebSocket(streamUrl, {
@@ -82,8 +88,8 @@ export function useAccumulationPanel(symbol?: string) {
     onError(socket) {
       if (!disposed && socket === stream.ws.value) fresh.value = false
     },
-    onMessage(_socket, event) {
-      if (disposed) return
+    onMessage(socket, event) {
+      if (disposed || !routeActive || document.hidden || !navigator.onLine || socket !== stream.ws.value) return
       try {
         const snapshot = JSON.parse(String(event.data))
         if (snapshot.type === 'unavailable') { available.value = false; fresh.value = false; return }
@@ -110,7 +116,7 @@ export function useAccumulationPanel(symbol?: string) {
   })
 
   function connectStream() {
-    if (!streamAvailable.value || disposed || !available.value) return
+    if (!streamAvailable.value || disposed || !routeActive || document.hidden || !navigator.onLine || !available.value) return
     const url = new URL('/accumulation/stream', MOONWALKER_API_ORIGIN)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     if (selected.value) url.searchParams.set('symbol', selected.value)
@@ -151,12 +157,15 @@ export function useAccumulationPanel(symbol?: string) {
   const pendingRequest = computed(() => unresolvedRequest.value)
 
   async function refreshDetail() {
-    if (!selected.value || disposed) return
+    if (!selected.value || disposed || !routeActive || document.hidden || !navigator.onLine) return
     const request = ++sequence
+    detailController?.abort()
+    const controller = new AbortController()
+    detailController = controller
     loading.value = true
     fresh.value = false
     try {
-      const result = await fetchAccumulationDetail(selected.value)
+      const result = await fetchAccumulationDetail(selected.value, controller.signal)
       if (request !== sequence || disposed) return
       applyDetail(result)
     } catch (cause) {
@@ -165,6 +174,7 @@ export function useAccumulationPanel(symbol?: string) {
       error.value = `${selected.value}: ${extractApiErrorMessage(cause, 'Could not load this holding. Actions are disabled until refresh succeeds.')}`
     } finally {
       if (request === sequence && !disposed) loading.value = false
+      if (detailController === controller) detailController = undefined
     }
   }
 
@@ -183,11 +193,16 @@ export function useAccumulationPanel(symbol?: string) {
   }
 
   async function loadPage(more = false) {
-    if (pageLoading || disposed) return
+    if (disposed || !routeActive || document.hidden || !navigator.onLine) return
+    if (pageLoading) { if (!more) reloadAfterPage = true; return }
+    reloadAfterPage = false
     pageLoading = true
+    const currentLifecycle = lifecycle
+    const controller = new AbortController()
+    pageController = controller
     try {
-      const result = await fetchAccumulationPage(more ? next.value ?? undefined : undefined)
-      if (disposed) return
+      const result = await fetchAccumulationPage(more ? next.value ?? undefined : undefined, controller.signal)
+      if (disposed || currentLifecycle !== lifecycle) return
       rows.value = more ? [...rows.value, ...result.activations.filter(row => !rows.value.some(old => old.symbol === row.symbol))] : result.activations
       next.value = result.next_after
       portfolio.value = result.portfolio ?? null
@@ -200,14 +215,20 @@ export function useAccumulationPanel(symbol?: string) {
       else if (selected.value) await refreshDetail()
       connectStream()
     } catch (cause) {
-      if (disposed) return
+      if (disposed || currentLifecycle !== lifecycle) return
       available.value = false
       fresh.value = false
       if (accumulationErrorStatus(cause) === 503 && !visible.value && !uncertain.value) return
       visible.value = true
       error.value = extractApiErrorMessage(cause, 'Accumulation status is unavailable.')
     } finally {
+      if (pageController !== controller) return
+      pageController = undefined
       pageLoading = false
+      if (reloadAfterPage && !disposed && routeActive && !document.hidden && navigator.onLine) {
+        reloadAfterPage = false
+        void loadPage()
+      }
     }
   }
 
@@ -330,11 +351,48 @@ export function useAccumulationPanel(symbol?: string) {
     }
   }
 
+  function suspend() {
+    ++lifecycle
+    ++sequence
+    fresh.value = false
+    loading.value = false
+    pageController?.abort()
+    pageController = undefined
+    detailController?.abort()
+    detailController = undefined
+    pageLoading = false
+    reloadAfterPage = false
+    stream.close()
+  }
+
+  function resume() {
+    if (disposed || !routeActive || document.hidden || !navigator.onLine) return
+    void loadPage()
+  }
+
+  function onVisibilityChange() {
+    if (pageHidden === document.hidden) return
+    pageHidden = document.hidden
+    if (pageHidden) suspend()
+    else resume()
+  }
+
   onMounted(() => {
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('offline', suspend)
+    window.addEventListener('online', resume)
     void loadPage()
     void loadStrategies()
 
   })
-  onBeforeUnmount(() => { disposed = true; ++sequence; stream.close() })
+  onActivated(() => { if (!routeActive) { routeActive = true; resume() } })
+  onDeactivated(() => { routeActive = false; suspend() })
+  onBeforeUnmount(() => {
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    window.removeEventListener('offline', suspend)
+    window.removeEventListener('online', resume)
+    disposed = true
+    suspend()
+  })
   return { confirmBlockedReason, pendingRequest, streamAvailable, streamStatus: stream.status, visible, available, rows, portfolio, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, quantity, csv, adjustmentDirection, adjustmentQuantity, adjustmentCost, adjustmentNote, ownershipConfirmation, ownershipNote, actions, disabled, loadPage, selectSymbol, refreshDetail, prepare, submit, strategies, strategyCursor, targetVersion, repairTarget, retirementTarget, strategyError, strategyLoading, loadStrategies }
 }

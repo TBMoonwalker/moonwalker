@@ -58,6 +58,8 @@ interface UseOpenTradeColumnsOptions {
     sortState: Ref<TradeTableSortState | null>
     maxSafetyOrders: Ref<number>
     denylistValue: Ref<string | null | undefined>
+    dcaDataFresh?: Ref<boolean>
+    canRetry?: (row: OpenTradeRow, action: 'manual_sell' | 'manual_buy') => boolean
     isDenied: (symbol: string, denylistValue: string | null | undefined) => boolean
 }
 
@@ -115,24 +117,24 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 disabled: options.isMissionActionLoading(
                     rowData.symbol,
                     automationAction,
-                ),
+                ) || options.dcaDataFresh?.value === false,
             },
              {
                 key: 'manual-buy',
                 label: 'Add manual buy',
-                disabled: isBuyBlocked(rowData),
+                disabled: isBuyBlocked(rowData) || options.dcaDataFresh?.value === false,
               },
               {
                 key: 'deny',
                 label: 'Deny from new entries',
-                disabled: false,
+                disabled: options.dcaDataFresh?.value === false,
               },
           ]
         if (options.isMobile.value) {
             overflowOptions.unshift({
                 key: 'stop',
                 label: 'Stop trade',
-                disabled: false,
+                disabled: options.dcaDataFresh?.value === false,
              })
           }
         return h(
@@ -356,6 +358,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                         rowData,
                         minTimeframe: options.configuredMinTimeframe.value,
                         onAddOrderManually: () => options.onAddManualBuy(rowData),
+                        manualActionDisabled: options.dcaDataFresh?.value === false,
                         accumulationIntent: options.accumulationIntent?.value?.symbol === rowData.symbol ? options.accumulationIntent.value : null,
                     }),
             },
@@ -460,6 +463,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                             size: 'medium',
                                             ghost: true,
                                             style: tradeActionButtonStyle,
+                                            disabled: options.dcaDataFresh?.value === false,
                                             onClick: () =>
                                                 options.onDealStop(rowData),
                                         },
@@ -498,6 +502,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                             ghost: true,
                             color: '#2E7D5B',
                             style: tradeActionButtonStyle,
+                            disabled: options.dcaDataFresh?.value === false && !options.canRetry?.(rowData, 'manual_sell'),
                             onClick: () => options.onDealSell(rowData),
                         },
                         {
@@ -524,6 +529,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                             size: 'medium',
                             ghost: true,
                             style: tradeActionButtonStyle,
+                            disabled: options.dcaDataFresh?.value === false,
                             onClick: () => options.onDealStop(rowData),
                         },
                         {

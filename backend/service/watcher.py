@@ -852,6 +852,7 @@ class Watcher:
         )
         await self._reload_exchange_client(self.config or {})
         await self._cancel_symbol_tasks()
+        self._last_symbol_data_at.clear()
         await self.__sync_symbol_tasks()
         self._last_stream_event_at = time.monotonic()
 

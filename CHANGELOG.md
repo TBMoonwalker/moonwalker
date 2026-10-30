@@ -2,6 +2,26 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.5.0.0] - 2026-10-30
+
+### Added
+- Reconnect to a live profit and open-trades view that refreshes from a fresh,
+  uncached snapshot instead of a possibly-stale cached one, so a recovery client
+  or a dashboard that just came back to the foreground never shows stale numbers.
+- Freshness-aware trade actions: selling, resizing or closing a trade re-checks
+  that the underlying data and your available funds are unchanged since the dialog
+  opened, and asks you to review the action again when they have moved.
+
+### Changed
+- Split the profit and open-trades streams into an ordinary on-cadence update and
+  an on-demand recovery update, so a slow refresh no longer stalls the dashboard's
+  regular updates.
+
+### Fixed
+- Name the failing condition when an accumulation step trips an internal check, so
+  the failure log tells you which invariant broke instead of only the error type;
+  exchange and timeout failures still log no request payload.
+
 ## [5.4.1.0] - 2026-10-28
 
 ### Added

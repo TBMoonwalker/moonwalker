@@ -1,3 +1,4 @@
+import asyncio
 import os
 import types
 from datetime import UTC, datetime, timedelta
@@ -12,6 +13,44 @@ from tortoise.exceptions import BaseORMException
 
 class _FakeOrmError(BaseORMException):
     """Test-only ORM failure used to exercise fallback logging paths."""
+
+
+@pytest.mark.asyncio
+async def test_forced_dashboard_refresh_rejects_failed_open_trade_read(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    statistic = Statistic()
+
+    class BrokenQuery:
+        async def values(self, *args):
+            raise _FakeOrmError("database unavailable")
+
+    async def zero(*args, **kwargs):
+        return 0.0
+
+    async def rows(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(model.OpenTrades, "all", lambda: BrokenQuery())
+    monkeypatch.setattr("service.statistic.realized_closed_trades", lambda: object())
+    monkeypatch.setattr(statistic, "_get_sum_value", zero)
+    monkeypatch.setattr(statistic, "_get_profit_rows_since", rows)
+    monkeypatch.setattr(
+        statistic, "_performance_complete", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        "service.statistic.has_unverified_manual_stop_profit",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        statistic, "_accumulation_history", AsyncMock(return_value=({}, True))
+    )
+    store_snapshot = AsyncMock()
+    monkeypatch.setattr(statistic, "_store_upnl_snapshot", store_snapshot)
+    monkeypatch.setattr(statistic, "_apply_autopilot_runtime_state", AsyncMock())
+    with pytest.raises(_FakeOrmError):
+        await statistic.get_profit_for_dashboard(100.0, force_refresh=True)
+    store_snapshot.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -76,6 +115,30 @@ async def test_store_upnl_snapshot_applies_sampling_interval(
     assert rows[0].funds_locked == 4.0
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_statistics_producers_store_one_interval_sample(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'test.sqlite'}", modules={"models": ["model"]}
+    )
+    await Tortoise.generate_schemas()
+    statistic = Statistic()
+    try:
+        await asyncio.gather(
+            *(
+                statistic._store_upnl_snapshot(
+                    {"upnl": 1.0, "profit_overall": 1.0, "funds_locked": 4.0}
+                )
+                for _ in range(8)
+            )
+        )
+        assert await model.UpnlHistory.all().count() == 1
+    finally:
+        await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio
@@ -183,6 +246,10 @@ async def test_get_sum_value_logs_traceback_and_returns_zero_on_orm_error(
     assert result == 0.0
     assert captured["message"] == "Error summing profits."
     assert captured["exc_info"] is True
+    with pytest.raises(_FakeOrmError):
+        await statistic._get_sum_value(
+            _FailingQuery(), "profit", "Error summing profits.", strict=True
+        )
 
 
 @pytest.mark.asyncio
@@ -220,6 +287,10 @@ async def test_get_profit_rows_since_logs_traceback_and_returns_empty_on_orm_err
     assert rows == []
     assert captured["message"] == "Error fetching profit rows."
     assert captured["exc_info"] is True
+    with pytest.raises(_FakeOrmError):
+        await statistic._get_profit_rows_since(
+            datetime.now(UTC), "Error fetching profit rows.", strict=True
+        )
 
 
 @pytest.mark.asyncio

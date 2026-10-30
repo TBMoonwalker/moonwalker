@@ -171,14 +171,26 @@ class ExchangeBalanceManager:
             return None
         return extract_free_amount(balance, quote_asset)
 
-    async def get_free_balance_for_asset(self, asset: str) -> float | None:
-        """Return currently available balance for an asset symbol."""
+    async def get_free_balance_for_asset(
+        self, asset: str, *, force_refresh: bool = False
+    ) -> float | None:
+        """Return currently available balance for an asset symbol.
+
+        A forced asset read bypasses the shared cache without modifying it, so
+        a slow recovery request does not hold up ordinary balance consumers.
+        """
         asset_symbol = str(asset or "").strip().upper()
         if not asset_symbol:
             return None
 
         try:
-            balance = await self.get_balance_snapshot()
+            if force_refresh:
+                exchange = self._get_exchange()
+                if exchange is None:
+                    return None
+                balance = await self._fetch_balance_with_retry(exchange)
+            else:
+                balance = await self.get_balance_snapshot()
         except (ccxt.BaseError, RuntimeError, OSError) as exc:
             self._logger.warning(
                 "Fetching free balance for %s failed: %s", asset_symbol, exc

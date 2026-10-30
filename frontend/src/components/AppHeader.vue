@@ -60,7 +60,8 @@ const tradingMode = computed(() => {
     : 'Dry run'
 })
 const streamsConnected = computed(
-  () => statisticsStatus.value === 'OPEN' && tradesStatus.value === 'OPEN',
+  () => statisticsStatus.value === 'OPEN' && tradesStatus.value === 'OPEN' &&
+    statisticsStore.fresh && tradesStore.fresh,
 )
 const tradingPaused = computed(() => configSnapshotStore.snapshot.value?.trading_paused === true)
 const pauseActionLabel = computed(() => tradingPaused.value ? 'Resume Moonwalker' : 'Pause Moonwalker')

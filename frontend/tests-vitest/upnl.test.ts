@@ -37,6 +37,63 @@ describe("useUpnlDatastore · web-storage stale-while-revalidate", () => {
     return useUpnlDatastore();
   }
 
+  it('does not wait for a hung earlier history request when forced to refresh', async () => {
+    fetchJsonMock.mockImplementationOnce(() => new Promise(() => {}))
+    const fresh = [{ timestamp: '2026-01-03 00:00:00', profit_overall: 9, funds_locked: 900 }]
+    fetchJsonMock.mockResolvedValueOnce(fresh)
+    const s = store()
+    void s.load_upnl_history_data()
+    await expect(s.load_upnl_history_data({ force: true })).resolves.toEqual(fresh)
+    expect(s.data).toEqual(fresh)
+  }, 500)
+
+  it('replaces an interrupted forced refresh and ignores its late result', async () => {
+    let finishOld!: (value: unknown) => void
+    fetchJsonMock.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+    const fresh = [{ timestamp: '2026-01-03 00:00:00', profit_overall: 9, funds_locked: 900 }]
+    fetchJsonMock.mockResolvedValueOnce(fresh)
+    const s = store()
+    const old = s.load_upnl_history_data({ force: true })
+    s.invalidatePendingHistory()
+    await s.load_upnl_history_data({ force: true })
+    finishOld(CACHED_POINTS)
+    await old
+    expect(s.data).toEqual(fresh)
+  })
+
+  it("revalidates after an older in-flight request without duplicating forced loads", async () => {
+    let finishOld!: (value: unknown) => void;
+    fetchJsonMock.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    const fresh = [{ timestamp: "2026-01-03 00:00:00", profit_overall: 9, funds_locked: 900 }];
+    fetchJsonMock.mockResolvedValueOnce(fresh);
+    const s = store();
+    const old = s.load_upnl_history_data();
+    const refresh = s.load_upnl_history_data({ force: true });
+    const repeated = s.load_upnl_history_data({ force: true });
+    finishOld(CACHED_POINTS);
+    await Promise.all([old, refresh, repeated]);
+    expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+    expect(s.data).toEqual(fresh);
+  });
+
+  // Value: protects=forced history refresh follows a failed in-flight read;
+  // fails_when=the old failure prevents recovery; why_new=existing test covers success;
+  // seam=none; no_claim=real network behavior (the API is mocked).
+  it("refreshes after an older in-flight history request fails", async () => {
+    let failOld!: (error: Error) => void;
+    fetchJsonMock.mockImplementationOnce(() => new Promise((_resolve, reject) => { failOld = reject; }));
+    const fresh = [{ timestamp: "2026-01-03 00:00:00", profit_overall: 9, funds_locked: 900 }];
+    fetchJsonMock.mockResolvedValueOnce(fresh);
+    const s = store();
+    const old = s.load_upnl_history_data();
+    const refresh = s.load_upnl_history_data({ force: true });
+    failOld(new Error("offline"));
+    await expect(old).rejects.toThrow("offline");
+    await expect(refresh).resolves.toEqual(fresh);
+    expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+    expect(s.data).toEqual(fresh);
+  });
+
   it("seeds `data` from a warm cache without a network call", () => {
     seedStorage(CACHED_POINTS);
     const s = store();

@@ -28,9 +28,9 @@ test(`integrates accumulation with order status and trade details with pushed wa
   }))
   const sockets: WebSocketRoute[] = []
   await page.routeWebSocket('**/accumulation/stream**', socket => { sockets.push(socket) })
-  await page.routeWebSocket('**/trades/open', socket => socket.send(JSON.stringify([trade])))
+  await page.routeWebSocket('**/trades/open*', socket => socket.send(JSON.stringify([trade])))
   for (const path of ['closed', 'unsellable', 'waiting']) await page.routeWebSocket(`**/trades/${path}`, socket => socket.send('[]'))
-  await page.routeWebSocket('**/statistic/profit', socket => socket.send('{}'))
+  await page.routeWebSocket('**/statistic/profit*', socket => socket.send('{}'))
   await page.route('**/config/all', route => route.fulfill({ json: {
     trade_mode: 'accumulation', accumulation_available: true, market: 'spot', accumulation_strategy_version_id: 7,
     timezone: 'Europe/Vienna', signal: 'asap', symbol_list: 'BTC/USDC', exchange: 'binance',
@@ -168,7 +168,7 @@ test('opens the requested recovery symbol outside the first registry page', asyn
     return route.fulfill({ json: { ...summary, activation_id: 'eth', symbol, operations: [], entry: null, older_operations_available: false } })
   })
   await page.routeWebSocket('**/trades/*', socket => socket.send('[]'))
-  await page.routeWebSocket('**/statistic/profit', socket => socket.send('{}'))
+  await page.routeWebSocket('**/statistic/profit*', socket => socket.send('{}'))
   await page.route('**/trades/*/length', route => route.fulfill({ json: { result: 0 } }))
   await page.goto('/control-center?mode=utilities&symbol=ETH%2FUSDC#accumulation-controls')
   await expect(page).toHaveURL(url => url.pathname === '/' && url.searchParams.get('symbol') === 'ETH/USDC')

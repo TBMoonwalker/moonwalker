@@ -1,5 +1,6 @@
 <template>
     <AccumulationPendingEntries :context="accumulation" :open-symbols="open_trades.map(row => row.symbol)" />
+    <p v-if="!dcaDataFresh" role="status">Live trade data is refreshing. New trade actions are unavailable until it is current.</p>
     <n-data-table
         size="small"
         remote
@@ -32,6 +33,7 @@
             :row-data="mobileTradeDetailsRow"
             :min-timeframe="configuredMinTimeframe"
             :on-add-order-manually="handleMobileAddOrderManually"
+            :manual-action-disabled="!dcaDataFresh"
             :accumulation-intent="accumulationIntent?.symbol === mobileTradeDetailsRow.symbol ? accumulationIntent : null"
         />
     </n-modal>
@@ -84,6 +86,7 @@ const props = withDefaults(
 
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
+const openTradeSocket = useWebSocketDataStore('openTrades')
 const trades_store = useTradesStore()
 
 const dialog = useDialog()
@@ -154,6 +157,7 @@ const availableFunds = computed(() => {
     const payload = statistics_data.data.value as Record<string, unknown> | null
     return toFiniteNonNegative(payload?.funds_available)
 })
+const dcaDataFresh = computed(() => openTradeSocket.fresh && statistics_store.fresh)
 const maxSafetyOrders = computed(() =>
     Math.trunc(toFiniteNonNegative(configSnapshotStore.snapshot.value?.mstc)),
 )
@@ -167,10 +171,14 @@ const {
     handleDealSell,
     handleDealStop,
     handleDealDeny,
+    canRetry,
 } = useOpenTradeActions({
     availableFunds,
     dialog,
     message,
+    isFresh: () => dcaDataFresh.value,
+    generation: () => openTradeSocket.generation + statistics_store.generation,
+    currentTrade: (symbol) => open_trades.value.find(row => row.symbol === symbol),
     onAfterDeny: async () => { await configSnapshotStore.refresh() },
 })
 const {
@@ -195,6 +203,8 @@ const {
     accumulationRows: accumulation.rows,
     accumulationFresh: accumulation.fresh,
     accumulationIntent,
+    dcaDataFresh,
+    canRetry,
     onAccumulationAction: (rowData, action) => {
         accumulationIntent.value = { symbol: rowData.symbol, action, id: ++nextAccumulationIntent }
         if (!isOpenTradeRowExpanded(rowData)) toggleOpenTradeRow(rowData, true)
@@ -206,8 +216,8 @@ const {
     onOpenTradeDetails: (rowData) => {
         if (!isOpenTradeRowExpanded(rowData)) toggleOpenTradeRow(rowData)
     },
-    onPauseMission: (rowData) => handlePauseMission(rowData.symbol),
-    onResumeMission: (rowData) => handleResumeMission(rowData.symbol),
+    onPauseMission: (rowData) => { if (dcaDataFresh.value) return handlePauseMission(rowData.symbol) },
+    onResumeMission: (rowData) => { if (dcaDataFresh.value) return handleResumeMission(rowData.symbol) },
     sortState,
     maxSafetyOrders,
     denylistValue,

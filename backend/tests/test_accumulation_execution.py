@@ -5033,3 +5033,70 @@ async def test_runtime_failure_logs_are_sanitized_coalesced_and_recover(caplog):
     assert "NetworkError" in caplog.text
     assert "credential" not in caplog.text
     assert "secret-key" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_runtime_failure_log_names_state_error_invariant(caplog):
+    """Our own invariant failures name the invariant, not just the exception class.
+
+    An :class:`AccumulationStateError` message is static, non-secret diagnostic
+    text, so the failure line includes it and the WARNING reads as a self-explanatory
+    symptom. Coalescence is preserved: a repeat with the same (wait, class)
+    fingerprint logs nothing, so a stuck symbol never spams one line per tick.
+    """
+    import logging as std_logging
+    from unittest.mock import Mock
+
+    from service.accumulation.runtime import AccumulationRuntime
+
+    adapter = Mock()
+    adapter.account_scope = AsyncMock(return_value="account")
+    runtime = AccumulationRuntime(adapter)
+    message = "Pinned strategy identity does not match."
+    with caplog.at_level(std_logging.INFO, logger="accumulation_runtime"):
+        runtime._failed(
+            "BTC/USDC", "evaluation", "WAIT_DATA", AccumulationStateError(message)
+        )
+        runtime._failed(
+            "BTC/USDC", "evaluation", "WAIT_DATA", AccumulationStateError(message)
+        )
+    records = [r for r in caplog.records if r.name == "accumulation_runtime"]
+    assert [r.levelname for r in records] == ["WARNING"]
+    assert "AccumulationStateError" in caplog.text
+    assert "Pinned strategy identity does not match." in caplog.text
+    assert "symbol=BTC/USDC" in caplog.text
+    assert "stage=evaluation" in caplog.text
+    assert "wait=WAIT_DATA" in caplog.text
+    assert runtime.status["BTC/USDC"] == "WAIT_DATA"
+
+
+@pytest.mark.asyncio
+async def test_runtime_failure_log_keeps_exchange_payloads_redacted(caplog):
+    """Exchange/timeout/OSError failures stay type-only; the message never leaks.
+
+    This pins the redaction contract on the changed line: a non-
+    AccumulationStateError carries no stringified payload into the log, even
+    though its type name is still enough to triage the failure.
+    """
+    import logging as std_logging
+    from unittest.mock import Mock
+
+    from service.accumulation.runtime import AccumulationRuntime
+
+    adapter = Mock()
+    adapter.account_scope = AsyncMock(return_value="account")
+    runtime = AccumulationRuntime(adapter)
+    with caplog.at_level(std_logging.INFO, logger="accumulation_runtime"):
+        runtime._failed(
+            "BTC/USDC",
+            "evaluation",
+            "WAIT_DATA",
+            ccxt.NetworkError("api_key=SECRET nonce=42 signed request payload"),
+        )
+    records = [r for r in caplog.records if r.name == "accumulation_runtime"]
+    assert [r.levelname for r in records] == ["WARNING"]
+    assert "NetworkError" in caplog.text
+    assert "api_key=SECRET" not in caplog.text
+    assert "nonce=42" not in caplog.text
+    assert "request payload" not in caplog.text
+    assert runtime.status["BTC/USDC"] == "WAIT_DATA"

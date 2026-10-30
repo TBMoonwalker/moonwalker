@@ -5,7 +5,7 @@ test('puts entry state and its reviewed next action before secondary information
   let live: WebSocketRoute | undefined
   await page.routeWebSocket('**/accumulation/stream**', socket => { live = socket })
   await page.routeWebSocket('**/trades/*', socket => socket.send('[]'))
-  await page.routeWebSocket('**/statistic/profit', socket => socket.send('{}'))
+  await page.routeWebSocket('**/statistic/profit*', socket => socket.send('{}'))
   await page.route('**/trades/*/length', route => route.fulfill({ json: { result: 0 } }))
   await page.clock.install()
   await page.route('**/config/all', route => route.fulfill({ json: {

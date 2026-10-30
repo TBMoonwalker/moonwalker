@@ -1,5 +1,7 @@
 """Tests for exchange balance manager."""
 
+import asyncio
+
 import ccxt.async_support as ccxt
 import pytest
 from service.exchange import Exchange
@@ -95,6 +97,57 @@ async def test_get_free_quote_balance_reads_quote_asset() -> None:
     balance = await manager.get_free_quote_balance("BTC/USDT")
 
     assert balance == 250.5
+
+
+@pytest.mark.asyncio
+async def test_free_asset_balance_can_bypass_an_existing_cache() -> None:
+    exchange = _DummyExchange()
+    manager = ExchangeBalanceManager(
+        logger=_DummyLogger(),
+        balance_cache_ttl_seconds=60.0,
+        get_exchange=lambda: exchange,
+        resolve_symbol=_resolve_symbol,
+    )
+    assert await manager.get_free_balance_for_asset("USDT") == 250.5
+    exchange.balance = {"free": {"USDT": "100"}}
+    assert await manager.get_free_balance_for_asset("USDT", force_refresh=True) == 100
+    assert exchange.fetch_balance_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_slow_forced_asset_balance_does_not_block_normal_read() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowFirstExchange(_DummyExchange):
+        async def fetch_balance(self) -> dict[str, object]:
+            self.fetch_balance_calls += 1
+            if self.fetch_balance_calls == 1:
+                started.set()
+                await release.wait()
+            return self.balance
+
+    exchange = SlowFirstExchange()
+    manager = ExchangeBalanceManager(
+        logger=_DummyLogger(),
+        balance_cache_ttl_seconds=60.0,
+        get_exchange=lambda: exchange,
+        resolve_symbol=_resolve_symbol,
+    )
+    forced = asyncio.create_task(
+        manager.get_free_balance_for_asset("USDT", force_refresh=True)
+    )
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        assert (
+            await asyncio.wait_for(manager.get_free_balance_for_asset("USDT"), 1)
+            == 250.5
+        )
+        release.set()
+        assert await asyncio.wait_for(forced, 1) == 250.5
+    finally:
+        release.set()
+        await asyncio.gather(forced, return_exceptions=True)
 
 
 @pytest.mark.asyncio

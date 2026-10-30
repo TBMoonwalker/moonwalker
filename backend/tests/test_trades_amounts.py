@@ -96,6 +96,20 @@ async def test_authoritative_trade_read_preserves_database_failure(
 
 
 @pytest.mark.asyncio
+async def test_authoritative_open_trade_read_does_not_hide_database_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_read(*_args, **_kwargs):
+        raise OperationalError("database unavailable")
+
+    monkeypatch.setattr(model.OpenTrades, "filter", fail_read)
+    trades = Trades()
+    assert await trades.get_open_trades() == []
+    with pytest.raises(TradeStateUnavailableError):
+        await trades.get_open_trades(raise_on_error=True)
+
+
+@pytest.mark.asyncio
 async def test_get_partial_sell_execution_reads_open_trade_totals(
     tmp_path, monkeypatch
 ) -> None:

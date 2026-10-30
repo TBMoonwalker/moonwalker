@@ -4,6 +4,7 @@ import { defineComponent } from 'vue'
 import { expect, it, vi } from 'vitest'
 import UpnlChart from '../src/components/UpnlChart.vue'
 import { useWebSocketDataStore } from '../src/stores/websocket'
+import { fetchJson } from '../src/api/client'
 
 vi.mock('../src/api/client', () => ({ fetchJson: vi.fn(async () => []) }))
 vi.mock('vue-echarts', () => ({ default: defineComponent({ name: 'ChartStub', props: ['option'], template: '<div class="test-chart" />' }) }))
@@ -31,4 +32,29 @@ it('shows a visible first performance point after coverage recovers, then a line
   await flushPromises()
   expect(chart.props('option').series[0]).toMatchObject({ data: [7, 8], symbol: 'none' })
   wrapper.unmount()
+})
+
+it('keeps a live point received while resumed history is loading', async () => {
+  localStorage.clear()
+  let hidden = false
+  const visibility = vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+  let resolveHistory!: (value: unknown) => void
+  vi.mocked(fetchJson).mockResolvedValueOnce([]).mockImplementationOnce(() => new Promise(resolve => { resolveHistory = resolve }))
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const wrapper = mount(UpnlChart, { props: { range: 'all' }, global: { plugins: [pinia] } })
+  await flushPromises()
+  hidden = true
+  document.dispatchEvent(new Event('visibilitychange'))
+  hidden = false
+  document.dispatchEvent(new Event('visibilitychange'))
+  const statistics = useWebSocketDataStore('statistics')
+  statistics.setRaw(JSON.stringify({ profit_overall: 8, funds_locked: 1000, profit_overall_timestamp: '2026-10-23 12:15:00', performance_complete: true }))
+  await flushPromises()
+  resolveHistory([{ timestamp: '2026-10-23 12:00:00', profit_overall: 7, funds_locked: 1000 }])
+  await flushPromises()
+  const chart = wrapper.findComponent({ name: 'ChartStub' })
+  expect(chart.props('option').series[0].data).toEqual([7, 8])
+  wrapper.unmount()
+  visibility.mockRestore()
 })

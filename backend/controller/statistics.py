@@ -8,9 +8,10 @@ from typing import Any
 
 import helper
 import model
+from helper.async_completion import finish_before_cancellation
 from litestar.exceptions import HTTPException, WebSocketDisconnect
 from litestar.handlers import get, websocket_stream
-from litestar.params import FromPath
+from litestar.params import FromPath, FromQuery
 from service.config import Config
 from service.realized_trades import has_unverified_manual_stop_profit
 from service.runtime_services import runtime_service_proxy
@@ -26,6 +27,19 @@ STATISTICS_BALANCE_CACHE_TTL_SECONDS = float(PROFIT_STREAM_INTERVAL_SECONDS)
 statistic = runtime_service_proxy("statistic")
 exchange = runtime_service_proxy("statistics_exchange")
 _config_service: Config | None = None
+_ACCOUNT_KEYS = (
+    "exchange",
+    "exchange_hostname",
+    "market",
+    "currency",
+    "key",
+    "secret",
+    "dry_run",
+)
+
+
+def _same_account(before: dict[str, Any], after: dict[str, Any]) -> bool:
+    return all(before.get(key) == after.get(key) for key in _ACCOUNT_KEYS)
 
 
 async def _get_config_service() -> Config:
@@ -36,16 +50,27 @@ async def _get_config_service() -> Config:
     return _config_service
 
 
-async def _get_available_funds() -> float | None:
+async def _get_available_funds(*, force_refresh: bool = False) -> float | None:
     """Resolve available quote funds from the configured exchange account."""
     try:
         config_service = await _get_config_service()
-        currency = str(config_service.get("currency", "USDC")).strip().upper()
+        config_snapshot = config_service.snapshot()
+        currency = (
+            str(config_snapshot.get("currency", config_service.get("currency", "USDC")))
+            .strip()
+            .upper()
+        )
         if not currency:
             return None
-        return await exchange.get_free_balance_for_asset(
-            config_service.snapshot(), currency
-        )
+        if force_refresh:
+            balance = await exchange.get_free_balance_for_asset(
+                config_snapshot, currency, force_refresh=True
+            )
+            current = config_service.snapshot()
+            if not _same_account(config_snapshot, current):
+                return None
+            return balance
+        return await exchange.get_free_balance_for_asset(config_snapshot, currency)
     except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
         logging.warning("Failed to fetch available exchange funds: %s", exc)
         return None
@@ -70,10 +95,27 @@ async def _build_profit_payload() -> str:
     return json.dumps(await _get_profit_cached())
 
 
+async def _build_profit_fresh_payload() -> str:
+    """Build a recovery snapshot from an uncached balance and aggregates."""
+    config_service = await _get_config_service()
+    account = config_service.snapshot()
+    available_funds = await _get_available_funds(force_refresh=True)
+    if available_funds is None:
+        raise RuntimeError("Fresh exchange balance unavailable")
+    payload = await finish_before_cancellation(
+        statistic.get_profit_for_dashboard(available_funds, force_refresh=True),
+        name="fresh-dashboard-statistics",
+    )
+    if not _same_account(account, config_service.snapshot()):
+        raise RuntimeError("Exchange account changed during dashboard refresh")
+    return json.dumps(payload)
+
+
 _profit_fanout = WebSocketFanout(
     name="profit",
     interval_seconds=PROFIT_STREAM_INTERVAL_SECONDS,
     producer=_build_profit_payload,
+    fresh_producer=_build_profit_fresh_payload,
     logger=logging,
 )
 
@@ -89,7 +131,7 @@ async def stop_websocket_fanout() -> None:
 
 
 @websocket_stream(path="/statistic/profit", warn_on_data_discard=False)
-async def profit() -> AsyncGenerator[str, None]:
+async def profit(recovery: FromQuery[bool] = False) -> AsyncGenerator[str, None]:
     """WebSocket endpoint for streaming profit statistics.
 
     Sends profit data to connected clients every 5 seconds.
@@ -98,7 +140,7 @@ async def profit() -> AsyncGenerator[str, None]:
         asyncio.CancelledError: When client disconnects.
     """
     try:
-        async for output in _profit_fanout.subscribe():
+        async for output in _profit_fanout.subscribe(require_new_production=recovery):
             yield output
     except (asyncio.CancelledError, WebSocketDisconnect):
         # Handle disconnection gracefully
