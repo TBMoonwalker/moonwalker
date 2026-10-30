@@ -447,8 +447,14 @@ state changes, last-client disconnect and shutdown. Clients never start the
 trading worker, and snapshot sharing does not introduce status polling.
 
 
-These streams are fan-out based: one producer loop refreshes shared data every
-5 seconds and broadcasts it to all connected dashboard clients.
+These streams share production across clients and refresh every 5 seconds.
+`/trades/open?recovery=true` and `/statistic/profit?recovery=true` opt into a
+separate shared recovery producer. Its first result begins after subscription;
+it uses an uncached open-trade read or an uncached exchange balance and
+statistics calculation. A failed read is retried without certifying the
+recovering client. Recovery subscribers continue receiving this producer so a
+cached ordinary update cannot replace their refreshed data. The JSON payload
+shape remains the same as the ordinary stream.
 
 | Method | Path | Purpose |
 | --- | --- | --- |

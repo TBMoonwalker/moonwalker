@@ -27,6 +27,7 @@
                     secondary
                     size="small"
                     type="primary"
+                    :disabled="manualActionDisabled"
                     @click="emitAddOrderManually"
                 >
                     Add order manually
@@ -99,6 +100,7 @@ const props = defineProps<{
     minTimeframe: TimeframeChoice
     accumulationIntent?: { action: string; id: number } | null
     onAddOrderManually?: (rowData: RowData) => void
+    manualActionDisabled?: boolean
 }>()
 
 const accumulation = props.rowData.lifecycle_mode === 'accumulation' ? useAccumulationPanel(props.rowData.symbol) : null

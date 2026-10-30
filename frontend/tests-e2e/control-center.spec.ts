@@ -199,7 +199,7 @@ test.beforeEach(async ({ page }) => {
   let customDetail = strategyDetail(customStrategy)
   let saveAttempts = 0
 
-  await page.routeWebSocket('**/trades/open', (socket) => {
+  await page.routeWebSocket('**/trades/open*', (socket) => {
     socket.send(JSON.stringify([openTrade]))
   })
   await page.routeWebSocket('**/trades/closed', (socket) => {
@@ -211,7 +211,7 @@ test.beforeEach(async ({ page }) => {
   await page.routeWebSocket('**/trades/waiting', (socket) => {
     socket.send('[]')
   })
-  await page.routeWebSocket('**/statistic/profit', (socket) => {
+  await page.routeWebSocket('**/statistic/profit*', (socket) => {
     socket.send(
       JSON.stringify({
         profit_overall: 42.5,

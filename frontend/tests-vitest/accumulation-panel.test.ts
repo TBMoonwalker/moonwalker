@@ -113,6 +113,124 @@ describe('accumulation controls', () => {
     api.sendAccumulationCommand.mockImplementation(command => Promise.resolve(operation(command)))
   })
 
+  it('does not accept accumulation snapshots while the tab is hidden', async () => {
+    let hidden = false
+    const visibility = vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+    const { panel, wrapper } = harness()
+    await flushPromises()
+    expect(panel.fresh.value).toBe(true)
+
+    hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+    const next = snapshot({ revision: 99 })
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [next], next_after: null }, detail: next }) })
+    await flushPromises()
+    expect(panel.fresh.value).toBe(false)
+    expect(panel.detail.value?.revision).not.toBe(99)
+
+    hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(panel.fresh.value).toBe(true)
+    wrapper.unmount()
+    visibility.mockRestore()
+  })
+
+  it('starts a new page request after returning while the old request hangs', async () => {
+    let hidden = false
+    const visibility = vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+    api.fetchAccumulationPage.mockReset()
+    api.fetchAccumulationPage.mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce({ activations: [snapshot()], next_after: null })
+    const { panel, wrapper } = harness()
+    hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+    hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(2)
+    expect(panel.fresh.value).toBe(true)
+    wrapper.unmount()
+    visibility.mockRestore()
+  })
+
+  it('invalidates freshness immediately when the browser goes offline', async () => {
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
+    const { panel, wrapper } = harness()
+    online.mockReturnValue(true)
+    await panel.loadPage()
+    await flushPromises()
+    expect(panel.fresh.value).toBe(true)
+    online.mockReturnValue(false)
+    window.dispatchEvent(new Event('offline'))
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [snapshot()], next_after: null }, detail: snapshot() }) })
+    expect(panel.fresh.value).toBe(false)
+    online.mockReturnValue(true)
+    window.dispatchEvent(new Event('online'))
+    await flushPromises()
+    expect(panel.fresh.value).toBe(true)
+    wrapper.unmount()
+    online.mockRestore()
+  })
+
+  it('clears the interrupted detail loading state if the resumed page fails', async () => {
+    let hidden = false
+    const visibility = vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+    const { panel, wrapper } = harness()
+    await flushPromises()
+    api.fetchAccumulationDetail.mockImplementationOnce(() => new Promise(() => {}))
+    void panel.refreshDetail()
+    expect(panel.loading.value).toBe(true)
+    hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+    api.fetchAccumulationPage.mockRejectedValueOnce(new Error('offline'))
+    hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(panel.loading.value).toBe(false)
+    expect(panel.fresh.value).toBe(false)
+    wrapper.unmount()
+    visibility.mockRestore()
+  })
+
+  // Value: protects=resumed status ignores a page started before hiding;
+  // fails_when=an old page response overwrites the refreshed page;
+  // why_new=the visibility test does not delay the page request; seam=none;
+  // no_claim=real network timing (the API uses controlled promises).
+  it('reloads the accumulation page after an in-flight request spans hiding', async () => {
+    let hidden = false
+    const visibility = vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+    let resolveOld!: (value: unknown) => void
+    api.fetchAccumulationPage.mockReset()
+    api.fetchAccumulationPage.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+      .mockResolvedValueOnce({ activations: [snapshot({ revision: 20 })], next_after: null })
+    const { panel, wrapper } = harness()
+    hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+    hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+    resolveOld({ activations: [snapshot({ revision: 1 })], next_after: null })
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(2)
+    expect(panel.rows.value[0]?.revision).toBe(20)
+    wrapper.unmount()
+    visibility.mockRestore()
+  })
+
+  // Value: protects=obsolete accumulation sockets cannot replace current state;
+  // fails_when=events from a replaced socket are accepted; why_new=the existing
+  // visibility test uses the current socket; seam=none;
+  // no_claim=browser event scheduling (the socket is mocked).
+  it('ignores a snapshot from an obsolete accumulation socket', async () => {
+    const { panel, wrapper } = harness()
+    await flushPromises()
+    live.options.onMessage({}, { data: JSON.stringify({ type: 'snapshot', page: { activations: [snapshot({ revision: 99 })], next_after: null }, detail: snapshot({ revision: 99 }) }) })
+    await flushPromises()
+    expect(panel.detail.value?.revision).toBe(12)
+    expect(panel.rows.value[0]?.revision).not.toBe(99)
+    wrapper.unmount()
+  })
+
   it('keeps the panel hidden when the release gate is disabled', async () => {
     api.fetchAccumulationPage.mockRejectedValue({ status: 503 })
     const wrapper = mount(AccumulationPanel)
@@ -139,7 +257,7 @@ describe('accumulation controls', () => {
     await flushPromises()
     expect(wrapper.findAll('details')).toHaveLength(0)
     await click(wrapper, 'Load more registrations')
-    expect(api.fetchAccumulationPage).toHaveBeenLastCalledWith('page-2')
+    expect(api.fetchAccumulationPage).toHaveBeenLastCalledWith('page-2', expect.any(AbortSignal))
     expect(wrapper.text()).toContain('ZZZ/USDC')
     expect(wrapper.findAll('details')).toHaveLength(1)
     expect(wrapper.text()).not.toContain('Load more registrations')
@@ -446,7 +564,7 @@ describe('accumulation controls', () => {
     api.fetchAccumulationDetail.mockImplementation((symbol: string) => Promise.resolve(snapshot({ symbol })))
     const wrapper = mount(AccumulationTradeStatus, { props: { symbol: 'ETH/USDC' }, global: { stubs: { RouterLink: true } } })
     await flushPromises()
-    expect(api.fetchAccumulationDetail).toHaveBeenCalledWith('ETH/USDC')
+    expect(api.fetchAccumulationDetail).toHaveBeenCalledWith('ETH/USDC', expect.any(AbortSignal))
     expect(wrapper.html()).toContain('ETH/USDC')
     expect(wrapper.text()).not.toContain('Manage accumulation')
     expect(wrapper.text()).not.toContain('Inventory and history')
@@ -548,11 +666,11 @@ describe('accumulation controls', () => {
     api.fetchAccumulationDetail.mockImplementation((symbol: string) => Promise.resolve(snapshot({ symbol })))
     const wrapper = mount(AccumulationPanel)
     await flushPromises()
-    expect(api.fetchAccumulationDetail).toHaveBeenCalledWith('ETH/USDC')
+    expect(api.fetchAccumulationDetail).toHaveBeenCalledWith('ETH/USDC', expect.any(AbortSignal))
     expect(wrapper.html()).toContain('ETH/USDC')
     routing.route.query.symbol = 'SOL/USDC'
     await flushPromises()
-    expect(api.fetchAccumulationDetail).toHaveBeenLastCalledWith('SOL/USDC')
+    expect(api.fetchAccumulationDetail).toHaveBeenLastCalledWith('SOL/USDC', expect.any(AbortSignal))
     expect(wrapper.html()).toContain('SOL/USDC')
     wrapper.unmount()
   })

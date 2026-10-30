@@ -137,8 +137,17 @@ Main live dashboard endpoints:
 Main REST statistics endpoint:
 - `GET /statistic/profit-overall/timeline`
 
-These websocket streams refresh every 5 seconds and broadcast shared payloads
-to all connected dashboard clients.
+These WebSocket streams refresh every 5 seconds and share production across
+dashboard clients. The dashboard closes its display streams while its browser
+tab is hidden and reconnects when visible. Trading continues on the server and
+other clients remain independent. Open-trade actions wait for new trade and
+balance snapshots after reconnecting; a confirmation opened before the tab was
+hidden must be reviewed again if its trade or available funds changed. A retry
+of an uncertain order keeps its existing operation ID.
+
+If a trade or balance refresh fails, new DCA actions remain unavailable while
+Moonwalker retries. Return to the tab with network access and check the
+connection and exchange if the refreshing status persists.
 
 Accumulation also uses `WS /accumulation/stream` for holding status and
 `WS /accumulation/performance/stream` for Statistics. The latter shares

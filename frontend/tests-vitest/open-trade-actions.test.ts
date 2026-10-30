@@ -83,6 +83,58 @@ describe('open trade order actions', () => {
          dialog.warning.mockClear()
       })
 
+    it('rejects an old confirmation after visibility recovery changes the trade', async () => {
+        const row = trade()
+        const fresh = ref(true)
+        const generation = ref(1)
+        const current = ref(row)
+        const actions = useOpenTradeActions({
+            availableFunds: ref(100), dialog: dialog as never, message: message as never,
+            isFresh: () => fresh.value, generation: () => generation.value,
+            currentTrade: () => current.value,
+        })
+        actions.handleDealSell(row)
+        fresh.value = false
+        generation.value++
+        expect(await (dialogs[0].onPositiveClick as () => Promise<unknown>)()).toBe(false)
+        fresh.value = true
+        current.value = { ...row, amount: 2 }
+        expect(await (dialogs[0].onPositiveClick as () => Promise<unknown>)()).toBe(false)
+        expect(fetchJsonMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects a confirmation when funds change on the same connection', async () => {
+        const row = trade()
+        const funds = ref(100)
+        const actions = useOpenTradeActions({ availableFunds: funds, dialog: dialog as never,
+            message: message as never, isFresh: () => true, generation: () => 1,
+            currentTrade: () => row })
+        actions.handleDealSell(row)
+        funds.value = 20
+        expect(await (dialogs[0].onPositiveClick as () => Promise<unknown>)()).toBe(false)
+        expect(fetchJsonMock).not.toHaveBeenCalled()
+    })
+
+    it('allows an uncertain sell to retry with the same operation while data is stale', async () => {
+        const fresh = ref(true)
+        const generation = ref(1)
+        fetchJsonMock.mockRejectedValueOnce(new Error('lost response')).mockResolvedValueOnce(mutation('applied'))
+        const row = trade()
+        const actions = useOpenTradeActions({
+            availableFunds: ref(100), dialog: dialog as never, message: message as never,
+            isFresh: () => fresh.value, generation: () => generation.value, currentTrade: () => row,
+        })
+        actions.handleDealSell(row)
+        await (dialogs[0].onPositiveClick as () => Promise<unknown>)()
+        const firstId = fetchJsonMock.mock.calls[0][1].headers[MOONWALKER_OPERATION_HEADER]
+        fresh.value = false
+        generation.value++
+        expect(actions.canRetry(row, 'manual_sell')).toBe(true)
+        actions.handleDealSell(row)
+        await (dialogs[1].onPositiveClick as () => Promise<unknown>)()
+        expect(fetchJsonMock.mock.calls[1][1].headers[MOONWALKER_OPERATION_HEADER]).toBe(firstId)
+    })
+
     it('denies a symbol from new entries and refreshes the denylist', async () => {
         fetchJsonMock.mockResolvedValueOnce({
             status: 'denied',

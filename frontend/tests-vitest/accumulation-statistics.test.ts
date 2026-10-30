@@ -35,6 +35,29 @@ afterEach(() => {
 })
 
 describe('accumulation statistics', () => {
+  it('suspends its stream in a hidden tab and reconnects once when visible', async () => {
+    let hidden = false
+    vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+    const wrapper = mount(AccumulationStatistics)
+    const oldSocket = FakeWebSocket.instances[0]
+    oldSocket.sendSnapshot(performance())
+    await flushPromises()
+
+    hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+    oldSocket.sendSnapshot({ ...performance(), holdings: [] })
+    await flushPromises()
+    expect(wrapper.text()).toContain('BTC/USDC')
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    wrapper.unmount()
+  })
+
   it('does not reuse disconnected history when reconnecting to a different account', async () => {
     vi.useFakeTimers()
     let resolveOld!: (value: unknown) => void

@@ -37,6 +37,7 @@ class Statistic:
         self.autopilot = Autopilot()
         self.capital_budget = CapitalBudgetService()
         self.snapshot_interval_seconds = 60
+        self._snapshot_lock = asyncio.Lock()
         self.timeline_horizons = {
             "day": timedelta(days=1),
             "week": timedelta(days=7),
@@ -95,6 +96,8 @@ class Statistic:
         queryset,
         field_name: str,
         error_message: str,
+        *,
+        strict: bool = False,
     ) -> float:
         """Return a scalar SUM aggregate with a stable 0.0 fallback."""
         try:
@@ -104,12 +107,16 @@ class Statistic:
             return float(result[0] or 0.0)
         except BaseORMException:
             self._log_orm_error(error_message)
+            if strict:
+                raise
             return 0.0
 
     async def _get_profit_rows_since(
         self,
         begin_datetime: datetime | Any,
         error_message: str,
+        *,
+        strict: bool = False,
     ) -> list[tuple[Any, Any]]:
         """Return closed-trade profit rows since the given date boundary."""
         try:
@@ -120,9 +127,13 @@ class Statistic:
             )
         except BaseORMException:
             self._log_orm_error(error_message)
+            if strict:
+                raise
             return []
 
-    async def _get_open_trade_profit_snapshot(self) -> tuple[float, float]:
+    async def _get_open_trade_profit_snapshot(
+        self, *, strict: bool = False
+    ) -> tuple[float, float]:
         """Return open-trade upnl and funds-locked totals."""
         try:
             open_trade_rows = await model.OpenTrades.all().values(
@@ -145,9 +156,11 @@ class Statistic:
             return float(upnl_value), float(funds_locked)
         except BaseORMException as exc:
             logging.error("Error getting open-trade profit snapshot: %s", exc)
+            if strict:
+                raise
             return 0.0, 0.0
 
-    async def _performance_complete(self) -> bool:
+    async def _performance_complete(self, *, strict: bool = False) -> bool:
         """Do not label legacy DCA aggregates as complete accumulation returns."""
         try:
             return not (
@@ -156,6 +169,8 @@ class Statistic:
             )
         except BaseORMException:
             logging.exception("Could not verify performance coverage.")
+            if strict:
+                raise
             return False
 
     @staticmethod
@@ -297,10 +312,16 @@ class Statistic:
         return copy.deepcopy(await self._get_profit_cached())
 
     async def get_profit_for_dashboard(
-        self, available_quote: float | None
+        self, available_quote: float | None, *, force_refresh: bool = False
     ) -> dict[str, Any]:
         """Return profit data enriched for the dashboard websocket stream."""
-        profit_data = copy.deepcopy(await self._get_profit_base_cached())
+        profit_data = copy.deepcopy(
+            await (
+                self._get_profit_base(strict=True)
+                if force_refresh
+                else self._get_profit_base_cached()
+            )
+        )
         await self._apply_autopilot_runtime_state(
             profit_data,
             available_quote=available_quote,
@@ -325,20 +346,26 @@ class Statistic:
     @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
     async def _get_profit_base_cached(self) -> dict[str, Any]:
         """Compute and cache DB-backed profit aggregates."""
+        return await self._get_profit_base()
+
+    async def _get_profit_base(self, *, strict: bool = False) -> dict[str, Any]:
+        """Compute DB-backed profit aggregates without reusing the cache."""
         profit_data = {}
         begin_week = (
             datetime.now() + timedelta(days=(0 - datetime.now().weekday()))
         ).date()
 
-        open_trade_snapshot_task = self._get_open_trade_profit_snapshot()
+        open_trade_snapshot_task = self._get_open_trade_profit_snapshot(strict=strict)
         closed_profit_task = self._get_sum_value(
             realized_closed_trades(),
             "profit",
             "Error getting profit: %s",
+            strict=strict,
         )
         profit_week_task = self._get_profit_rows_since(
             begin_week,
             "Error getting profits for the week: %s",
+            strict=strict,
         )
 
         (
@@ -352,7 +379,9 @@ class Statistic:
         )
         upnl_value, funds_locked = open_trade_snapshot
 
-        profit_data["performance_complete"] = await self._performance_complete()
+        profit_data["performance_complete"] = await self._performance_complete(
+            strict=strict
+        )
         if not profit_data["performance_complete"]:
             from service.runtime_services import get_active_accumulation_runtime
 
@@ -519,6 +548,11 @@ class Statistic:
         """Persist a sampled uPNL snapshot for long-term charting."""
         if profit_data.get("performance_complete") is False:
             return
+        async with self._snapshot_lock:
+            await self._store_upnl_snapshot_locked(profit_data)
+
+    async def _store_upnl_snapshot_locked(self, profit_data: dict[str, Any]) -> None:
+        """Check and write one sample while the single-instance lock is held."""
         try:
             latest_snapshot = (
                 await model.UpnlHistory.all().order_by("-timestamp").first()

@@ -85,6 +85,29 @@ async def test_stream_watchdog_ignores_healthy_stream(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_reclaim_resets_stale_symbol_heartbeats(monkeypatch) -> None:
+    watcher = Watcher()
+    watcher.config = {}
+    watcher.runtime_state.ticker_symbols = ["BARD/USDC"]
+    monkeypatch.setattr(watcher_module, "logging", _Logger())
+    watcher._last_symbol_data_at["BARD/USDC"] = time.monotonic() - 20000
+
+    async def reload_client(_config: dict) -> None:
+        return None
+
+    async def watch_symbol(_symbol: str) -> None:
+        await asyncio.Event().wait()
+
+    watcher._reload_exchange_client = reload_client  # type: ignore[assignment]
+    watcher.watch_symbol_with_reconnect = watch_symbol  # type: ignore[assignment]
+    try:
+        await watcher._reclaim_stalled_stream()
+        assert not watcher._detect_stalled_symbol()
+    finally:
+        await watcher._cancel_symbol_tasks()
+
+
+@pytest.mark.asyncio
 async def test_drain_reclaim_rebuilds_client_and_respawns(monkeypatch) -> None:
     watcher = Watcher()
     watcher.config = {"exchange": "binance", "market": "spot", "dry_run": True}

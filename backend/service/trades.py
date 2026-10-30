@@ -312,6 +312,7 @@ class Trades:
         self,
         *,
         exposure_state: str = TradeExposureState.LONG_EXPOSED.value,
+        raise_on_error: bool = False,
     ) -> list[dict[str, Any]]:
         """
         Gives back the open orders including all base
@@ -376,6 +377,8 @@ class Trades:
         except BaseORMException as e:
             # Broad catch to keep open trades endpoint responsive.
             logging.error("Error getting open orders. Cause: %s", e)
+            if raise_on_error:
+                raise TradeStateUnavailableError("Open trades unavailable") from e
             return []
 
     async def get_unsellable_trades(self) -> list[dict[str, Any]]:

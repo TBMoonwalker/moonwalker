@@ -49,6 +49,8 @@ let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 let activityRetryTimer: ReturnType<typeof setTimeout> | undefined
 let socket: WebSocket | undefined
 let active = false
+let routeActive = false
+let pageHidden = document.hidden
 let activityRevision: number | null = null
 let activityReloadPending = false
 let accountGeneration: number | null = null
@@ -153,7 +155,7 @@ async function loadActivity(restart = false) {
   }
 }
 function start() {
-  if (active) return
+  if (active || !routeActive || document.hidden) return
   active = true
   connect()
   void loadActivity(true)
@@ -177,10 +179,30 @@ function stop() {
   socket = undefined
   current?.close()
 }
-onMounted(start)
-onActivated(start)
-onDeactivated(stop)
-onUnmounted(stop)
+function activate() {
+  routeActive = true
+  start()
+}
+function deactivate() {
+  routeActive = false
+  stop()
+}
+function onVisibilityChange() {
+  if (pageHidden === document.hidden) return
+  pageHidden = document.hidden
+  if (pageHidden) stop()
+  else start()
+}
+onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  activate()
+})
+onActivated(activate)
+onDeactivated(deactivate)
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  deactivate()
+})
 </script>
 
 <template>

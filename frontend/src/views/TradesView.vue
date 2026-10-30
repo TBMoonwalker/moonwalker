@@ -60,7 +60,8 @@ const openTradesCount = computed(() =>
 )
 const closedTradesCount = useClosedTradeCount(closedTradesState.data)
 const streamsConnected = computed(
-  () => statisticsState.status.value === 'OPEN' && openTradesState.status.value === 'OPEN',
+  () => statisticsState.status.value === 'OPEN' && openTradesState.status.value === 'OPEN' &&
+    statisticsStore.fresh && openTradesStore.fresh,
 )
 const autopilotPayload = computed(() => statisticsState.data.value as Record<string, unknown> | null)
 const autopilotState = computed(() => String(autopilotPayload.value?.autopilot ?? 'none'))

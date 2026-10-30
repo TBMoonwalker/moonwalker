@@ -33,23 +33,50 @@ interface UseOpenTradeActionsOptions {
     dialog: ReturnType<typeof useDialog>
     message: ReturnType<typeof useMessage>
     onAfterDeny?: () => void | Promise<void>
+    isFresh?: () => boolean
+    generation?: () => number
+    currentTrade?: (symbol: string) => OpenTradeRow | undefined
 }
 
 export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
     const operationRegistry = createOrderOperationRegistry()
 
+    function checkFresh(data: OpenTradeRow, generation: number, fingerprint: string, operationKey?: string): boolean {
+        if (operationKey && operationRegistry.get(operationKey)) return true
+        if (options.isFresh && !options.isFresh()) {
+            options.message.error('Live trade data is refreshing. Try again when it is current.')
+            return false
+        }
+        if (options.currentTrade || (options.generation && generation !== options.generation())) {
+            const current = options.currentTrade?.(data.symbol)
+            const currentFingerprint = JSON.stringify([current, options.availableFunds.value])
+            if (!current || currentFingerprint !== fingerprint) {
+                options.message.error('Trade or available funds changed. Close this dialog and review the action again.')
+                return false
+            }
+        }
+        return true
+    }
+
+    function capture(data: OpenTradeRow) {
+        return { generation: options.generation?.() ?? 0, fingerprint: JSON.stringify([data, options.availableFunds.value]) }
+    }
+
     function handleDealSell(data: OpenTradeRow): void {
+        const operationKey = `manual_sell:${data.deal_id || data.symbol}`
+        const captured = capture(data)
+        if (!checkFresh(data, captured.generation, captured.fingerprint, operationKey)) return
         const d = options.dialog.warning({
             title: 'Selling deal',
             content: `Do you like to sell ${data.amount} ${data.symbol} ?`,
             positiveText: 'Sell',
             negativeText: 'Do not sell',
             onPositiveClick: async () => {
+                if (!checkFresh(data, captured.generation, captured.fingerprint, operationKey)) return false
                 d.loading = true
                 const [symbol, currency] = splitTradeSymbol(
                     data.symbol.toLowerCase(),
                 )
-                const operationKey = `manual_sell:${data.deal_id || data.symbol}`
                 const operationId = operationRegistry.acquire(
                     operationKey,
                     'manual_sell',
@@ -102,6 +129,9 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
     }
 
     function handleDealBuy(data: OpenTradeRow): void {
+        const operationKey = `manual_buy:${data.deal_id || data.symbol}`
+        const captured = capture(data)
+        if (!checkFresh(data, captured.generation, captured.fingerprint, operationKey)) return
         const [symbol, currency] = splitTradeSymbol(data.symbol.toLowerCase())
         const maxAmount = floorToDecimals(
             toFiniteNonNegative(options.availableFunds.value),
@@ -186,6 +216,7 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
             positiveText: 'Add funds',
             negativeText: 'Cancel',
             onPositiveClick: async () => {
+                if (!checkFresh(data, captured.generation, captured.fingerprint, operationKey)) return false
                 d.loading = true
                 const finalAmount = roundToDecimals(
                     clampToRange(amount.value, 0, maxAmount),
@@ -199,7 +230,6 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
                     return false
                 }
                 const orderAmount = formatOrderAmount(finalAmount)
-                const operationKey = `manual_buy:${data.deal_id || data.symbol}`
                 const operationId = operationRegistry.acquire(
                     operationKey,
                     'manual_buy',
@@ -252,6 +282,8 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
     }
 
     function handleAddManualBuy(data: OpenTradeRow): void {
+        const captured = capture(data)
+        if (!checkFresh(data, captured.generation, captured.fingerprint)) return
         const symbol = String(data.symbol || '').toUpperCase()
         const previousPrice = getPreviousBuyPrice(data)
         const price = ref(
@@ -327,6 +359,7 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
             positiveText: 'Add order manually',
             negativeText: 'Cancel',
             onPositiveClick: async () => {
+                if (!checkFresh(data, captured.generation, captured.fingerprint)) return false
                 d.loading = true
                 const finalTimestamp = Number(timestampMs.value ?? 0)
                 const finalPrice = Number(price.value ?? 0)
@@ -386,12 +419,15 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
     }
 
     function handleDealStop(data: OpenTradeRow): void {
+        const captured = capture(data)
+        if (!checkFresh(data, captured.generation, captured.fingerprint)) return
         const d = options.dialog.warning({
             title: 'Stopping deal',
             content: `Do you like to stop the deal for ${data.symbol} ?`,
             positiveText: 'Stop',
             negativeText: 'Do not stop',
             onPositiveClick: async () => {
+                if (!checkFresh(data, captured.generation, captured.fingerprint)) return false
                 d.loading = true
                 try {
                     const [symbol, currency] = splitTradeSymbol(
@@ -433,12 +469,15 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
      }
 
     function handleDealDeny(data: OpenTradeRow): void {
+        const captured = capture(data)
+        if (!checkFresh(data, captured.generation, captured.fingerprint)) return
         const d = options.dialog.warning({
             title: 'Deny symbol from new entries',
             content: `Deny ${data.symbol} from opening new signal deals? The open deal keeps running.`,
             positiveText: 'Deny',
             negativeText: 'Do not deny',
             onPositiveClick: async () => {
+                if (!checkFresh(data, captured.generation, captured.fingerprint)) return false
                 d.loading = true
                 try {
                     const result = await fetchJson<{
@@ -482,6 +521,8 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
      }
 
     return {
+        canRetry: (data: OpenTradeRow, action: 'manual_sell' | 'manual_buy') =>
+            !!operationRegistry.get(`${action}:${data.deal_id || data.symbol}`),
         handleAddManualBuy,
         handleDealBuy,
         handleDealSell,

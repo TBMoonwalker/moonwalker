@@ -958,11 +958,13 @@ class Exchange:
             return None
 
     async def get_free_balance_for_asset(
-        self, config: dict[str, Any], asset: str
+        self, config: dict[str, Any], asset: str, *, force_refresh: bool = False
     ) -> float | None:
         """Return currently available balance for an asset symbol (e.g. USDC)."""
         await self._ensure_exchange(config)
-        return await self._balance_manager.get_free_balance_for_asset(asset)
+        return await self._balance_manager.get_free_balance_for_asset(
+            asset, force_refresh=force_refresh
+        )
 
     async def _resolve_sell_amount(
         self, symbol: str, requested_amount: float

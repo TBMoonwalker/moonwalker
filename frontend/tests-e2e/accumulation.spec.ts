@@ -4,7 +4,7 @@ import type { AccumulationDetail } from '../src/types/accumulation'
 test.beforeEach(async ({ page }) => {
   await page.routeWebSocket('**/accumulation/stream**', () => {})
   await page.routeWebSocket('**/trades/*', socket => socket.send('[]'))
-  await page.routeWebSocket('**/statistic/profit', socket => socket.send('{}'))
+  await page.routeWebSocket('**/statistic/profit*', socket => socket.send('{}'))
   await page.route('**/trades/*/length', route => route.fulfill({ json: { result: 0 } }))
 })
 

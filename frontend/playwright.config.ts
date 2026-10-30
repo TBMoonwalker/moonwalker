@@ -24,6 +24,16 @@ export default defineConfig({
   },
   projects: [
     {
+      name: 'firefox',
+      testMatch: '**/background-recovery.spec.ts',
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'webkit',
+      testMatch: '**/background-recovery.spec.ts',
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],

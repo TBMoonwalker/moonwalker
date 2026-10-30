@@ -1172,6 +1172,30 @@ def test_trades_websocket_disconnect_is_not_logged_as_error(monkeypatch) -> None
     assert errors == []
 
 
+def test_recovery_websocket_routes_use_fresh_producers(monkeypatch) -> None:
+    """Recovery query parameters select fresh producers on the real routes."""
+    from unittest.mock import AsyncMock
+
+    open_producer = AsyncMock(return_value='[{"symbol":"fresh"}]')
+    profit_producer = AsyncMock(return_value='{"funds_available":123}')
+    monkeypatch.setattr(
+        trades_controller._open_trades_fanout, "_fresh_producer", open_producer
+    )
+    monkeypatch.setattr(
+        statistics_controller._profit_fanout, "_fresh_producer", profit_producer
+    )
+    app = Litestar(
+        route_handlers=[trades_controller.open_trades, statistics_controller.profit]
+    )
+    with TestClient(app=app) as client:
+        with client.websocket_connect("/trades/open?recovery=true") as socket:
+            assert json.loads(socket.receive_text()) == [{"symbol": "fresh"}]
+        with client.websocket_connect("/statistic/profit?recovery=true") as socket:
+            assert json.loads(socket.receive_text()) == {"funds_available": 123}
+    assert open_producer.await_count >= 1
+    assert profit_producer.await_count >= 1
+
+
 def test_closed_trades_websocket_disconnect_is_not_logged_as_error(
     monkeypatch,
 ) -> None:

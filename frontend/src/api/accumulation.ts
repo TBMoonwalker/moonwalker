@@ -8,15 +8,17 @@ export async function fetchAccumulationStrategies(afterId = 0): Promise<Accumula
   })).data
 }
 
-export async function fetchAccumulationPage(after?: string): Promise<AccumulationPage> {
+export async function fetchAccumulationPage(after?: string, signal?: AbortSignal): Promise<AccumulationPage> {
   return (await axios.get<AccumulationPage>(buildMoonwalkerApiUrl('/accumulation/activations'), {
     params: { limit: 25, after },
+    signal,
   })).data
 }
 
-export async function fetchAccumulationDetail(symbol: string): Promise<AccumulationDetail> {
+export async function fetchAccumulationDetail(symbol: string, signal?: AbortSignal): Promise<AccumulationDetail> {
   return (await axios.get<AccumulationDetail>(buildMoonwalkerApiUrl('/accumulation/activation'), {
     params: { symbol },
+    signal,
   })).data
 }
 

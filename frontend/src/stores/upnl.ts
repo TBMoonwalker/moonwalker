@@ -39,6 +39,9 @@ export const useUpnlDatastore = defineStore('upnl', () => {
   const isLoading = ref(false)
   const historyVerified = ref(false)
   let pendingLoad: Promise<UpnlPoint[]> | null = null
+  let pendingForcedLoad: Promise<UpnlPoint[]> | null = null
+  let pendingController: AbortController | null = null
+  let requestGeneration = 0
 
   function hasFreshCache(): boolean {
    return (
@@ -47,17 +50,21 @@ export const useUpnlDatastore = defineStore('upnl', () => {
    )
   }
 
-  async function load_upnl_history_data(options: { force?: boolean } = {}) {
+  async function load_upnl_history_data(options: { force?: boolean } = {}): Promise<UpnlPoint[]> {
    if (!options.force && hasFreshCache()) {
     return data.value
    }
-   if (pendingLoad) {
-    return pendingLoad
-   }
+   if (options.force && pendingForcedLoad) return pendingForcedLoad
+   if (!options.force && pendingLoad) return pendingLoad
 
+   if (options.force) pendingController?.abort()
    isLoading.value = true
-   pendingLoad = fetchJson<UpnlPoint[]>('/statistic/profit-overall/timeline')
+   const generation = ++requestGeneration
+   const controller = new AbortController()
+   pendingController = controller
+   const request = fetchJson<UpnlPoint[]>('/statistic/profit-overall/timeline', { signal: controller.signal })
     .then((payload) => {
+     if (generation !== requestGeneration) return payload
      data.value = payload
      historyVerified.value = true
      loadedAt.value = Date.now()
@@ -69,16 +76,29 @@ export const useUpnlDatastore = defineStore('upnl', () => {
      return payload
     })
     .catch((error) => {
-     historyVerified.value = false
+     if (generation === requestGeneration) historyVerified.value = false
      throw error
     })
     .finally(() => {
-     isLoading.value = false
-     pendingLoad = null
+     if (generation === requestGeneration) isLoading.value = false
+     if (pendingLoad === request) pendingLoad = null
+     if (pendingForcedLoad === request) pendingForcedLoad = null
+     if (pendingController === controller) pendingController = null
     })
-
-   return pendingLoad
+   pendingLoad = request
+   if (options.force) pendingForcedLoad = request
+   return request
   }
 
-  return { data, loadedAt, isLoading, historyVerified, load_upnl_history_data }
+  function invalidatePendingHistory() {
+   ++requestGeneration
+   pendingController?.abort()
+   pendingController = null
+   pendingLoad = null
+   pendingForcedLoad = null
+   isLoading.value = false
+   historyVerified.value = false
+  }
+
+  return { data, loadedAt, isLoading, historyVerified, load_upnl_history_data, invalidatePendingHistory }
  })

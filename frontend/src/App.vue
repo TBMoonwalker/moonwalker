@@ -117,22 +117,49 @@ const createManagedSocket = (
   name: string,
   url: string,
   store: ReturnType<typeof useWebSocketDataStore>,
-  options?: { healthcheck?: boolean },
+  options?: { healthcheck?: boolean; recovery?: boolean },
 ) => {
   const healthcheckEnabled = options?.healthcheck ?? true
-  const socket = useWebSocket(url, {
+  const socketUrl = new URL(url)
+  if (options?.recovery) socketUrl.searchParams.set('recovery', 'true')
+  const socket = useWebSocket(socketUrl.toString(), {
+    immediate: false,
+    autoConnect: false,
     autoReconnect: {
       retries: -1,
       delay: 1500,
     },
-    onMessage(_ws, event) {
+    onMessage(ws, event) {
+      if (document.hidden || ws !== socket.ws.value) return
       lastMessageAt.value = Date.now()
-      store.setRaw((event.data as string) ?? null)
+      const payload = (event.data as string) ?? null
+      let valid = false
+      try {
+        const parsed: unknown = JSON.parse(payload)
+        valid = name === 'openTrades' ? Array.isArray(parsed)
+          : name === 'statistics' ? !!parsed && typeof parsed === 'object' &&
+            typeof (parsed as Record<string, unknown>).funds_available === 'number' &&
+            Number.isFinite((parsed as Record<string, number>).funds_available)
+          : true
+      } catch { /* Invalid payloads never certify freshness. */ }
+      store.setRaw(payload, valid && !!options?.recovery)
     },
   })
 
   const lastMessageAt = ref(Date.now())
   let lastReconnectAt = 0
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+
+  const suspend = () => {
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+    store.invalidate()
+    socket.close()
+  }
+  const resume = () => {
+    if (document.hidden || !navigator.onLine || socket.status.value !== 'CLOSED') return
+    socket.open()
+  }
 
   const reconnect = (reason: string) => {
     if (!wsWatchdogEnabled.value) {
@@ -146,13 +173,14 @@ const createManagedSocket = (
     lastReconnectAt = now
     store.markReconnect()
     trackUiEvent('ws_reconnect', { socket: name, reason })
-    socket.close()
-    setTimeout(() => socket.open(), 250)
+    suspend()
+    reconnectTimer = setTimeout(resume, 250)
     console.debug(`[ws] reinitialized ${name}`)
   }
 
   const stopStatusWatch = watch(socket.status, (status) => {
     store.setStatus(status as WebSocketStatus)
+    if (status === 'CLOSED') store.invalidate()
     if (status === 'OPEN') {
       lastMessageAt.value = Date.now()
     }
@@ -161,15 +189,18 @@ const createManagedSocket = (
   const dispose = () => {
     stopStatusWatch()
     store.setStatus('CLOSED')
-    socket.close()
+    suspend()
   }
 
   return {
     name,
     socket,
     healthcheckEnabled,
+    store,
     lastMessageAt,
     reconnect,
+    suspend,
+    resume,
     dispose,
   }
 }
@@ -179,6 +210,7 @@ const managedSockets = [
   'openTrades',
   buildWsUrl('/trades/open'),
   open_trade_store,
+  { recovery: true },
   ),
   createManagedSocket(
   'closedTrades',
@@ -194,32 +226,41 @@ const managedSockets = [
    'statistics',
   buildWsUrl('/statistic/profit'),
   statistics_store,
+  { recovery: true },
    ),
 ]
 
 const onActiveAgain = () => {
   void refreshSharedConfig()
-  if (!wsWatchdogEnabled.value) {
-    return
-  }
   if (document.hidden || !navigator.onLine) {
     return
   }
   for (const managedSocket of managedSockets) {
     if (managedSocket.socket.status.value !== 'OPEN') {
-      managedSocket.reconnect('app_active')
+      managedSocket.resume()
     }
   }
 }
 
+let pageHidden = document.hidden
 const visibilityHandler = () => {
-  if (!document.hidden) {
-    onActiveAgain()
-  }
+  if (pageHidden === document.hidden) return
+  pageHidden = document.hidden
+  if (pageHidden) managedSockets.forEach((socket) => socket.suspend())
+  else onActiveAgain()
 }
+const onOffline = () => managedSockets.forEach((socket) => socket.suspend())
 
 let healthcheckTimer: number | null = null
 const runHealthcheck = () => {
+  if (!document.hidden) {
+    const now = Date.now()
+    for (const managedSocket of managedSockets) {
+      if (managedSocket.store.fresh && now - managedSocket.lastMessageAt.value > wsStaleTimeoutMs.value) {
+        managedSocket.store.invalidate()
+      }
+    }
+  }
   if (wsWatchdogEnabled.value && !document.hidden && navigator.onLine) {
     const now = Date.now()
     for (const managedSocket of managedSockets) {
@@ -242,6 +283,7 @@ onUnmounted(() => {
   }
   window.removeEventListener('focus', onActiveAgain)
   window.removeEventListener('online', onActiveAgain)
+  window.removeEventListener('offline', onOffline)
   document.removeEventListener('visibilitychange', visibilityHandler)
   for (const managedSocket of managedSockets) {
     managedSocket.dispose()
@@ -249,6 +291,7 @@ onUnmounted(() => {
 })
 
 onMounted(() => {
+  onActiveAgain()
   void configSnapshotStore.ensureLoaded(false).catch((error) => {
     console.debug('[ws] using default watchdog config', error)
   })
@@ -256,6 +299,7 @@ onMounted(() => {
   configRefreshTimer = window.setInterval(() => { void refreshSharedConfig() }, 15000)
   window.addEventListener('focus', onActiveAgain)
   window.addEventListener('online', onActiveAgain)
+  window.addEventListener('offline', onOffline)
   document.addEventListener('visibilitychange', visibilityHandler)
 })
 

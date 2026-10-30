@@ -15,7 +15,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { use } from 'echarts/core'
 import { LineChart } from 'echarts/charts'
@@ -42,6 +42,9 @@ const { scheme } = storeToRefs(themeStore)
 const isLoading = ref(data.value.length === 0)
 const showEmptyState = ref(false)
 const performanceComplete = ref(true)
+let routeActive = true
+let pageHidden = document.hidden
+let latestRealtime: { profitOverall: number; fundsLocked: number; timestamp: string } | null = null
 const emptyStateText = ref('No profit history yet')
 const visiblePoints = computed(() => filterPerformancePoints(data.value, props.range))
 const placeholderText = computed(() =>
@@ -91,6 +94,7 @@ function pushRealtimePoint(profitOverall: number, fundsLocked: number, timestamp
 
   const lastIndex = data.value.length - 1
   const lastPoint = data.value[lastIndex]
+  if (timestamp < lastPoint.timestamp) return
   if (toMinuteBucket(lastPoint.timestamp) === toMinuteBucket(timestamp)) {
     data.value[lastIndex] = point
   } else {
@@ -200,6 +204,7 @@ const option = computed(() => {
 })
 
 onMounted(async () => {
+  document.addEventListener('visibilitychange', onVisibilityChange)
   try {
     await upnlStore.load_upnl_history_data()
     showEmptyState.value = data.value.length === 0
@@ -210,6 +215,27 @@ onMounted(async () => {
     isLoading.value = false
   }
 })
+
+async function refreshAfterReturn() {
+  try {
+    await upnlStore.load_upnl_history_data({ force: true })
+    if (latestRealtime && routeActive && !document.hidden) {
+      pushRealtimePoint(latestRealtime.profitOverall, latestRealtime.fundsLocked, latestRealtime.timestamp)
+    }
+    showEmptyState.value = data.value.length === 0
+  } catch {
+    emptyStateText.value = 'Profit history is unavailable.'
+  }
+}
+function onVisibilityChange() {
+  if (pageHidden === document.hidden) return
+  pageHidden = document.hidden
+  if (pageHidden) { latestRealtime = null; upnlStore.invalidatePendingHistory() }
+  else if (routeActive) void refreshAfterReturn()
+}
+onActivated(() => { if (!routeActive) { routeActive = true; if (!document.hidden) void refreshAfterReturn() } })
+onDeactivated(() => { routeActive = false; latestRealtime = null; upnlStore.invalidatePendingHistory() })
+onUnmounted(() => document.removeEventListener('visibilitychange', onVisibilityChange))
 
 watch(
   statisticsData.data,
@@ -233,11 +259,12 @@ watch(
       return
     }
 
-    pushRealtimePoint(
-      Number(websocketData.profit_overall),
-      Number(websocketData.funds_locked),
-      websocketData.profit_overall_timestamp,
-    )
+    latestRealtime = {
+      profitOverall: Number(websocketData.profit_overall),
+      fundsLocked: Number(websocketData.funds_locked),
+      timestamp: websocketData.profit_overall_timestamp,
+    }
+    pushRealtimePoint(latestRealtime.profitOverall, latestRealtime.fundsLocked, latestRealtime.timestamp)
     showEmptyState.value = data.value.length === 0
   },
   { immediate: true },

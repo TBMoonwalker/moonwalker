@@ -7,6 +7,7 @@ from typing import Any
 
 import helper
 from controller.responses import json_response
+from helper.async_completion import finish_before_cancellation
 from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
 from litestar.params import FromPath, FromQuery
@@ -61,6 +62,14 @@ async def _build_open_trades_payload() -> str:
     return _json_dumps(delisting_protection.enrich_open_trades(output))
 
 
+async def _build_open_trades_fresh_payload() -> str:
+    """Build an authoritative open-trade snapshot for recovery clients."""
+    output = await finish_before_cancellation(
+        trades.get_open_trades(raise_on_error=True), name="fresh-open-trades"
+    )
+    return _json_dumps(delisting_protection.enrich_open_trades(output))
+
+
 async def _build_closed_trades_payload() -> str:
     """Build serialized payload for closed-trades stream."""
     output = await _get_closed_trades_cached()
@@ -77,6 +86,7 @@ _open_trades_fanout = WebSocketFanout(
     name="open_trades",
     interval_seconds=5,
     producer=_build_open_trades_payload,
+    fresh_producer=_build_open_trades_fresh_payload,
     logger=logging,
 )
 _closed_trades_fanout = WebSocketFanout(
@@ -108,10 +118,12 @@ async def stop_websocket_fanout() -> None:
 
 
 @websocket_stream(path="/trades/open", warn_on_data_discard=False)
-async def open_trades() -> AsyncGenerator[str, None]:
+async def open_trades(recovery: FromQuery[bool] = False) -> AsyncGenerator[str, None]:
     """WebSocket endpoint for streaming open trades data every 5 seconds."""
     try:
-        async for output in _open_trades_fanout.subscribe():
+        async for output in _open_trades_fanout.subscribe(
+            require_new_production=recovery
+        ):
             yield output
     except (asyncio.CancelledError, WebSocketDisconnect):
         logging.info("Client disconnected from open trades WebSocket")

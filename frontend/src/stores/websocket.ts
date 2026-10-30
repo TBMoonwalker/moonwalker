@@ -12,22 +12,31 @@ export const useWebSocketDataStore = (wsId: string) => defineStore(`${wsId}`, {
       lastMessageAt: null as number | null,
       lastStatusAt: null as number | null,
       reconnectCount: 0,
+      fresh: false,
+      generation: 0,
     }
   },
   actions: {
-    setRaw(payload: string | null) {
+    setRaw(payload: string | null, fresh = false) {
       this.raw = payload
       this.hasReceivedData = true
       this.lastMessageAt = Date.now()
       if (payload === null || payload === undefined) {
         this.data = null
+        this.fresh = false
         return
       }
       try {
         this.data = JSON.parse(payload)
+        this.fresh = fresh
       } catch {
         this.data = null
+        this.fresh = false
       }
+    },
+    invalidate() {
+      this.fresh = false
+      this.generation += 1
     },
     setStatus(status: WebSocketStatus) {
       this.status = status
