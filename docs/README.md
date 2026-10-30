@@ -19,6 +19,7 @@ dashboard clients can connect to that instance.
 - [Telegram monitoring](monitoring.md)
 - [Operations, backups, logs, and dashboard streams](operations.md)
 - [Deny a symbol from future entries](designs/denylist-symbol-from-open-trade.md)
+- [Move accumulation coins to a hardware wallet](designs/accumulation-hardware-wallet-custody.md)
 
 ## API and development
 
