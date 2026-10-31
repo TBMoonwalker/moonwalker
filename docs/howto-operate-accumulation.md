@@ -93,11 +93,11 @@ for adoption and retry behavior.
 3. Resume explicitly after a pause. Resume revalidates ownership and history;
    it does not purchase missed historical signals.
 
-The monitoring log viewer includes `accumulation_runtime.log`. Expected runtime
-failures record the symbol, stage, wait reason and exception class once per
-failure transition; a successful retry records recovery. Repeated identical
-failures are suppressed. Exchange exception text, credentials and raw payloads
-are excluded. Ordinary strategy waits do not produce failure warnings.
+The `logs/accumulation.log` file records expected runtime failures
+(symbol, stage, wait reason and exception class) once per failure transition
+and a successful retry, with repeated identical failures suppressed. Exchange
+exception text, credentials and raw payloads are excluded; ordinary strategy
+waits do not produce failure warnings.
 
 The dashboard receives status updates over WebSocket. A disconnected stream
 makes actions stale; reconnect or use **Refresh status** before acting.
