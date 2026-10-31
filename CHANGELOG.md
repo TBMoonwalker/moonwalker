@@ -2,6 +2,20 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.5.0.2] - 2026-10-31
+
+### Fixed
+- Tolerate a sub-lot rounding difference between the exchange-reported free balance
+  and the DB-stored accumulated quantity in the accumulation owned-base check. Bybit
+  and Bybit-EU report a spot balance at a fixed decimal precision while the ledger
+  keeps a higher-precision total from the fill reports, so a fraction-of-a-quantum
+  shortfall (for example a half-satoshi, a few hundredths of one percent of what is
+  held) is now treated as a reporting artifact instead of parking the step as
+  "owned base missing or encumbered." A genuine encumbrance — an order hold, a pending
+  fill, an external transfer, or any shortfall that is not sub-lot — still trips the
+  guard, because the tolerance is capped at the smaller of one trading quantum and one
+  percent of the owned quantity.
+
 ## [5.5.0.1] - 2026-10-31
 
 ### Fixed
