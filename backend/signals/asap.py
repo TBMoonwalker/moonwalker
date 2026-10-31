@@ -32,7 +32,7 @@ from service.strategy_runtime import get_strategy_adapter
 from tenacity import retry, wait_fixed
 from tortoise.exceptions import BaseORMException
 
-logging = helper.LoggerFactory.get_logger("logs/signal.log", "asap")
+logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal")
 
 
 @dataclass(frozen=True)

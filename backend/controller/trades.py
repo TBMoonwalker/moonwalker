@@ -17,7 +17,7 @@ from service.order_requests import normalize_order_symbol
 from service.runtime_services import runtime_service_proxy
 from service.websocket_fanout import WebSocketFanout
 
-logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_trades")
+logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller")
 trades = runtime_service_proxy("trades")
 delisting_protection = runtime_service_proxy("delisting_protection")
 trading_controls = runtime_service_proxy("trading_controls")

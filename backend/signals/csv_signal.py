@@ -13,7 +13,7 @@ from service.csv_signal_import import CSVSignalImportService
 from service.data import Data
 from service.signal_runtime import parse_signal_settings
 
-logging = helper.LoggerFactory.get_logger("logs/signal.log", "csv_signal")
+logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal")
 
 
 class SignalPlugin:

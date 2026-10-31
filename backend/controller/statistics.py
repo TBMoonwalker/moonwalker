@@ -18,9 +18,7 @@ from service.runtime_services import runtime_service_proxy
 from service.statistic import PROFIT_TIMELINE_HORIZON
 from service.websocket_fanout import WebSocketFanout
 
-logging = helper.LoggerFactory.get_logger(
-    "logs/controller.log", "controller_statistics"
-)
+logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller")
 PROFIT_STREAM_INTERVAL_SECONDS = 5
 STATISTICS_BALANCE_CACHE_TTL_SECONDS = float(PROFIT_STREAM_INTERVAL_SECONDS)
 

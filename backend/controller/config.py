@@ -33,7 +33,7 @@ from service.trade_lifecycle_config import TradeModeConfigError
 from service.trading_controls import GLOBAL_TRADING_PAUSED_KEY
 from service.trading_maintenance import trading_maintenance_barrier
 
-logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
+logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 
 CSV_SIGNAL_NAME = "csv_signal"
 LIVE_ACTIVATION_KEY = "dry_run"

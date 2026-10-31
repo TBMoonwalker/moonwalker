@@ -9,7 +9,7 @@ from typing import Any, Iterable
 import helper
 from service.strategy_catalog import BUILTIN_STRATEGY_BY_SLUG
 
-logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_capability")
+logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 
 # Strategy -> indicator methods required by its implementation.
 REQUIRED_INDICATOR_METHODS: dict[str, tuple[str, ...]] = {

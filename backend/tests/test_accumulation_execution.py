@@ -5182,7 +5182,7 @@ async def test_runtime_failure_logs_are_sanitized_coalesced_and_recover(caplog):
     adapter.account_scope = AsyncMock(return_value="account")
     runtime = AccumulationRuntime(adapter)
     activation = SimpleNamespace(id="activation", symbol="BTC/USDC")
-    with caplog.at_level(std_logging.INFO, logger="accumulation_runtime"):
+    with caplog.at_level(std_logging.INFO, logger="accumulation"):
         error = ccxt.NetworkError("secret-key=credential / signed request payload")
         runtime.lifecycle.rebase_enabled = AsyncMock(
             side_effect=[error, error, None, error]
@@ -5191,9 +5191,11 @@ async def test_runtime_failure_logs_are_sanitized_coalesced_and_recover(caplog):
         assert not await runtime._rebase(activation)
         assert await runtime._rebase(activation)
         assert not await runtime._rebase(activation)
-    assert [
-        r.levelname for r in caplog.records if r.name == "accumulation_runtime"
-    ] == ["WARNING", "INFO", "WARNING"]
+    assert [r.levelname for r in caplog.records if r.name == "accumulation"] == [
+        "WARNING",
+        "INFO",
+        "WARNING",
+    ]
     assert "NetworkError" in caplog.text
     assert "credential" not in caplog.text
     assert "secret-key" not in caplog.text
@@ -5217,14 +5219,14 @@ async def test_runtime_failure_log_names_state_error_invariant(caplog):
     adapter.account_scope = AsyncMock(return_value="account")
     runtime = AccumulationRuntime(adapter)
     message = "Pinned strategy identity does not match."
-    with caplog.at_level(std_logging.INFO, logger="accumulation_runtime"):
+    with caplog.at_level(std_logging.INFO, logger="accumulation"):
         runtime._failed(
             "BTC/USDC", "evaluation", "WAIT_DATA", AccumulationStateError(message)
         )
         runtime._failed(
             "BTC/USDC", "evaluation", "WAIT_DATA", AccumulationStateError(message)
         )
-    records = [r for r in caplog.records if r.name == "accumulation_runtime"]
+    records = [r for r in caplog.records if r.name == "accumulation"]
     assert [r.levelname for r in records] == ["WARNING"]
     assert "AccumulationStateError" in caplog.text
     assert "Pinned strategy identity does not match." in caplog.text
@@ -5250,14 +5252,14 @@ async def test_runtime_failure_log_keeps_exchange_payloads_redacted(caplog):
     adapter = Mock()
     adapter.account_scope = AsyncMock(return_value="account")
     runtime = AccumulationRuntime(adapter)
-    with caplog.at_level(std_logging.INFO, logger="accumulation_runtime"):
+    with caplog.at_level(std_logging.INFO, logger="accumulation"):
         runtime._failed(
             "BTC/USDC",
             "evaluation",
             "WAIT_DATA",
             ccxt.NetworkError("api_key=SECRET nonce=42 signed request payload"),
         )
-    records = [r for r in caplog.records if r.name == "accumulation_runtime"]
+    records = [r for r in caplog.records if r.name == "accumulation"]
     assert [r.levelname for r in records] == ["WARNING"]
     assert "NetworkError" in caplog.text
     assert "api_key=SECRET" not in caplog.text

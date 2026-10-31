@@ -23,7 +23,7 @@ from service.trade_math import (
 )
 from tortoise.transactions import in_transaction
 
-logging = helper.LoggerFactory.get_logger("logs/signal.log", "csv_signal_import")
+logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal")
 
 
 class CSVSignalImportService:

@@ -12,7 +12,7 @@ from service.accumulation.state import AccumulationConflictError
 from service.backtest import Backtest, BacktestValidationError
 from service.config import Config
 
-logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_backtest")
+logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller")
 
 
 @post("/backtest/run")

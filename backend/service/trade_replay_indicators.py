@@ -22,7 +22,7 @@ from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger(
     "logs/trades.log",
-    "trade_replay_indicators",
+    "trades",
 )
 
 NORMALIZED_TIMESTAMP_SQL = build_normalized_text_timestamp_sql()

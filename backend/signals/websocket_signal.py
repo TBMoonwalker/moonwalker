@@ -33,7 +33,7 @@ from tortoise.exceptions import BaseORMException
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
-logging = helper.LoggerFactory.get_logger("logs/signal.log", "websocket_signal")
+logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal")
 
 
 @dataclass(frozen=True)

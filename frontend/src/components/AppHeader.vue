@@ -2,7 +2,6 @@
 import { computed, h, ref, type Component } from 'vue'
 import axios from 'axios'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { storeToRefs } from 'pinia'
 import type { MenuOption } from 'naive-ui/es/menu'
 import { NIcon } from 'naive-ui/es/icon'
 import { useMessage } from 'naive-ui/es/message'
@@ -17,7 +16,7 @@ import {
 } from '@vicons/ionicons5'
 import logoImage from '../assets/logo.png'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
-import { useWebSocketDataStore } from '../stores/websocket'
+import { useConnectionSync } from '../composables/useConnectionSync'
 import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import ThemeToggle from './ThemeToggle.vue'
@@ -28,10 +27,7 @@ const message = useMessage()
 const mobileMenuOpen = ref(false)
 const tradingPauseLoading = ref(false)
 const configSnapshotStore = useSharedConfigSnapshot()
-const statisticsStore = useWebSocketDataStore('statistics')
-const tradesStore = useWebSocketDataStore('openTrades')
-const { status: statisticsStatus } = storeToRefs(statisticsStore)
-const { status: tradesStatus } = storeToRefs(tradesStore)
+const { connection } = useConnectionSync()
 
 const titles: Record<string, string> = {
   trades: 'Overview',
@@ -59,10 +55,6 @@ const tradingMode = computed(() => {
     ? 'Live trading'
     : 'Dry run'
 })
-const streamsConnected = computed(
-  () => statisticsStatus.value === 'OPEN' && tradesStatus.value === 'OPEN' &&
-    statisticsStore.fresh && tradesStore.fresh,
-)
 const tradingPaused = computed(() => configSnapshotStore.snapshot.value?.trading_paused === true)
 const pauseActionLabel = computed(() => tradingPaused.value ? 'Resume Moonwalker' : 'Pause Moonwalker')
 
@@ -193,12 +185,23 @@ function navigate(key: string | number): void {
         <span class="mode-badge" :class="{ 'is-live': tradingMode === 'Live trading' }">
           {{ tradingMode }}
         </span>
-        <span class="connection-badge">
-          <span :class="['connection-dot', { 'is-connected': streamsConnected }]" />
-          {{ streamsConnected ? 'Connected' : 'Connecting' }}
+        <span
+          class="connection-badge"
+          :class="{ 'is-connected-badge': connection.connected }"
+          role="status"
+          aria-live="polite"
+        >
+          <n-spin v-if="!connection.connected" size="small" class="connection-sync-spinner" aria-hidden="true" />
+          <span v-else class="connection-dot is-connected" aria-hidden="true" />
+          {{ connection.label }}
         </span>
         <ThemeToggle />
       </div>
+      <div
+        class="sync-bar"
+        :class="{ 'is-active': !connection.connected }"
+        aria-hidden="true"
+      ></div>
     </header>
   </div>
 </template>
@@ -269,6 +272,7 @@ function navigate(key: string | number): void {
 }
 .side-menu :deep(.n-menu-item-content-header) { font-size: 13px; font-weight: 600; }
 .app-topbar {
+  position: relative;
   grid-column: 2;
   grid-row: 1;
   display: flex;
@@ -279,6 +283,55 @@ function navigate(key: string | number): void {
   padding: 0 34px;
   border-bottom: 1px solid var(--mw-color-border);
   background: var(--mw-color-surface-base);
+}
+.sync-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 3px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0;
+  transition: opacity 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.sync-bar.is-active {
+  opacity: 1;
+}
+.sync-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 35%;
+  border-radius: 999px;
+  background: var(--mw-color-warning);
+  transform: translateX(-140%);
+  will-change: transform;
+}
+.sync-bar.is-active::before {
+  animation: sync-bar-indeterminate 900ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes sync-bar-indeterminate {
+  0% {
+    transform: translateX(-140%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+.connection-sync-spinner {
+  vertical-align: middle;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sync-bar.is-active::before {
+    animation: none;
+    width: 100%;
+    transform: none;
+    opacity: 0.5;
+  }
 }
 .breadcrumb, .topbar-actions { display: flex; align-items: center; gap: 12px; }
 .breadcrumb { color: var(--mw-color-text-muted); font-size: 12px; white-space: nowrap; }

@@ -26,7 +26,7 @@ from service.strategy_catalog import (
 from service.strategy_ir import validate_strategy_ir_document
 from tortoise.transactions import in_transaction
 
-logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_builder")
+logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_]{1,94}$")
 _STRATEGY_PROMOTION_LOCK = asyncio.Lock()

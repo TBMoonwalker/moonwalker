@@ -11,8 +11,6 @@ import helper
 import model
 from service.ai_trust import build_analytics_payload
 
-logging = helper.LoggerFactory.get_logger("logs/analytics.log", "analytics")
-
 # Only touch recent data to keep queries fast on large datasets.
 ANALYTICS_LOOKBACK_YEARS = 2
 

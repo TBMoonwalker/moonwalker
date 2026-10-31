@@ -2,13 +2,13 @@
 
 import asyncio
 import json
-import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from dataclasses import asdict
 from typing import Any
 
+import helper
 from controller.responses import json_response
 from litestar.connection import Request
 from litestar.exceptions import SerializationException, WebSocketDisconnect
@@ -27,6 +27,8 @@ from service.accumulation.status import (
 from service.runtime_services import get_active_accumulation_runtime
 from tortoise import Tortoise
 from tortoise.exceptions import OperationalError
+
+logging = helper.LoggerFactory.get_logger("logs/accumulation.log", "accumulation")
 
 
 def _runtime(*, repair: bool = False) -> AccumulationRuntime | None:
@@ -253,9 +255,7 @@ async def stream_performance() -> AsyncGenerator[str, None]:
                 failure_logged = False
             except Exception:  # noqa: BLE001 - isolate transient stream failures.
                 if not failure_logged:
-                    logging.getLogger(__name__).exception(
-                        "Accumulation performance stream failed"
-                    )
+                    logging.exception("Accumulation performance stream failed")
                     failure_logged = True
                 yield json.dumps({"type": "unavailable"})
             await asyncio.sleep(2)

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 from service.data_timeframes import timeframe_bucket_origin_milliseconds
@@ -62,6 +64,76 @@ def build_archived_ohlcv_payload(
     return build_resampled_ohlcv_payload(source, timerange, offset)
 
 
+def _fresh_iana_zone(tzinfo: Any) -> ZoneInfo | None:
+    """Resolve a binary TZif tzinfo to a fresh IANA-backed ``ZoneInfo``.
+
+    ``dateutil``'s ``gettz`` and ``pytz`` hand back tzinfo objects whose
+    transition tables are baked into the OS-shipped ``TZif`` binary, which
+    stops at ~2037 on most systems. For any instant past that boundary the
+    stale offset is reused, producing off-by-an-hour DST answers. The
+    stdlib ``zoneinfo`` database resolves the same IANA name through a
+    separately-updated data source, which has current far-future rules.
+    """
+    key = getattr(tzinfo, "key", None)
+    if key:
+        try:
+            return ZoneInfo(str(key))
+        except (ValueError, ZoneInfoNotFoundError):
+            return None
+    path = getattr(tzinfo, "_filename", None)
+    if path is None:
+        return None
+    path_str = str(path)
+    match = re.search(r"zoneinfo/", path_str, re.IGNORECASE)
+    if match is not None:
+        name = path_str[match.end() :].strip(os.sep)
+        try:
+            return ZoneInfo(name)
+        except (ValueError, ZoneInfoNotFoundError):
+            return None
+    return None
+
+
+def _reanchor_stale_tz(value: Any) -> Any:
+    """Re-resolve a tz-aware value through a fresh IANA zone when available.
+
+    No-op for naive timestamps and for any tzinfo we cannot resolve to a
+    ``ZoneInfo``. Wall-clock and ``fold`` are preserved (Python's
+    ``datetime.replace`` keeps both); only the ``tzinfo`` changes.
+    """
+    tzinfo = getattr(value, "tzinfo", None)
+    if tzinfo is None:
+        return value
+    zone = _fresh_iana_zone(tzinfo)
+    if zone is None:
+        return value
+    try:
+        return value.replace(tzinfo=zone)
+    except (TypeError, ValueError):
+        return value
+
+
+def _column_should_reanchor(series: pd.Series) -> bool:
+    """Whether to re-anchor far-future tz-aware timestamps in this column.
+
+    Numeric columns keep the original pandas unit inference untouched;
+    tz-aware ``datetime64[<tz>]`` dtypes are re-anchored as a whole, and
+    object-dtype columns are scanned lazily so a single tz-aware element
+    among naive ones still triggers the re-anchoring pass.
+    """
+    dtype = series.dtype
+    unit_kind = dtype.kind
+    if unit_kind in ("i", "u", "f", "b"):
+        return False
+    if unit_kind == "M" and getattr(dtype, "tz", None) is not None:
+        return True
+    # object dtype: only scan until we hit the first aware element.
+    for value in series:
+        if getattr(value, "tzinfo", None) is not None:
+            return True
+    return False
+
+
 def timestamp_to_unix_seconds(timestamp: Any) -> float | None:
     """Convert arbitrary timestamp-like values to UTC unix seconds."""
     if pd.isna(timestamp):
@@ -77,6 +149,12 @@ def serialize_ohlcv_dataframe(df_source: pd.DataFrame, offset: float) -> str:
     df = df_source.copy()
     offset_minutes = int(offset)
     offset_seconds = offset_minutes * 60
+    # dateutil/pytz tzinfos carry a stale binary TZif whose transitions
+    # stop at ~2037; re-anchor tz-aware inputs through the IANA zoneinfo
+    # database so far-future instants resolve with current rules.
+    column = df.get("timestamp")
+    if column is not None and _column_should_reanchor(column):
+        df["timestamp"] = df["timestamp"].map(_reanchor_stale_tz)
     timestamp_series = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
     df["time"] = timestamp_series.map(timestamp_to_unix_seconds)
     df.dropna(subset=["time"], inplace=True)

@@ -3,7 +3,6 @@
 import re
 from typing import Any
 
-import helper
 from controller.responses import json_response
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
@@ -12,7 +11,6 @@ from litestar.params import FromPath
 from service.config import Config
 from service.runtime_services import runtime_service_proxy
 
-logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_orders")
 orders = runtime_service_proxy("orders")
 OPERATION_ID_HEADER = "x-moonwalker-operation-id"
 OPERATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
