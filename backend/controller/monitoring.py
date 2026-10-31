@@ -3,7 +3,6 @@
 import asyncio
 from typing import Any
 
-import helper
 from controller.responses import json_response
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
@@ -15,9 +14,6 @@ from service.config_redaction import merge_redacted_config_overrides
 from service.monitoring import MonitoringService
 from service.runtime_services import runtime_service_proxy
 
-logging = helper.LoggerFactory.get_logger(
-    "logs/controller.log", "controller_monitoring"
-)
 log_viewer_service = runtime_service_proxy("log_viewer")
 
 

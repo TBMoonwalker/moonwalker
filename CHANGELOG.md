@@ -2,6 +2,37 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.5.1.0] - 2026-10-31
+
+### Added
+- Show a connection sync indicator in the dashboard header. A small badge next
+  to the app title tells you whether the dashboard is live, reconnecting, or
+  showing stale data; a one-line status bar underneath makes the same state
+  visible on narrow screens. When the WebSocket drops, the indicator warns you
+  before you act on stale trades.
+
+### Fixed
+- Correct the OHLCV timestamp serializer for far-future tz-aware values. The
+  serializer was reusing the binary `TZif` shipped with the OS, whose
+  transition tables stop at ~2037 and fall back to the last known offset for
+  any later instant. The fix re-resolves tz-aware timestamps through the stdlib
+  `zoneinfo` database, so a 12:00 Vienna wall-clock in 2040 (CEST, +02:00) now
+  serializes to 10:00 UTC instead of 11:00.
+
+### Changed
+- Trim the logging infrastructure. Six module-level loggers that were imported
+  but never used have been removed; six module groups that each opened their
+  own `RotatingFileHandler` on the same file in the same process are now
+  unified to a single handler per domain, so log records stop interleaving and
+  file rotation stays in lockstep.
+- Fold the accumulation domain's logging into one file. Execution, runtime,
+  notification, and performance-stream log records all write to
+  `logs/accumulation.log` instead of three scattered files. Operators now
+  watch a single stream for accumulation activity.
+- Route accumulation notification and performance-stream log records through
+  the project `LoggerFactory` instead of the bare `logging` module, so the
+  failures land in their domain file instead of leaking into `run.log`.
+
 ## [5.5.0.2] - 2026-10-31
 
 ### Fixed

@@ -3,7 +3,7 @@
 import helper
 from service.background_work_queue import BoundedWorkQueue
 
-logging = helper.LoggerFactory.get_logger("logs/ai_trust.log", "ai_work_queue")
+logging = helper.LoggerFactory.get_logger("logs/ai_trust.log", "ai_trust")
 
 
 class AiWorkQueue(BoundedWorkQueue):

@@ -49,9 +49,7 @@ from service.trading_controls import is_global_trading_paused
 from service.trading_maintenance import trading_maintenance_barrier
 from tortoise.transactions import in_transaction
 
-logging = helper.LoggerFactory.get_logger(
-    "logs/accumulation_execution.log", "accumulation_execution"
-)
+logging = helper.LoggerFactory.get_logger("logs/accumulation.log", "accumulation")
 
 
 @dataclass(frozen=True)

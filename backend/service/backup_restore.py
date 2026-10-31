@@ -42,7 +42,7 @@ from tortoise import fields
 from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.transactions import in_transaction
 
-logging = helper.LoggerFactory.get_logger("logs/config.log", "backup_restore")
+logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 
 BACKUP_SCHEMA_VERSION = 3
 RECOVERY_MANIFEST_SCHEMA_VERSION = 1

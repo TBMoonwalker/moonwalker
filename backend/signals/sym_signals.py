@@ -31,7 +31,7 @@ from socketio.exceptions import ConnectionError as SocketConnectionError
 from socketio.exceptions import DisconnectedError, TimeoutError
 from tortoise.exceptions import BaseORMException
 
-logging = helper.LoggerFactory.get_logger("logs/signal.log", "sym_signals")
+logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal")
 
 
 class SignalPlugin:

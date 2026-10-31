@@ -11,7 +11,12 @@ from service.exchange_balance_manager import ExchangeBalanceManager
 from service.watcher import Watcher
 
 
-def test_single_owner_disconnect_and_observer_failure_are_safe(caplog):
+def test_single_owner_disconnect_and_observer_failure_are_safe(caplog, monkeypatch):
+    import logging
+
+    monkeypatch.setattr(logging.getLogger("accumulation"), "propagate", True)
+    caplog.set_level(logging.INFO, logger="accumulation")
+
     notifications = AccumulationInputNotifications()
     first, second = object(), object()
     listener = Mock()

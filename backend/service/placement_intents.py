@@ -11,7 +11,6 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
-import helper
 import model
 from service.database import run_sqlite_write_with_retry
 from service.exchange_capabilities import (
@@ -19,11 +18,6 @@ from service.exchange_capabilities import (
     exchange_execution_scope,
 )
 from tortoise.exceptions import IntegrityError
-
-logging = helper.LoggerFactory.get_logger(
-    "logs/placement_intents.log",
-    "placement_intents",
-)
 
 
 class PlacementIntentState(StrEnum):

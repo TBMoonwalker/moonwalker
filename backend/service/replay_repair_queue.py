@@ -5,7 +5,7 @@ from service.background_work_queue import BoundedWorkQueue
 
 logging = helper.LoggerFactory.get_logger(
     "logs/order_persistence.log",
-    "replay_repair_queue",
+    "order_persistence",
 )
 
 replay_repair_queue = BoundedWorkQueue(

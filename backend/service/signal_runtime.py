@@ -16,7 +16,7 @@ from service.statistic import Statistic
 from service.trading_contracts import BuyIntent
 from service.trading_controls import is_global_trading_paused
 
-logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal_runtime")
+logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal")
 
 _PENDING_ADMISSION_SYMBOLS: set[str] = set()
 _PENDING_ADMISSION_LOCK = asyncio.Lock()

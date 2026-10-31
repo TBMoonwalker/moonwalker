@@ -2,7 +2,6 @@
 
 from typing import Any
 
-import helper
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
 from litestar.handlers import get, post
@@ -12,8 +11,6 @@ from service.config_redaction import merge_redacted_config_overrides
 from service.runtime_services import runtime_service_proxy
 
 data = runtime_service_proxy("data")
-
-logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_data")
 
 
 @get(path="/data/ohlcv/replay/{deal_id:str}/{timerange:str}/{offset:str}")

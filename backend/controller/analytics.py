@@ -2,13 +2,10 @@
 
 from typing import Any
 
-import helper
 from litestar.exceptions import ValidationException
 from litestar.handlers import get
 from litestar.params import FromQuery
 from service.runtime_services import runtime_service_proxy
-
-logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_analytics")
 
 analytics = runtime_service_proxy("analytics")
 

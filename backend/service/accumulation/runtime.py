@@ -51,9 +51,7 @@ from service.strategy_runtime import load_accumulation_strategy_version
 from service.trading_controls import is_global_trading_paused
 from service.trading_maintenance import trading_maintenance_barrier
 
-logging = helper.LoggerFactory.get_logger(
-    "logs/accumulation_runtime.log", "accumulation_runtime"
-)
+logging = helper.LoggerFactory.get_logger("logs/accumulation.log", "accumulation")
 
 # Source-owned capability: editable config and restored rows cannot override it.
 ACCUMULATION_RUNTIME_AVAILABLE = True

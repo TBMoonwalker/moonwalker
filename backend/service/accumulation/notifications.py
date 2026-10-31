@@ -5,10 +5,11 @@ Publishers and the owner run on the application's event loop. A disconnected
 owner is a no-op; the recovery heartbeat remains authoritative.
 """
 
-import logging
 from collections.abc import Callable
 
-logger = logging.getLogger(__name__)
+import helper
+
+logging = helper.LoggerFactory.get_logger("logs/accumulation.log", "accumulation")
 
 
 class AccumulationInputNotifications:
@@ -40,7 +41,7 @@ class AccumulationInputNotifications:
             try:
                 self._listener(symbol)
             except Exception:  # noqa: BLE001 - observers cannot fail committed accounting.
-                logger.exception("Accumulation input notification failed")
+                logging.exception("Accumulation input notification failed")
 
 
 accumulation_input_notifications = AccumulationInputNotifications()
