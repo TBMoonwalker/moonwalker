@@ -14,6 +14,15 @@ All notable changes to Moonwalker are documented in this file.
 - Name the free, owned and deficit magnitudes when an accumulation owned-base check
   fails, so a parked symbol reads as a self-diagnosing symptom instead of an opaque
   error type.
+- Tolerate a sub-lot rounding difference between the exchange-reported free balance
+  and the DB-stored accumulated quantity in the owned-base check. Bybit and Bybit-EU
+  report a spot balance at a fixed decimal precision while the accumulation ledger
+  keeps a higher-precision total from the fill reports, so a fraction-of-a-quantum
+  shortfall (for example a half-satoshi, a few hundredths of one percent of what is
+  held) is treated as a reporting artifact instead of parking the step as encumbered.
+  A genuine encumbrance — an order hold, a pending fill, an external transfer, or any
+  shortfall that is not sub-lot — still trips the guard, because the tolerance is capped
+  at the smaller of one trading quantum and one percent of the owned quantity.
 
 ## [5.5.0.0] - 2026-10-30
 
