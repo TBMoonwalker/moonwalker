@@ -78,6 +78,9 @@ class Client:
             }
         }
         self.balance = {"free": {"USDC": "1000", "BTC": "0"}, "used": {"USDC": "0"}}
+        self.unified_balance = None
+        self.unified_fetch_error = None
+        self.balance_calls = []
         self.open_orders = []
         self.response = None
         self.failure = None
@@ -102,7 +105,16 @@ class Client:
             self.precisionMode,
         )
 
-    async def fetch_balance(self):
+    async def fetch_balance(self, params=None):
+        type_name = (params or {}).get("type")
+        if type_name == "unified":
+            self.balance_calls.append(("unified", params))
+            if self.unified_fetch_error is not None:
+                raise self.unified_fetch_error
+            if self.unified_balance is not None:
+                return copy.deepcopy(self.unified_balance)
+            return None
+        self.balance_calls.append(("default", params))
         return copy.deepcopy(self.balance)
 
     async def fetch_open_orders(self, symbol):
@@ -379,6 +391,98 @@ async def test_owned_base_shortfall_blocks_and_surplus_is_not_adopted(env):
     ).funding.free_quote == "1000"
     await holding.refresh_from_db()
     assert holding.accumulation_net_quantity == "2"
+
+
+@pytest.mark.asyncio
+async def test_bybit_unified_wallet_adopts_base_the_default_read_misses(env):
+    """Bybit spot funds can sit in a Unified Trading Account the auto-detected
+    default read returns empty for. Admission must reconcile to that wallet so
+    the owned-base guard sees the base the account trades with, releasing a
+    WAIT_REBASE park caused by the wrong wallet being read."""
+    adapter, client, _, config, *_ = env
+    client.id = "bybiteu"
+    activation, _ = await setup_activation(env)
+    holding = await model.OpenTrades.create(
+        symbol="BTC/USDC",
+        lifecycle_mode="accumulation",
+        accumulation_net_quantity="2",
+        accumulation_remaining_cost="100",
+    )
+    activation.holding_id = holding.id
+    await activation.save()
+    # The default (spot) read sees neither BTC nor a usable quote; UTA holds both.
+    client.balance = {"free": {"USDC": "0"}, "used": {"USDC": "0"}}
+    client.unified_balance = {
+        "free": {"USDC": "1000", "BTC": "2"},
+        "used": {"USDC": "0"},
+    }
+    inputs = await adapter.read_inputs(activation.symbol, config)
+    assert inputs.funding.free_quote == "1000"
+    assert any(kind == "unified" for kind, _ in client.balance_calls)
+
+
+@pytest.mark.asyncio
+async def test_bybit_unified_wallet_error_falls_back_to_default_read(env):
+    """A unified read that fails (a classic account with no UTA, or a transient
+    network blip) must not block admission: reconciliation falls back to the
+    default read, leaving non-UTA accounts and every other exchange unchanged."""
+    adapter, client, _, config, *_ = env
+    client.id = "bybit"
+    activation, _ = await setup_activation(env)
+    holding = await model.OpenTrades.create(
+        symbol="BTC/USDC",
+        lifecycle_mode="accumulation",
+        accumulation_net_quantity="2",
+        accumulation_remaining_cost="100",
+    )
+    activation.holding_id = holding.id
+    await activation.save()
+    client.balance = {"free": {"USDC": "1000", "BTC": "2"}, "used": {"USDC": "0"}}
+    client.unified_fetch_error = ccxt.NetworkError("no unified trading account")
+    inputs = await adapter.read_inputs(activation.symbol, config)
+    assert inputs.funding.free_quote == "1000"
+    assert any(kind == "unified" for kind, _ in client.balance_calls)
+    await holding.refresh_from_db()
+    assert holding.accumulation_net_quantity == "2"
+
+
+@pytest.mark.asyncio
+async def test_unified_reconciliation_skipped_for_non_bybit_venue(env):
+    """Only venues with a unified trading wallet are reconciled; any other
+    exchange uses the default read and never requests a unified wallet."""
+    adapter, client, _, config, *_ = env
+    # client.id stays "binance"; if a unified read were ever requested it would
+    # raise, so the assertion proves the reconciliation path was skipped.
+    client.unified_fetch_error = ccxt.NetworkError("unified wallets are bybit-only")
+    client.unified_balance = {"free": {"USDC": "1000", "BTC": "2"}}
+    await adapter.read_inputs("BTC/USDC", config)
+    assert not any(kind == "unified" for kind, _ in client.balance_calls)
+
+
+@pytest.mark.asyncio
+async def test_owned_base_shortfall_names_magnitudes(env):
+    """The guard's failure names the non-secret magnitude (free, owned,
+    deficit) so a parked symbol reads as a self-diagnosing symptom: a tiny
+    deficit points at fee dust, a large one at an encumbrance or external
+    move, instead of an opaque invariant name."""
+    adapter, client, _, config, *_ = env
+    client.id = "bybit"
+    activation, _ = await setup_activation(env)
+    holding = await model.OpenTrades.create(
+        symbol="BTC/USDC",
+        lifecycle_mode="accumulation",
+        accumulation_net_quantity="2",
+        accumulation_remaining_cost="100",
+    )
+    activation.holding_id = holding.id
+    await activation.save()
+    client.balance = {"free": {"USDC": "1000", "BTC": "1"}, "used": {"USDC": "0"}}
+    with pytest.raises(AccumulationStateError, match="missing or encumbered") as caught:
+        await adapter.read_inputs(activation.symbol, config)
+    message = str(caught.value)
+    assert "free=1" in message
+    assert "owned=2" in message
+    assert "deficit=1" in message
 
 
 @pytest.mark.asyncio

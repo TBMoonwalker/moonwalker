@@ -48,6 +48,11 @@ from service.exchange_capabilities import (
 from service.exchange_risk import get_min_notional_for_market
 from service.strategy_runtime import load_accumulation_strategy_version
 
+# Exchanges whose spot funds live in a Unified Trading Account that the
+# auto-detected balance read can miss, so admission reconciles against that
+# wallet before guarding owned base.
+_UNIFIED_WALLET_EXCHANGES = frozenset({"bybit", "bybiteu"})
+
 
 def _balance_observed_at(
     client: Any, balance: dict[str, Any], *, started_ms: int, now_ms: int
@@ -297,6 +302,44 @@ class AccumulationExchangeAdapter:
             raise AccumulationStateError("Symbol or configured quote currency changed.")
         return client
 
+    async def _reconcile_spot_wallet(
+        self, client: Any, symbol: str, balance: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Adopt the wallet that actually holds the trading base.
+
+        Bybit and Bybit-EU keep spot funds in a Unified Trading Account that the
+        auto-detected ``fetchBalance`` read can miss. Read that wallet and adopt
+        it when it shows strictly more free base than the default read, so the
+        owned-base and funding checks reconcile against the account the bot
+        trades from. A classic account never sees a larger unified read, so it
+        keeps the default; any unified-read error, or a missing unified wallet,
+        falls back to the default read, leaving every other exchange unchanged.
+        """
+        if getattr(client, "id", None) not in _UNIFIED_WALLET_EXCHANGES:
+            return balance
+
+        base = symbol.split("/")[0]
+
+        def free_base(read: dict[str, Any]) -> Decimal:
+            value = read.get("free", {}).get(base)
+            if value is None:
+                return Decimal(0)
+            try:
+                return Decimal(decimal_evidence(value))
+            except AccumulationStateError:
+                return Decimal(0)
+
+        default_free = free_base(balance)
+        try:
+            unified = await client.fetch_balance({"type": "unified"})
+        except (ccxt.BaseError, OSError, RuntimeError):
+            return balance
+        if not isinstance(unified, dict) or not isinstance(unified.get("free"), dict):
+            return balance
+        if free_base(unified) > default_free:
+            return unified
+        return balance
+
     async def _owned_base(
         self, symbol: str, free: Any, imported_quantity: str = "0"
     ) -> None:
@@ -322,8 +365,15 @@ class AccumulationExchangeAdapter:
         with localcontext() as context:
             context.prec = 512
             quantity = sum(quantities, Decimal(0))
-        if quantity > 0 and Decimal(decimal_evidence(free)) < quantity:
-            raise AccumulationStateError("Owned base is missing or encumbered.")
+        if quantity <= 0:
+            return
+        free_decimal = Decimal(decimal_evidence(free))
+        if free_decimal >= quantity:
+            return
+        raise AccumulationStateError(
+            "Owned base is missing or encumbered: "
+            f"free={free_decimal} owned={quantity} deficit={quantity - free_decimal}."
+        )
 
     async def account_inventory(
         self, symbol: str, config: dict[str, Any]
@@ -338,6 +388,7 @@ class AccumulationExchangeAdapter:
                 balance.get("free"), dict
             ):
                 raise AccumulationStateError("Fresh wallet evidence is unavailable.")
+            balance = await self._reconcile_spot_wallet(client, symbol, balance)
             observed = _balance_observed_at(
                 client, balance, started_ms=started, now_ms=self.clock_ms()
             )
@@ -459,6 +510,7 @@ class AccumulationExchangeAdapter:
                 balance.get("free"), dict
             ):
                 raise AccumulationStateError("Fresh free balance is unavailable.")
+            balance = await self._reconcile_spot_wallet(client, symbol, balance)
             base, quote = symbol.split("/")
             # Missing assets are unknown; a verified zero must be explicitly present.
             free_quote = decimal_evidence(balance["free"].get(quote))
@@ -518,6 +570,7 @@ class AccumulationExchangeAdapter:
                 balance.get("free"), dict
             ):
                 raise AccumulationStateError("Fresh wallet evidence is unavailable.")
+            balance = await self._reconcile_spot_wallet(client, symbol, balance)
             balance_time = _balance_observed_at(
                 client, balance, started_ms=started, now_ms=self.clock_ms()
             )

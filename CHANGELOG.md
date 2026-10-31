@@ -2,6 +2,19 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.5.0.1] - 2026-10-31
+
+### Fixed
+- Resolve an accumulation rebase park on Bybit and Bybit-EU where the owned-base
+  check read the wrong wallet: the auto-detected balance read can return the spot
+  wallet while your base sits in the Unified Trading Account, so a step parked as
+  "owned base missing or encumbered." The check now reconciles against the unified
+  wallet when it holds the base, and falls back to the previous read for every
+  other account.
+- Name the free, owned and deficit magnitudes when an accumulation owned-base check
+  fails, so a parked symbol reads as a self-diagnosing symptom instead of an opaque
+  error type.
+
 ## [5.5.0.0] - 2026-10-30
 
 ### Added
