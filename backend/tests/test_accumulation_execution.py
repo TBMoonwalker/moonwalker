@@ -486,6 +486,66 @@ async def test_owned_base_shortfall_names_magnitudes(env):
 
 
 @pytest.mark.asyncio
+async def test_owned_base_tolerance_for_exchange_report_precision(env):
+    """A sub-satoshi deficit between the DB-stored owned quantity and the
+    exchange-reported free balance must not park an accumulation step.
+
+    Bybit (and similar venues) report spot balances at a fixed decimal
+    precision (BTC: 8 dp) while the DB stores the exact accumulated net
+    quantity to higher precision (9 dp from fill reports). The guard must
+    compare at a common, precision-aware threshold so a 5e-9 BTC rounding
+    artifact does not trip WAIT_REBASE."""
+    adapter, client, _, config, *_ = env
+    client.id = "bybiteu"
+    # Bybit spot reports BTC at 6 dp; the DB stores the exact 9-dp
+    # accumulated total from fill reports.
+    client.markets["BTC/USDC"]["precision"]["amount"] = 0.000001
+    activation, _ = await setup_activation(env)
+    holding = await model.OpenTrades.create(
+        symbol="BTC/USDC",
+        lifecycle_mode="accumulation",
+        accumulation_net_quantity="0.017112955",
+        accumulation_remaining_cost="100",
+    )
+    activation.holding_id = holding.id
+    await activation.save()
+    client.balance = {
+        "free": {"USDC": "1000", "BTC": "0.01711295"},
+        "used": {"USDC": "0"},
+    }
+    # Owned 0.017112955 > free 0.01711295 by 5e-9 BTC — a display/precision
+    # artifact well within one bybit trading quantum (1e-6 BTC), not a real
+    # encumbrance.
+    inputs = await adapter.read_inputs(activation.symbol, config)
+    assert inputs.funding.free_quote == "1000"
+
+
+@pytest.mark.asyncio
+async def test_owned_base_encumbrance_still_blocks_when_above_one_lot(env):
+    """A deficit larger than one trading quantum must still trip the guard.
+
+    The sub-lot tolerance must not mask a real encumbrance: a 2-lot deficit
+    is a genuine shortfall, not a precision artifact."""
+    adapter, client, _, config, *_ = env
+    client.id = "bybiteu"
+    client.markets["BTC/USDC"]["precision"]["amount"] = 0.000001
+    activation, _ = await setup_activation(env)
+    holding = await model.OpenTrades.create(
+        symbol="BTC/USDC",
+        lifecycle_mode="accumulation",
+        accumulation_net_quantity="2",
+        accumulation_remaining_cost="100",
+    )
+    activation.holding_id = holding.id
+    await activation.save()
+    # Owned 2 BTC but only 1 BTC free — a 1 BTC deficit is far more than one
+    # quantum (1e-6), so the guard must still fire.
+    client.balance = {"free": {"USDC": "1000", "BTC": "1"}, "used": {"USDC": "0"}}
+    with pytest.raises(AccumulationStateError, match="missing or encumbered"):
+        await adapter.read_inputs(activation.symbol, config)
+
+
+@pytest.mark.asyncio
 async def test_single_submission_accounts_exact_fill_and_duplicate_call_does_not_buy(
     env,
 ):

@@ -12,7 +12,7 @@ import json
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from decimal import Decimal, localcontext
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any
 
 import ccxt.async_support as ccxt
@@ -341,9 +341,22 @@ class AccumulationExchangeAdapter:
         return balance
 
     async def _owned_base(
-        self, symbol: str, free: Any, imported_quantity: str = "0"
+        self,
+        symbol: str,
+        free: Any,
+        imported_quantity: str = "0",
+        client: Any = None,
     ) -> None:
-        """Surplus wallet coins stay unmanaged; encumbered or missing base blocks."""
+        """Surplus wallet coins stay unmanaged; encumbered or missing base blocks.
+
+        A deficit at or below one trading quantum (the market's amount
+        precision) is treated as an exchange-reporting precision artifact and
+        does not trip the guard, so accumulation can round-trip a sub-lot
+        rounding difference between the exchange's balance endpoint and the
+        DB-stored accumulated quantity. A real encumbrance (an order hold, a
+        pending fill, or an external transfer) is at least one quantum and
+        still trips the invariant.
+        """
         base = symbol.split("/")[0]
         quantities = [Decimal(canonical_decimal(imported_quantity))]
         for holding in await model.OpenTrades.filter(symbol__startswith=base + "/"):
@@ -370,10 +383,33 @@ class AccumulationExchangeAdapter:
         free_decimal = Decimal(decimal_evidence(free))
         if free_decimal >= quantity:
             return
-        raise AccumulationStateError(
-            "Owned base is missing or encumbered: "
-            f"free={free_decimal} owned={quantity} deficit={quantity - free_decimal}."
-        )
+        # A deficit at or below one trading quantum *and* a small fraction
+        # of the owned quantity is treated as an exchange-reporting
+        # precision artifact and does not trip the guard, so accumulation
+        # can round-trip a sub-lot rounding difference between the
+        # exchange's balance endpoint and the DB-stored accumulated
+        # quantity. The fraction cap keeps the tolerance from masking a
+        # genuine encumbrance (e.g., a partial fill that leaves a real
+        # portion of the base unmanaged): a real shortfall is many
+        # quanta, not a sub-percent rounding of the held total.
+        factor = Decimal(1) / Decimal(100)  # 1% of the owned quantity
+        if client is not None:
+            market = (getattr(client, "markets", {}) or {}).get(symbol)
+            if isinstance(market, dict):
+                raw = (market.get("precision") or {}).get("amount")
+                if raw is not None:
+                    try:
+                        lot = Decimal(str(raw))
+                        if lot > 0:
+                            tolerance = min(lot, quantity * factor)
+                    except (InvalidOperation, ValueError):
+                        pass
+        if free_decimal + tolerance < quantity:
+            raise AccumulationStateError(
+                "Owned base is missing or encumbered: "
+                f"free={free_decimal} owned={quantity} "
+                f"deficit={quantity - free_decimal}."
+            )
 
     async def account_inventory(
         self, symbol: str, config: dict[str, Any]
@@ -517,7 +553,12 @@ class AccumulationExchangeAdapter:
             _balance_observed_at(
                 client, balance, started_ms=started, now_ms=self.clock_ms()
             )
-            await self._owned_base(symbol, balance["free"].get(base), imported_quantity)
+            await self._owned_base(
+                symbol,
+                balance["free"].get(base),
+                imported_quantity,
+                client=client,
+            )
             holds = await self._reflected_holds(client, symbol, quote, scope)
             if holds:
                 used = Decimal(decimal_evidence((balance.get("used") or {}).get(quote)))
@@ -574,7 +615,9 @@ class AccumulationExchangeAdapter:
             balance_time = _balance_observed_at(
                 client, balance, started_ms=started, now_ms=self.clock_ms()
             )
-            await self._owned_base(symbol, balance["free"].get(symbol.split("/")[0]))
+            await self._owned_base(
+                symbol, balance["free"].get(symbol.split("/")[0]), client=client
+            )
             orders = await client.fetch_open_orders(symbol)
             if not isinstance(orders, list) or orders:
                 raise AccumulationStateError(
