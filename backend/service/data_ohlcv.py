@@ -154,7 +154,15 @@ def serialize_ohlcv_dataframe(df_source: pd.DataFrame, offset: float) -> str:
     # database so far-future instants resolve with current rules.
     column = df.get("timestamp")
     if column is not None and _column_should_reanchor(column):
-        df["timestamp"] = df["timestamp"].map(_reanchor_stale_tz)
+        # The per-value re-anchor boxes each element, which on pandas >= 3.1
+        # raises while materialising a dateutil/pytz tzfile column (get_dst_info
+        # calls .total_seconds() on a None offset). That release ships a fresh
+        # tz database, so its native UTC conversion is already correct; fall back
+        # to it instead of letting the boxing error escape.
+        try:
+            df["timestamp"] = column.map(_reanchor_stale_tz)
+        except AttributeError:
+            pass
     timestamp_series = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
     df["time"] = timestamp_series.map(timestamp_to_unix_seconds)
     df.dropna(subset=["time"], inplace=True)
