@@ -52,6 +52,21 @@ export function createAppRouter(
                 path: '/statistics',
                 redirect: { name: 'stats' },
             },
+            // Legacy pre-v4.0 route names: the backend used to 404 these;
+            // the SPA entry is now served and they land on Configuration
+            // (legacy-migration-removal wave, D16).
+            {
+                path: '/config',
+                redirect: { name: 'controlCenter' },
+            },
+            {
+                path: '/settings',
+                redirect: { name: 'controlCenter' },
+            },
+            {
+                path: '/:pathMatch(.*)*',
+                redirect: { name: 'trades' },
+            },
         ],
     })
 

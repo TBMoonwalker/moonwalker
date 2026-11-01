@@ -12,7 +12,6 @@ from litestar.params import FromPath
 from litestar.response import File
 
 _HASHED_ASSET_PATTERN = re.compile(r".+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
-_REMOVED_LEGACY_SPA_PATHS = frozenset({"config", "settings"})
 DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
 
 
@@ -124,11 +123,6 @@ async def _serve_vue_path(path: str) -> File:
         candidate = _resolve_relative_file(STATIC_DIR, path)
     if candidate is not None and await asyncio.to_thread(candidate.is_file):
         return _file_response(candidate)
-
-    normalized_path = path.lstrip("/\\") if path else ""
-    first_segment = normalized_path.split("/", 1)[0].strip().lower()
-    if first_segment in _REMOVED_LEGACY_SPA_PATHS:
-        raise NotFoundException("Route not found")
 
     index_file = TEMPLATE_DIR / "index.html"
     # Check existence off the event loop so a blocking stat cannot stall the loop
