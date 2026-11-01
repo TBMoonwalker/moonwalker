@@ -12,6 +12,7 @@ from litestar.response import File
 from service.config import Config
 from service.config_redaction import merge_redacted_config_overrides
 from service.monitoring import MonitoringService
+from service.msv import MINIMUM_SUPPORTED_VERSION, get_msv_baseline
 from service.runtime_services import runtime_service_proxy
 
 log_viewer_service = runtime_service_proxy("log_viewer")
@@ -89,7 +90,29 @@ async def test_monitoring_telegram(request: Request[Any, Any, Any]) -> Any:
     return {"message": message}
 
 
+@get(path="/monitoring/msv")
+async def get_monitoring_msv() -> Any:
+    """Report the minimum-supported-version baseline recorded at startup."""
+    baseline = get_msv_baseline()
+    if baseline is None:
+        return {
+            "minimum_supported_version": MINIMUM_SUPPORTED_VERSION,
+            "status": "unknown",
+            "summary": "baseline not yet established",
+        }
+    return {
+        "minimum_supported_version": baseline.minimum_supported_version,
+        "floor_config_migration": baseline.floor_config_migration,
+        "status": baseline.status,
+        "supported": baseline.supported,
+        "schema_history_present": baseline.schema_history_present,
+        "summary": baseline.summary,
+        "upgrade_guidance": baseline.upgrade_guidance,
+    }
+
+
 route_handlers = [
+    get_monitoring_msv,
     get_monitoring_log_sources,
     get_monitoring_log_source,
     download_monitoring_log_source,

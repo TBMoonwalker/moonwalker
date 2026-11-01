@@ -12,7 +12,6 @@ from service.accumulation import runtime as accumulation_runtime
 from service.accumulation.lifecycle import AccumulationLifecycleService
 from service.accumulation.strategy import build_accumulation_strategy_document
 from service.config import Config
-from service.config_migrations import canonicalize_trade_mode_rows
 from service.csv_signal_import import CSVSignalImportService
 from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.orders import Orders
@@ -71,20 +70,12 @@ async def test_release_gate_rejects_selection_atomically(selection, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_selection_pin_survives_reload_and_safe_backup_normalization(selection):
+async def test_selection_pin_survives_reload(selection):
     config, updates, version, _ = selection
     await config.batch_set(updates)
     await config.load_all()
     assert config.get("trade_mode") == "accumulation"
     assert config.get("accumulation_strategy_version_id") == version.id
-    rows = canonicalize_trade_mode_rows(
-        [{"key": "trade_mode", "value": "accumulation", "value_type": "str"}]
-    )
-    assert rows[0]["value"] == "accumulation"
-    with pytest.raises(ValueError, match="Unknown trade mode"):
-        canonicalize_trade_mode_rows(
-            [{"key": "trade_mode", "value": "unexpected", "value_type": "str"}]
-        )
 
 
 @pytest.mark.asyncio
@@ -333,24 +324,6 @@ async def test_mode_change_drains_orders_without_holding_the_config_lock(selecti
     await asyncio.wait_for(asyncio.gather(operation, change), 5)
     assert config.get("timezone") == "Europe/Vienna"
     assert config.get("trade_mode") == "accumulation"
-
-
-@pytest.mark.asyncio
-async def test_unknown_persisted_mode_never_migrates_into_dynamic_dca(selection):
-    from service.config_migrations import (
-        TRADE_MODE_MIGRATION_VERSION,
-        run_config_migrations,
-    )
-
-    await model.AppConfig.create(
-        key="trade_mode", value="unknown_mode", value_type="str"
-    )
-    with pytest.raises(ValueError, match="Unknown trade mode"):
-        await run_config_migrations()
-    assert (await model.AppConfig.get(key="trade_mode")).value == "unknown_mode"
-    assert not await model.ConfigMigration.filter(
-        version=TRADE_MODE_MIGRATION_VERSION
-    ).exists()
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import helper
 import model
+from service.msv import MINIMUM_SUPPORTED_VERSION, preflight_msv
 from service.replay_candles import archive_replay_candles_for_deal
 from service.schema_migrations import (
     MigrationDefinition,
@@ -1209,6 +1210,20 @@ class Database:
             await bootstrap_sqlite_migration_ledger(db_url)
             # Generate the schema
             await Tortoise.generate_schemas()
+            # The preflight reads the ledger before any migration callback runs,
+            # so it reflects the install's last-known baseline. It is report-only:
+            # a preflight failure must never block startup.
+            try:
+                baseline = await preflight_msv()
+                if not baseline.supported:
+                    logging.warning(
+                        "Database baseline is %s; minimum supported version is %s. %s",
+                        baseline.summary,
+                        MINIMUM_SUPPORTED_VERSION,
+                        baseline.upgrade_guidance,
+                    )
+            except Exception:  # noqa: BLE001 - the preflight must never block startup.
+                logging.exception("MSV preflight failed; continuing startup.")
             await self._run_schema_init_steps()
             await self._repair_index_only_corruption_if_needed()
             await self._run_backfill_init_steps()

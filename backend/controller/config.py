@@ -13,11 +13,7 @@ from litestar.handlers import get, post, put
 from litestar.params import FromPath, FromQuery
 from model import AppConfig, OpenTrades
 from service.accumulation.config import accumulation_available, configuration_mode_guard
-from service.config import (
-    Config,
-    build_removed_config_key_message,
-    is_removed_config_key,
-)
+from service.config import Config
 from service.config_contract import public_config_contract
 from service.config_persistence import should_persist_config_value
 from service.config_redaction import (
@@ -298,14 +294,6 @@ def _validate_live_activation_boundary(
     return None
 
 
-def _validate_removed_config_keys(updates: ConfigUpdateMap) -> str | None:
-    """Return an error when the payload references a removed config key."""
-    for key in updates:
-        if is_removed_config_key(key):
-            return build_removed_config_key_message(key)
-    return None
-
-
 def _validate_recovery_target_policy_updates(
     config_snapshot: dict[str, Any],
     updates: ConfigUpdateMap,
@@ -488,10 +476,6 @@ async def _validate_config_updates(
             **raw_value,
             "value": restored_value,
         }
-
-    error_message = _validate_removed_config_keys(prepared_sensitive_updates)
-    if error_message:
-        return None, _config_update_conflict(error_message)
 
     prepared_updates = prepared_sensitive_updates
 

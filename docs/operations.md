@@ -39,6 +39,61 @@ requirements installation step before launching `backend/app.py` directly.
 Starting `backend/app.py` from an existing virtual environment bypasses
 dependency synchronization after an upgrade.
 
+## Minimum supported version
+
+Moonwalker declares a minimum supported version (MSV). Legacy migration and
+compatibility code that predates it is kept only until an install is known to
+have reached the floor.
+
+- **Minimum supported version:** `4.9.0.0`, the sidestep-removal release.
+- **Posture:** report only. A `preflight_msv` step runs at startup, before any
+  schema or config migration callback, and records the install's baseline. It
+  **never blocks startup** and **never mutates a ledger**: an install that
+  predates the floor still loads and runs.
+
+The preflight reports three outcomes:
+
+- `supported` — the install's configuration ledger already contains the
+  `2026-09-sidestep-removal-v1` migration row, so it has run at or after the
+  floor.
+- `unsupported` — the install has schema history (it is not fresh) but its
+  configuration ledger predates the floor. Startup logs a `WARNING` with the
+  upgrade path and the dashboard reports the same state at
+  `GET /monitoring/msv`.
+- `fresh` — no ledger history at all. Treated as supported; it will receive the
+  current migrations on the same startup.
+
+### Why the configuration ledger is the floor signal
+
+The floor release deliberately added no schema migration, so a `4.8.x` and a
+`4.9.x` database share an identical schema ledger and cannot be told apart
+structurally. The non-self-healing marker that an install reached the floor is
+the `2026-09-sidestep-removal-v1` row in the `config_migrations` ledger.
+Databases that ran the floor release carry the row from that release onward.
+Databases created after the trade-mode migration was removed receive the row
+on their first startup only if they carry no pre-floor legacy bridge keys; a
+database that still carries those keys is left unmarked and keeps reporting
+`unsupported`, so the row stays a true floor signal rather than a self-healing
+one.
+
+### Upgrade path for a pre-floor install
+
+1. Upgrade the installation through `4.9.0.0`.
+2. Save the configuration and export a fresh full backup through the backup tool,
+   so any removed legacy bridge is gone from the persisted data.
+
+The trade-mode bridge removal shipped first under that gate; the remaining
+removal passes stay gated on every install reaching `4.9.0.0`.
+
+> **Changelog drift reconciled (B2 removal pass, 2026-11-01).** The
+> `4.0.0.0` changelog entry claimed the legacy trade-mode config keys
+> (`trade_lifecycle_mode`, `dynamic_dca`, `sidestep_campaign_enabled`) are no
+> longer migrated; that claim was never true — the trade-mode bridge did not
+> exist in that release, and once `2026-09-sidestep-removal-v1` arrived with
+> `4.9.0.0` it canonicalized the keys until this removal. That migration and
+> its guards are now gone, the historical entry is corrected, and the
+> unreleased changelog entry documents the current restore behavior.
+
 ## Shared local Redis
 
 Separate Moonwalker installations can reuse the Redis server on
@@ -208,6 +263,14 @@ Two restore modes are available:
 - Restore config only: replaces configuration, leaves current trade data in
   place.
 - Restore full backup: replaces both configuration and the included trade data.
+
+Backups created before `4.9.0.0` may still carry the raw trade-mode bridge
+keys (`trade_lifecycle_mode`, top-level `dynamic_dca`,
+`sidestep_campaign_enabled`). Restoring such a backup is still supported: the
+three keys are dropped silently and the rest of the backup restores normally,
+because every legacy representation was equivalent to the default `trade_mode`
+value (`dynamic_dca`). All other removed config keys are still rejected on
+restore with a message that names the replacement key.
 
 Restore requires explicit confirmation. Before replacing state, Moonwalker
 blocks new exchange-order work and waits for already admitted order work to

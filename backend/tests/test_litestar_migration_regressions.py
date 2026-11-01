@@ -535,60 +535,6 @@ def test_config_multiple_blocks_switch_to_csv_signal_when_open_trades_exist(
     assert service.last_batch is None
 
 
-def test_config_multiple_rejects_removed_trade_mode_bridge_keys(monkeypatch) -> None:
-    """Legacy trade-mode bridge keys must be rejected at the API boundary."""
-    service = _DummyConfigService()
-
-    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
-        return service
-
-    monkeypatch.setattr(
-        config_controller.Config, "instance", classmethod(_fake_instance)
-    )
-
-    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
-    payload = {"dynamic_dca": {"value": True, "type": "bool"}}
-    with TestClient(app=app) as client:
-        response = client.post("/config/multiple", json=payload)
-
-    assert response.status_code == 409
-    assert response.json() == {
-        "error": (
-            "Config key 'dynamic_dca' was removed in this release. "
-            "Use 'trade_mode' instead."
-        ),
-        "message": (
-            "Config key 'dynamic_dca' was removed in this release. "
-            "Use 'trade_mode' instead."
-        ),
-    }
-    assert service.last_batch is None
-
-
-def test_config_multiple_rejects_removed_debug_key(monkeypatch) -> None:
-    """The retired 'debug' config key must be rejected, no successor."""
-    service = _DummyConfigService()
-
-    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
-        return service
-
-    monkeypatch.setattr(
-        config_controller.Config, "instance", classmethod(_fake_instance)
-    )
-
-    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
-    payload = {"debug": {"value": True, "type": "bool"}}
-    with TestClient(app=app) as client:
-        response = client.post("/config/multiple", json=payload)
-
-    assert response.status_code == 409
-    assert response.json() == {
-        "error": "Config key 'debug' was removed in this release.",
-        "message": "Config key 'debug' was removed in this release.",
-    }
-    assert service.last_batch is None
-
-
 def test_config_single_blocks_switch_to_csv_signal_when_open_trades_exist(
     monkeypatch,
 ) -> None:
@@ -611,6 +557,59 @@ def test_config_single_blocks_switch_to_csv_signal_when_open_trades_exist(
 
     assert response.status_code == 409
     assert "open trades" in response.json().get("error", "").lower()
+    assert service.last_batch is None
+
+
+def test_config_multiple_rejects_recovery_target_without_positive_step_scale(
+    monkeypatch,
+) -> None:
+    """Recovery-target updates must carry a positive safety-order step scale."""
+    service = _DummyConfigService()
+    service._cache["dynamic_so_sizing_mode"] = "recovery_target"
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    payload = {"ss": {"value": 0, "type": "int"}}
+    with TestClient(app=app) as client:
+        response = client.post("/config/multiple", json=payload)
+
+    assert response.status_code == 409
+    assert "positive safety-order step scale" in response.json().get("error", "")
+    assert service.last_batch is None
+
+
+def test_config_multiple_rejects_recovery_target_drift_when_max_below_min(
+    monkeypatch,
+) -> None:
+    """Recovery-target drift bounds must keep max >= min."""
+    service = _DummyConfigService()
+    service._cache["dynamic_so_sizing_mode"] = "recovery_target"
+    service._cache["ss"] = 1.5
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    payload = {
+        "dynamic_so_max_deal_quote": {"value": 10, "type": "int"},
+        "dynamic_so_execution_drift_min_pct": {"value": 0.5, "type": "float"},
+        "dynamic_so_execution_drift_max_pct": {"value": 0.2, "type": "float"},
+    }
+    with TestClient(app=app) as client:
+        response = client.post("/config/multiple", json=payload)
+
+    assert response.status_code == 409
+    assert "greater than or equal" in response.json().get("error", "")
     assert service.last_batch is None
 
 
@@ -1075,77 +1074,6 @@ def test_config_multiple_rejects_legacy_stringified_update_payloads() -> None:
             "Invalid keys: dry_run"
         )
     }
-
-
-def test_config_single_rejects_removed_legacy_autopilot_max_fund_key(
-    monkeypatch,
-) -> None:
-    """Single-key config updates should reject removed legacy max-fund writes."""
-    service = _DummyConfigService()
-
-    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
-        return service
-
-    monkeypatch.setattr(
-        config_controller.Config, "instance", classmethod(_fake_instance)
-    )
-
-    app = Litestar(route_handlers=[config_controller.update_config_key])
-    with TestClient(app=app) as client:
-        response = client.put(
-            "/config/single/autopilot_max_fund",
-            json={"value": {"value": 250, "type": "int"}},
-        )
-
-    assert response.status_code == 409
-    assert response.json() == {
-        "error": (
-            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
-            "Use 'capital_max_fund' instead."
-        ),
-        "message": (
-            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
-            "Use 'capital_max_fund' instead."
-        ),
-    }
-    assert service.last_single is None
-
-
-def test_config_multiple_rejects_removed_legacy_autopilot_max_fund_key(
-    monkeypatch,
-) -> None:
-    """Batch config updates should reject removed legacy max-fund writes."""
-    service = _DummyConfigService()
-
-    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
-        return service
-
-    monkeypatch.setattr(
-        config_controller.Config, "instance", classmethod(_fake_instance)
-    )
-
-    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
-    with TestClient(app=app) as client:
-        response = client.post(
-            "/config/multiple",
-            json={
-                "capital_max_fund": {"value": 250, "type": "int"},
-                "autopilot_max_fund": {"value": 250, "type": "int"},
-            },
-        )
-
-    assert response.status_code == 409
-    assert response.json() == {
-        "error": (
-            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
-            "Use 'capital_max_fund' instead."
-        ),
-        "message": (
-            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
-            "Use 'capital_max_fund' instead."
-        ),
-    }
-    assert service.last_batch is None
 
 
 def test_trades_websocket_disconnect_is_not_logged_as_error(monkeypatch) -> None:

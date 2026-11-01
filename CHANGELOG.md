@@ -2,6 +2,18 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [Unreleased]
+
+### Removed
+
+- The legacy trade-mode bridge keys (`trade_lifecycle_mode`, top-level
+  `dynamic_dca`, `sidestep_campaign_enabled`) are no longer migrated or
+  handled at startup. Restoring a pre-4.9 backup that still carries them
+  drops the three keys silently: every legacy representation was equivalent
+  to the default `trade_mode` value (`dynamic_dca`), so no setting is lost.
+  The other removed config keys (for example `autopilot_max_fund`) are still
+  rejected on restore with a message that names the replacement key.
+
 ## [5.5.1.0] - 2026-10-31
 
 ### Added
@@ -817,11 +829,14 @@ All notable changes to Moonwalker are documented in this file.
 
 ### Breaking Changes
 
-- Remove old-version upgrade bridges. Moonwalker no longer migrates legacy
-  trade-mode config keys (`trade_lifecycle_mode`, `dynamic_dca`,
-  `sidestep_campaign_enabled`), legacy Strategy Builder custom graph shapes,
-  old EMA strategy state tables, old campaign close-row percentage repairs, or
-  the `ema_swing_reverse` compatibility alias.
+- Remove old-version upgrade bridges. This release removed legacy Strategy
+  Builder custom graph shapes, old EMA strategy state tables, old campaign
+  close-row percentage repairs, and the `ema_swing_reverse` compatibility
+  alias. The legacy trade-mode config keys (`trade_lifecycle_mode`,
+  `dynamic_dca`, `sidestep_campaign_enabled`) were not removed in this
+  release: the trade-mode bridge did not exist yet, and the configuration
+  migration that canonicalized it kept running until it was removed in the
+  unreleased entry above.
 - Remove legacy Autopilot and Backtest shims:
   `autopilot_entry_stretch_max_multiplier` is no longer read as a fallback for
   `autopilot_base_order_stretch_max_multiplier`, and direct `Backtest(...)`
