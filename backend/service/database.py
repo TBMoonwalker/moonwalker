@@ -1002,7 +1002,10 @@ class Database:
         for trigger in triggers:
             trigger_sql = trigger["sql"] or ""
             for column in to_drop:
-                if re.search(rf"\b{re.escape(column)}\b", trigger_sql):
+                # SQLite identifiers are case-insensitive and trigger
+                # column references are not validated at CREATE TRIGGER
+                # time, so a mixed-case reference must refuse too.
+                if re.search(rf"\b{re.escape(column)}\b", trigger_sql, re.IGNORECASE):
                     raise RuntimeError(
                         f"Cannot rebuild {table}: trigger "
                         f"{trigger['name']} references dropped column {column}."

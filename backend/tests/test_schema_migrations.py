@@ -680,6 +680,13 @@ async def test_contract_drop_rebuild_refuses_foreign_keys_and_triggers(
             );
             CREATE TRIGGER trg_dropped_ref AFTER UPDATE OF campaign_id
             ON triggered_dropped_ref BEGIN SELECT 1; END;
+            CREATE TABLE triggered_mixed_case_ref (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NULL
+            );
+            CREATE TRIGGER trg_mixed_case_ref AFTER UPDATE
+            ON triggered_mixed_case_ref
+            WHEN OLD.Campaign_Id IS NOT NULL BEGIN SELECT 1; END;
             """
         )
         connection.commit()
@@ -694,6 +701,13 @@ async def test_contract_drop_rebuild_refuses_foreign_keys_and_triggers(
         with pytest.raises(RuntimeError, match="trigger.*campaign_id"):
             await Database._rebuild_table_without_columns(
                 conn, "triggered_dropped_ref", ("campaign_id",)
+            )
+        # SQLite identifiers are case-insensitive and trigger column
+        # references are only checked at fire time, so a mixed-case
+        # reference to a dropped column must refuse as well.
+        with pytest.raises(RuntimeError, match="trigger.*campaign_id"):
+            await Database._rebuild_table_without_columns(
+                conn, "triggered_mixed_case_ref", ("campaign_id",)
             )
         # A trigger that references no dropped column survives the rebuild.
         await Database._rebuild_table_without_columns(
