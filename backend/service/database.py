@@ -936,13 +936,24 @@ class Database:
         every row. Aborts startup when a live open trade still carries
         campaign residue: the drop would silently unlink it from its position.
         See docs/operations.md, "Campaign residue recovery".
+
+        The residue check runs in its own transaction and the rebuilds run
+        after it commits: the accumulation tables carry incoming foreign keys
+        into opentrades/placement_intents, and the rebuild must toggle
+        ``PRAGMA foreign_keys`` around the drop, which SQLite only allows
+        outside a transaction. Every rebuild restores its rows with their
+        original IDs, so incoming references stay valid and each rebuild is
+        resumable (a table whose columns are already gone is a no-op).
         """
         if not self.db_url.startswith("sqlite://"):
             return
-        async with in_transaction() as conn:
-            await self._assert_no_open_trade_campaign_residue(conn)
-            for table, drop_columns in _LEGACY_CAMPAIGN_REBUILDS:
-                await self._rebuild_table_without_columns(conn, table, drop_columns)
+        async with in_transaction():
+            await self._assert_no_open_trade_campaign_residue(
+                Tortoise.get_connection("default")
+            )
+        connection = Tortoise.get_connection("default")
+        for table, drop_columns in _LEGACY_CAMPAIGN_REBUILDS:
+            await self._rebuild_table_without_columns(connection, table, drop_columns)
 
     @staticmethod
     async def _assert_no_open_trade_campaign_residue(conn: Any) -> None:
@@ -978,8 +989,14 @@ class Database:
         recreated. Unique constraints are re-declared as table constraints.
         Triggers that reference only kept columns are dropped with the old
         table and recreated unchanged, because the rebuild renames back to
-        the original table name. A table with foreign keys, or a trigger
-        that references a dropped column, is refused rather than rebuilt.
+        the original table name. The mutation phase runs with foreign-key
+        enforcement temporarily disabled so incoming foreign keys (held by
+        the accumulation tables) keep their references: the rows are
+        restored with their original IDs. The AUTOINCREMENT high-water mark
+        is preserved across the rebuild. A table with foreign keys, or a
+        trigger that references a dropped column, is refused rather than
+        rebuilt; expression and partial indexes are refused as well because
+        the rebuild cannot redeclare them.
         """
         _, columns = await conn.execute_query(f"PRAGMA table_info({table})")
         if not columns:
@@ -1048,10 +1065,28 @@ class Database:
             index_columns = tuple(
                 row["name"] for row in sorted(index_cols, key=lambda row: row["seqno"])
             )
+            if any(col is None for col in index_columns):
+                raise RuntimeError(
+                    f"Cannot rebuild {table}: index {index_name} is an "
+                    "expression index; the rebuild cannot redeclare it."
+                )
             if not index_columns or any(col in to_drop for col in index_columns):
                 continue
             if index["origin"] == "pk":
                 continue
+            _, index_sql_rows = await conn.execute_query(
+                "SELECT sql FROM sqlite_master "
+                f"WHERE type = 'index' AND name = '{index_name}'"
+            )
+            if (
+                index_sql_rows
+                and index_sql_rows[0]["sql"]
+                and re.search(r"\bWHERE\b", index_sql_rows[0]["sql"], re.IGNORECASE)
+            ):
+                raise RuntimeError(
+                    f"Cannot rebuild {table}: index {index_name} is a partial "
+                    "(WHERE) index; the rebuild cannot redeclare its predicate."
+                )
             if bool(index["unique"]) and str(index_name).startswith(
                 "sqlite_autoindex_"
             ):
@@ -1068,22 +1103,67 @@ class Database:
                 *(f"UNIQUE ({', '.join(cols)})" for cols in unique_constraints),
             ]
         )
-        await conn.execute_query(f"DROP TABLE IF EXISTS {new_table}")
-        await conn.execute_query(f"CREATE TABLE {new_table} ({table_sql})")
-        kept_names = ", ".join(row["name"] for row in kept_columns)
-        await conn.execute_query(
-            f"INSERT INTO {new_table} ({kept_names}) SELECT {kept_names} FROM {table}"
-        )
-        await conn.execute_query(f"DROP TABLE {table}")
-        await conn.execute_query(f"ALTER TABLE {new_table} RENAME TO {table}")
-        for index_name, unique, index_columns in recreated_indexes:
-            unique_sql = "UNIQUE " if unique else ""
+        # The rebuild must run with foreign-key enforcement off: SQLite fires
+        # the ON DELETE actions of incoming foreign keys (SET NULL, RESTRICT)
+        # when a parent table is dropped. The rows are restored with their
+        # original IDs, so those references stay valid and must be left
+        # untouched. The high-water mark is captured before the drop so the
+        # rebuild cannot reset it and reuse deleted row IDs.
+        fk_state = (await conn.execute_query("PRAGMA foreign_keys"))[1]
+        fk_on = bool(fk_state) and bool(fk_state[0][0])
+        seq_value = None
+        if autoincrement:
+            seq_rows = (
+                await conn.execute_query(
+                    f"SELECT seq FROM sqlite_sequence WHERE name = '{table}'"
+                )
+            )[1]
+            seq_value = seq_rows[0]["seq"] if seq_rows else None
+        if fk_on:
+            await conn.execute_query("PRAGMA foreign_keys=OFF")
+        try:
+            await conn.execute_query(f"DROP TABLE IF EXISTS {new_table}")
+            await conn.execute_query(f"CREATE TABLE {new_table} ({table_sql})")
+            kept_names = ", ".join(row["name"] for row in kept_columns)
             await conn.execute_query(
-                f"CREATE {unique_sql}INDEX {index_name} "
-                f"ON {table} ({', '.join(index_columns)})"
+                f"INSERT INTO {new_table} ({kept_names}) SELECT {kept_names} FROM {table}"
             )
-        for trigger in triggers:
-            await conn.execute_query(trigger["sql"])
+            await conn.execute_query(f"DROP TABLE {table}")
+            await conn.execute_query(f"ALTER TABLE {new_table} RENAME TO {table}")
+            for index_name, unique, index_columns in recreated_indexes:
+                unique_sql = "UNIQUE " if unique else ""
+                await conn.execute_query(
+                    f"CREATE {unique_sql}INDEX {index_name} "
+                    f"ON {table} ({', '.join(index_columns)})"
+                )
+            for trigger in triggers:
+                await conn.execute_query(trigger["sql"])
+            if autoincrement:
+                pk_name = next(row["name"] for row in kept_columns if row["pk"])
+                max_rows = (
+                    await conn.execute_query(f"SELECT MAX({pk_name}) AS m FROM {table}")
+                )[1]
+                preserved = (
+                    seq_value if seq_value is not None else (max_rows[0]["m"] or 0)
+                )
+                remaining = (
+                    await conn.execute_query(
+                        f"SELECT seq FROM sqlite_sequence WHERE name = '{table}'"
+                    )
+                )[1]
+                if remaining:
+                    await conn.execute_query(
+                        f"UPDATE sqlite_sequence SET seq = {preserved} "
+                        f"WHERE name = '{table}'"
+                    )
+                elif preserved:
+                    await conn.execute_query(
+                        f"INSERT INTO sqlite_sequence (name, seq) "
+                        f"VALUES ('{table}', {preserved})"
+                    )
+        finally:
+            if fk_on:
+                await conn.execute_query("PRAGMA foreign_keys=ON")
 
     async def _ensure_manual_stop_valuation(self) -> None:
         """Add optional unsold valuation fields without rewriting past closes."""

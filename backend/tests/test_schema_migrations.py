@@ -747,3 +747,181 @@ async def test_contract_drop_rebuild_refuses_foreign_keys_and_triggers(
     assert "campaign_id" not in triggered_columns
     assert "trg" in triggered_triggers
     assert child_rows == [(1, "child-1")]
+
+
+@pytest.mark.asyncio
+async def test_contract_drop_rebuild_preserves_incoming_foreign_key_references(
+    tmp_path,
+) -> None:
+    """Value: protects=incoming-FK safety of the 021 table rebuild
+    (a table referenced by other tables' foreign keys is rebuilt without
+    firing their ON DELETE actions, so child rows keep their references);
+    fails_when=the rebuild drops the parent while foreign-key enforcement is
+    on and incoming references are silently SET NULL or the rebuild is
+    refused by a RESTRICT child; why_new=the accumulation tables carry
+    incoming keys into opentrades/placement_intents, which real installs
+    always have, while the 4.9 fixture's child tables are empty; seam=none;
+    no_claim=does not assert production table shapes."""
+    await Tortoise.close_connections()
+    db_path = tmp_path / "contract-drop-incoming-fk.sqlite"
+    with closing(sqlite3.connect(db_path)) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE fk_parent (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NULL
+            );
+            CREATE TABLE fk_child_setnull (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_id INTEGER NULL,
+                FOREIGN KEY (parent_id) REFERENCES fk_parent(id)
+                ON DELETE SET NULL
+            );
+            CREATE TABLE fk_child_restrict (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_id INTEGER NULL,
+                FOREIGN KEY (parent_id) REFERENCES fk_parent(id)
+                ON DELETE RESTRICT
+            );
+            INSERT INTO fk_parent (id, campaign_id) VALUES (1, 'parent-1');
+            INSERT INTO fk_parent (id, campaign_id) VALUES (2, 'parent-2');
+            INSERT INTO fk_child_setnull (parent_id) VALUES (1);
+            INSERT INTO fk_child_restrict (parent_id) VALUES (2);
+            """
+        )
+        connection.commit()
+
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    conn = Tortoise.get_connection("default")
+    try:
+        await Database._rebuild_table_without_columns(
+            conn, "fk_parent", ("campaign_id",)
+        )
+    finally:
+        await Tortoise.close_connections()
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        parent_ids = [row[0] for row in connection.execute("SELECT id FROM fk_parent")]
+        setnull_refs = connection.execute(
+            "SELECT parent_id FROM fk_child_setnull"
+        ).fetchall()
+        restrict_refs = connection.execute(
+            "SELECT parent_id FROM fk_child_restrict"
+        ).fetchall()
+    assert parent_ids == [1, 2]
+    # Both incoming references survive the rebuild untouched: with foreign
+    # key enforcement on, the DROP would have SET NULL the first reference
+    # and refused the rebuild because of the RESTRICT child.
+    assert setnull_refs == [(1,)]
+    assert restrict_refs == [(2,)]
+
+
+@pytest.mark.asyncio
+async def test_contract_drop_rebuild_preserves_autoincrement_high_water_mark(
+    tmp_path,
+) -> None:
+    """Value: protects=AUTOINCREMENT high-water mark across the 021 table
+    rebuild (the rebuild cannot reset sqlite_sequence and reuse deleted row
+    IDs); fails_when=a rebuild leaves the sequence row missing so the next
+    insert reuses the ID of a row deleted before the upgrade; why_new=the
+    copy/drop/rename dance drops the sqlite_sequence row with the old
+    table; seam=none; no_claim=does not assert production table shapes."""
+    await Tortoise.close_connections()
+    db_path = tmp_path / "contract-drop-sequence.sqlite"
+    with closing(sqlite3.connect(db_path)) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE seq_parent (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NULL
+            );
+            INSERT INTO seq_parent (id, campaign_id)
+            VALUES (1, NULL), (2, NULL), (3, NULL);
+            DELETE FROM seq_parent WHERE id = 3;
+            """
+        )
+        connection.commit()
+
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    conn = Tortoise.get_connection("default")
+    try:
+        await Database._rebuild_table_without_columns(
+            conn, "seq_parent", ("campaign_id",)
+        )
+        await conn.execute_query("INSERT INTO seq_parent DEFAULT VALUES")
+    finally:
+        await Tortoise.close_connections()
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        rows = connection.execute("SELECT id FROM seq_parent ORDER BY id").fetchall()
+    # Without the preservation, the rebuilt table's max ID is 2 and the new
+    # row would reuse the deleted ID 3.
+    assert [row[0] for row in rows] == [1, 2, 4]
+
+
+@pytest.mark.asyncio
+async def test_contract_drop_rebuild_refuses_expression_and_partial_indexes(
+    tmp_path,
+) -> None:
+    """Value: protects=explicit refusal of index shapes the 021 table
+    rebuild cannot redeclare (expression indexes and partial WHERE
+    predicates), instead of a late confusing failure mid-rebuild;
+    fails_when=a rebuild silently drops an index predicate or aborts with
+    an unactionable error after starting the copy; why_new=the rebuild
+    redeclares indexes from column names alone; seam=none;
+    no_claim=does not assert production table shapes."""
+    await Tortoise.close_connections()
+    db_path = tmp_path / "contract-drop-index-refusals.sqlite"
+    with closing(sqlite3.connect(db_path)) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE expr_indexed (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NULL,
+                label TEXT NULL
+            );
+            CREATE INDEX idx_expr ON expr_indexed (length(label));
+            CREATE TABLE partial_indexed (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NULL,
+                label TEXT NULL
+            );
+            CREATE INDEX idx_partial ON partial_indexed (label)
+            WHERE label IS NOT NULL;
+            """
+        )
+        connection.commit()
+
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    conn = Tortoise.get_connection("default")
+    try:
+        with pytest.raises(RuntimeError, match="expression index"):
+            await Database._rebuild_table_without_columns(
+                conn, "expr_indexed", ("campaign_id",)
+            )
+        with pytest.raises(RuntimeError, match="partial"):
+            await Database._rebuild_table_without_columns(
+                conn, "partial_indexed", ("campaign_id",)
+            )
+    finally:
+        await Tortoise.close_connections()
+
+    # The refusals happened before the destructive DDL: both tables are
+    # untouched, campaign column and indexes intact.
+    with closing(sqlite3.connect(db_path)) as connection:
+        for table in ("expr_indexed", "partial_indexed"):
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    f"PRAGMA table_info('{table}')"
+                ).fetchall()
+            }
+            indexes = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master "
+                    f"WHERE type = 'index' AND tbl_name = '{table}'"
+                ).fetchall()
+            }
+            assert "campaign_id" in columns
+            assert ("idx_expr" if table == "expr_indexed" else "idx_partial") in indexes
