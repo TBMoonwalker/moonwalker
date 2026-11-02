@@ -1,5 +1,17 @@
 {
   "runner": "cd scripts && PATH=\"/opt/homebrew/opt/node@24/bin:$PATH\" ./ci.sh {files}",
+  "allowlist": [
+    {
+      "finding": "env.kv",
+      "paths": ["backend/tests/test_backup_restore.py"],
+      "reason": "test fixtures: AppConfig key/value rows for the trade_lifecycle_mode, dynamic_dca and sidestep_campaign_enabled backup payloads; enum and boolean values, no credentials"
+    },
+    {
+      "finding": "env.kv",
+      "paths": ["backend/tests/test_msv_preflight.py"],
+      "reason": "test fixture: AppConfig key/value row for trade_lifecycle_mode in the MSV preflight tests; enum value, no credential"
+    }
+  ],
   "dependencies": {
     "backend/requirements*.in": [
       "backend/tests/test_dependency_lock_policy.py"
