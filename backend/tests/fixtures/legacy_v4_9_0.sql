@@ -192,6 +192,41 @@ CREATE INDEX idx_tradeexecutions_deal_time ON tradeexecutions (deal_id, timestam
 CREATE INDEX idx_tradeexecutions_campaign_time ON tradeexecutions (campaign_id, timestamp);
 CREATE INDEX idx_tradeexecutions_symbol_time ON tradeexecutions (symbol, timestamp);
 
+CREATE TABLE placement_intents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation_id VARCHAR(64) NOT NULL,
+    source_operation_id VARCHAR(64) NULL,
+    client_order_id VARCHAR(128) NULL,
+    exchange_order_id VARCHAR(128) NULL,
+    exchange_name VARCHAR(64) NOT NULL,
+    symbol VARCHAR(50) NOT NULL,
+    action VARCHAR(32) NOT NULL,
+    side VARCHAR(8) NOT NULL,
+    order_type VARCHAR(32) NOT NULL,
+    state VARCHAR(32) NOT NULL,
+    deal_id VARCHAR(36) NULL,
+    campaign_id VARCHAR(36) NULL,
+    requested_quote REAL NOT NULL DEFAULT 0.0,
+    requested_amount REAL NOT NULL DEFAULT 0.0,
+    maximum_price REAL NULL,
+    reserved_quote REAL NOT NULL DEFAULT 0.0,
+    request_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT NULL,
+    reason_code VARCHAR(64) NULL,
+    error_message TEXT NULL,
+    reconciliation_attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    submitted_at TIMESTAMP NULL,
+    completed_at TIMESTAMP NULL
+);
+
+CREATE INDEX idx_placement_intents_state_symbol ON placement_intents (state, symbol);
+CREATE INDEX idx_placement_intents_exchange_order_id ON placement_intents (exchange_order_id);
+CREATE INDEX idx_placement_intents_deal_id ON placement_intents (deal_id);
+CREATE UNIQUE INDEX uidx_placement_intents_operation_id ON placement_intents (operation_id);
+CREATE UNIQUE INDEX uidx_placement_intents_client_order_id ON placement_intents (client_order_id);
+
 -- Sidestep-era orphan: the campaign table no longer has a model, and its
 -- rows are intentionally left untouched by the contract migration.
 CREATE TABLE spotcampaigns (
@@ -299,6 +334,16 @@ INSERT INTO spotcampaigns (
     'campaign-eth-usdc-2024', 'ETH/USDC', 'exited', '2024-04-25 09:00:00+00:00',
     '2024-05-02 09:00:00+00:00', 'legacy-deal-eth-usdc', 2, 'take_profit',
     NULL, 5.0, NULL
+);
+
+INSERT INTO placement_intents (
+    operation_id, client_order_id, exchange_name, symbol, action, side,
+    order_type, state, deal_id, campaign_id, requested_quote, requested_amount,
+    request_json, created_at, updated_at
+) VALUES (
+    'op-legacy-1', 'cli-legacy-1', 'binance', 'BTC/USDC', 'open', 'buy',
+    'limit', 'submitted', 'legacy-deal-btc-usdc', 'campaign-eth-usdc-2024',
+    100.0, 1.0, '{}', '2024-05-03 09:00:00+00:00', '2024-05-03 09:00:00+00:00'
 );
 
 INSERT INTO upnl_history (timestamp, upnl, profit_overall, funds_locked)

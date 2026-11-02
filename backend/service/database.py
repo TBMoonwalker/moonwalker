@@ -976,8 +976,10 @@ class Database:
         The table is recreated with every kept column, its rows are copied
         over, and user-created indexes that reference only kept columns are
         recreated. Unique constraints are re-declared as table constraints.
-        A table with foreign keys or triggers is refused rather than rebuilt,
-        because this helper cannot redeclare those constraints.
+        Triggers that reference only kept columns are dropped with the old
+        table and recreated unchanged, because the rebuild renames back to
+        the original table name. A table with foreign keys, or a trigger
+        that references a dropped column, is refused rather than rebuilt.
         """
         _, columns = await conn.execute_query(f"PRAGMA table_info({table})")
         if not columns:
@@ -994,11 +996,17 @@ class Database:
                 f"Cannot rebuild {table}: unexpected foreign keys found."
             )
         _, triggers = await conn.execute_query(
-            "SELECT name FROM sqlite_master "
+            "SELECT name, sql FROM sqlite_master "
             f"WHERE type = 'trigger' AND tbl_name = '{table}'"
         )
-        if triggers:
-            raise RuntimeError(f"Cannot rebuild {table}: triggers found.")
+        for trigger in triggers:
+            trigger_sql = trigger["sql"] or ""
+            for column in to_drop:
+                if re.search(rf"\b{re.escape(column)}\b", trigger_sql):
+                    raise RuntimeError(
+                        f"Cannot rebuild {table}: trigger "
+                        f"{trigger['name']} references dropped column {column}."
+                    )
 
         kept_columns = [row for row in columns if row["name"] not in to_drop]
         autoincrement = False
@@ -1071,6 +1079,8 @@ class Database:
                 f"CREATE {unique_sql}INDEX {index_name} "
                 f"ON {table} ({', '.join(index_columns)})"
             )
+        for trigger in triggers:
+            await conn.execute_query(trigger["sql"])
 
     async def _ensure_manual_stop_valuation(self) -> None:
         """Add optional unsold valuation fields without rewriting past closes."""

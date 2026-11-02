@@ -389,7 +389,7 @@ async def test_config_load_all_applies_tp_spike_defaults(tmp_path, monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_config_load_all_clears_removed_keys(tmp_path, monkeypatch) -> None:
+async def test_config_load_all_replaces_snapshot_from_db(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
