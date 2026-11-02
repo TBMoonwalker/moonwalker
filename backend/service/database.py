@@ -522,28 +522,14 @@ class Database:
         if not self.db_url.startswith("sqlite://"):
             return
 
-        open_rows = await model.OpenTrades.all().values(
-            "symbol",
-            "deal_id",
-            "sold_amount",
-            "execution_history_complete",
-        )
+        open_rows = await model.OpenTrades.all().values("symbol", "deal_id")
         for open_row in open_rows:
             symbol = str(open_row.get("symbol") or "").strip()
             if not symbol:
                 continue
 
             deal_id = str(open_row.get("deal_id") or uuid4())
-            has_legacy_partial = float(open_row.get("sold_amount") or 0.0) > 0
-            execution_history_complete = (
-                bool(open_row.get("execution_history_complete", True))
-                and not has_legacy_partial
-            )
-
-            await model.OpenTrades.filter(symbol=symbol).update(
-                deal_id=deal_id,
-                execution_history_complete=execution_history_complete,
-            )
+            await model.OpenTrades.filter(symbol=symbol).update(deal_id=deal_id)
             await model.Trades.filter(symbol=symbol).update(deal_id=deal_id)
 
             existing_executions = await model.TradeExecutions.filter(
