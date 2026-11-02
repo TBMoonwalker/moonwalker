@@ -136,6 +136,7 @@ class BackupService:
                     safe_fields={"restore_trade_data": restore_trade_data},
                 )
             validated_trade_data = self._validate_trade_data(trade_data)
+            self._assert_no_open_trade_campaign_residue(validated_trade_data)
             if any(validated_trade_data[name] for name in ACCUMULATION_TABLE_MODELS):
                 if not ACCUMULATION_TABLE_MODELS.keys() <= trade_data.keys():
                     raise ValueError("Accumulation backup is missing ownership tables.")
@@ -440,6 +441,38 @@ class BackupService:
                 normalized_rows.append(normalized_row)
             validated[table_name] = normalized_rows
         return validated
+
+    @staticmethod
+    def _assert_no_open_trade_campaign_residue(
+        validated_trade_data: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Refuse a full restore whose open trades still reference a campaign.
+
+        Mirrors the startup residue gate in ``Database.init``: the campaign
+        columns were dropped in the 4.9 contract migration, so deserializing
+        a pre-4.9 backup row that still carries ``campaign_id`` would silently
+        lose the campaign linkage without the operator review the startup gate
+        requires. The documented recovery procedure must run first.
+        """
+        residue_rows = [
+            row
+            for row in validated_trade_data.get("open_trades", [])
+            if row.get("campaign_id") is not None
+        ]
+        if not residue_rows:
+            return
+        symbols = ", ".join(
+            sorted(str(row.get("symbol") or "<unknown>") for row in residue_rows)
+        )
+        raise ValueError(
+            "Restore aborted: the backup has "
+            f"{len(residue_rows)} open trade row(s) with legacy campaign "
+            f"residue (symbols: {symbols}). The campaign columns were dropped "
+            "in 4.9, so restoring would silently lose the campaign linkage. "
+            "Review the open position(s) on the exchange, clear the "
+            "campaign_id value(s) in the backup's open-trade rows, then "
+            'retry; see docs/operations.md, "Campaign residue recovery".'
+        )
 
     @classmethod
     def _validate_recovery_manifest(

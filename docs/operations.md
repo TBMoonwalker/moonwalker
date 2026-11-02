@@ -346,6 +346,12 @@ symbol(s). The migration is not run and the database is left unchanged.
 This can only happen on an install that ran a pre-4.9 sidestep-era build with
 an open position; every later release writes `campaign_id` as null.
 
+The same gate applies to full backup restores: restoring a backup whose
+open-trade rows carry a non-null `campaign_id` is refused with a message that
+names the affected symbol(s), because the restore would silently drop the
+campaign linkage. Clear the residue in the backup's open-trade rows first
+(same procedure as below, applied to the backup), then retry the restore.
+
 Recommended recovery flow:
 
 1. Note the affected symbol(s) from the startup log.

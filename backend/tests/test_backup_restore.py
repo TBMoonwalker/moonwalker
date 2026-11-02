@@ -621,3 +621,53 @@ async def test_restore_backup_rejects_removed_legacy_autopilot_max_fund_key(
 
     await Tortoise.close_connections()
     Config._instance = None
+
+
+@pytest.mark.asyncio
+async def test_restore_refuses_open_trade_campaign_residue_before_writes(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+    monkeypatch.setattr(Config, "instance", classmethod(_fake_config_instance))
+    Config._instance = None
+
+    import model
+
+    await model.AppConfig.create(
+        key="timezone", value="Europe/Vienna", value_type="str"
+    )
+    await model.OpenTrades.create(
+        symbol="LEG/USDC",
+        amount=1.0,
+        cost=10.0,
+        current_price=11.0,
+        avg_price=10.0,
+        open_date="1",
+    )
+
+    backup_service = BackupService()
+    backup_payload = await backup_service.export_backup(include_trade_data=True)
+    # Simulate a pre-4.9 backup: the open-trade row still references a legacy
+    # campaign that the 4.9 contract migration drops from the schema.
+    backup_payload["trade_data"]["open_trades"][0]["campaign_id"] = "campaign-legacy-1"
+
+    with pytest.raises(ValueError, match="legacy campaign residue"):
+        await backup_service.restore_backup(
+            backup_payload,
+            restore_trade_data=True,
+        )
+
+    # The refusal happens before the restore transaction: nothing was written.
+    restored = await model.OpenTrades.all()
+    assert len(restored) == 1
+    assert restored[0].symbol == "LEG/USDC"
+    timezone_row = await model.AppConfig.get(key="timezone")
+    assert timezone_row.value == "Europe/Vienna"
+
+    await Tortoise.close_connections()
+    Config._instance = None
