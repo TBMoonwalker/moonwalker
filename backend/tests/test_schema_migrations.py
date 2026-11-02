@@ -340,6 +340,29 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
         spotcampaigns = connection.execute(
             "SELECT campaign_id, symbol, state FROM spotcampaigns"
         ).fetchall()
+        placement_intent = connection.execute(
+            "SELECT operation_id, client_order_id, exchange_name, symbol, "
+            "deal_id, state FROM placement_intents"
+        ).fetchone()
+        placement_indexes = {
+            tuple(
+                column[2]
+                for column in connection.execute(
+                    f"PRAGMA index_info('{index_row[1]}')"
+                ).fetchall()
+            ): index_row[2]
+            for index_row in connection.execute(
+                "PRAGMA index_list('placement_intents')"
+            ).fetchall()
+            if index_row[1]
+        }
+        placement_triggers = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'trigger' AND tbl_name = 'placement_intents'"
+            ).fetchall()
+        }
 
     assert len(ledger_rows) == 20
     assert ("2026-11-01-021-campaign-column-drop", "applied") in ledger_rows
@@ -397,6 +420,25 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
     assert "idx_tradeexecutions_deal_time" in remaining_indexes
     # The orphan campaign table and its rows are intentionally untouched.
     assert spotcampaigns == [("campaign-eth-usdc-2024", "ETH/USDC", "exited")]
+    # A populated placement_intents survives the rebuild with its row data,
+    # unique constraints and named indexes intact.
+    assert placement_intent == (
+        "op-legacy-1",
+        "cli-legacy-1",
+        "binance",
+        "BTC/USDC",
+        "legacy-deal-btc-usdc",
+        "submitted",
+    )
+    assert placement_indexes[("operation_id",)] == 1
+    assert placement_indexes[("client_order_id",)] == 1
+    assert ("state", "symbol") in placement_indexes
+    assert ("exchange_order_id",) in placement_indexes
+    assert ("deal_id",) in placement_indexes
+    # The history-revision trigger created by the accumulation migrations
+    # survives the rebuild: real installs carry it, and the drop must not
+    # silently lose it.
+    assert "history_revision_placement_intents_identity" in placement_triggers
 
 
 @pytest.mark.asyncio
@@ -596,3 +638,98 @@ async def test_startup_migrates_archive_column_when_old_migrations_already_appli
         version="2026-10-23-015-accumulation-dust-archive"
     )
     assert ledger.status == "applied"
+
+
+@pytest.mark.asyncio
+async def test_contract_drop_rebuild_refuses_foreign_keys_and_triggers(
+    tmp_path,
+) -> None:
+    """Value: protects=destructive-migration guard (the 021 table rebuild
+    refuses foreign keys and triggers that reference dropped columns, while
+    preserving triggers that reference only kept columns);
+    fails_when=a rebuild silently drops FK/trigger constraints or partially
+    rebuilds a table; why_new=the 4.9 fixture tables never carry foreign keys
+    or triggers, so both refusal branches and the trigger-preservation path
+    are unexercised; seam=none;
+    no_claim=does not assert production table shapes."""
+    await Tortoise.close_connections()
+    db_path = tmp_path / "contract-drop-refusals.sqlite"
+    with closing(sqlite3.connect(db_path)) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE fk_parent (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NULL
+            );
+            CREATE TABLE fk_child (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NULL,
+                parent_id INTEGER NOT NULL,
+                FOREIGN KEY (parent_id) REFERENCES fk_parent(id)
+            );
+            INSERT INTO fk_parent (id, campaign_id) VALUES (1, 'parent-1');
+            INSERT INTO fk_child (id, campaign_id, parent_id) VALUES (1, 'child-1', 1);
+            CREATE TABLE triggered (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NULL
+            );
+            CREATE TRIGGER trg AFTER INSERT ON triggered BEGIN SELECT 1; END;
+            CREATE TABLE triggered_dropped_ref (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NULL
+            );
+            CREATE TRIGGER trg_dropped_ref AFTER UPDATE OF campaign_id
+            ON triggered_dropped_ref BEGIN SELECT 1; END;
+            """
+        )
+        connection.commit()
+
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    conn = Tortoise.get_connection("default")
+    try:
+        with pytest.raises(RuntimeError, match="foreign keys"):
+            await Database._rebuild_table_without_columns(
+                conn, "fk_child", ("campaign_id",)
+            )
+        with pytest.raises(RuntimeError, match="trigger.*campaign_id"):
+            await Database._rebuild_table_without_columns(
+                conn, "triggered_dropped_ref", ("campaign_id",)
+            )
+        # A trigger that references no dropped column survives the rebuild.
+        await Database._rebuild_table_without_columns(
+            conn, "triggered", ("campaign_id",)
+        )
+    finally:
+        await Tortoise.close_connections()
+
+    # The refusals left both refused tables untouched: no partial rebuild.
+    with closing(sqlite3.connect(db_path)) as connection:
+        child_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info('fk_child')").fetchall()
+        }
+        dropped_ref_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info('triggered_dropped_ref')"
+            ).fetchall()
+        }
+        triggered_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info('triggered')").fetchall()
+        }
+        triggered_triggers = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'trigger' AND tbl_name = 'triggered'"
+            ).fetchall()
+        }
+        child_rows = connection.execute(
+            "SELECT id, campaign_id FROM fk_child"
+        ).fetchall()
+    assert "campaign_id" in child_columns
+    assert "campaign_id" in dropped_ref_columns
+    assert "campaign_id" not in triggered_columns
+    assert "trg" in triggered_triggers
+    assert child_rows == [(1, "child-1")]

@@ -742,3 +742,144 @@ async def test_background_replay_backfill_does_not_raise_on_failure(
     monkeypatch.setattr(Database, "_backfill_trade_replay_candles", raise_failure)
 
     await database.backfill_trade_replay_candles_if_needed()
+
+
+@pytest.mark.asyncio
+async def test_database_init_msv_preflight_records_baseline_and_is_report_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Value: protects=MSV preflight wiring in Database.init (baseline recorded
+    before any migration callback; a preflight failure never blocks startup);
+    fails_when=a preflight exception aborts init or the baseline is not recorded
+    for the reporting surface; why_new=the init ordering test records the
+    migration steps but never exercises the preflight seam; seam=none;
+    no_claim=does not assert warning-log wording."""
+    from service.msv import (
+        evaluate_msv_baseline,
+        get_msv_baseline,
+        set_msv_baseline,
+    )
+
+    recorded: list[str] = []
+    fresh_baseline = evaluate_msv_baseline(False, False)
+
+    async def record_preflight() -> object:
+        recorded.append("preflight")
+        set_msv_baseline(fresh_baseline)
+        return fresh_baseline
+
+    async def fake_tortoise_init(*_args, **_kwargs) -> object:
+        recorded.append("tortoise_init")
+        return object()
+
+    def _record(name: str):
+        async def _step(*_args, **_kwargs) -> None:
+            recorded.append(name)
+
+        return _step
+
+    monkeypatch.setenv("MOONWALKER_DB_URL", "sqlite:///tmp/msv-preflight.sqlite")
+    monkeypatch.setattr("service.database.Tortoise.init", fake_tortoise_init)
+    monkeypatch.setattr(
+        "service.database.Tortoise.generate_schemas", _record("generate_schemas")
+    )
+    monkeypatch.setattr(
+        "service.database.bootstrap_sqlite_migration_ledger",
+        _record("bootstrap_migration_ledger"),
+    )
+    monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _record("apply_pragmas"))
+    monkeypatch.setattr(Database, "_run_schema_init_steps", _record("schema_steps"))
+    monkeypatch.setattr(
+        Database, "_repair_index_only_corruption_if_needed", _record("repair")
+    )
+    monkeypatch.setattr(Database, "_run_backfill_init_steps", _record("backfill"))
+    monkeypatch.setattr("service.database.preflight_msv", record_preflight)
+
+    try:
+        await Database().init()
+
+        assert recorded == [
+            "tortoise_init",
+            "apply_pragmas",
+            "bootstrap_migration_ledger",
+            "generate_schemas",
+            "preflight",
+            "schema_steps",
+            "repair",
+            "backfill",
+        ]
+        assert get_msv_baseline() is fresh_baseline
+
+        async def failing_preflight() -> object:
+            raise RuntimeError("simulated ledger read failure")
+
+        monkeypatch.setattr("service.database.preflight_msv", failing_preflight)
+        phase_b: list[str] = []
+
+        def _record_b(name: str):
+            async def _step_b(*_args, **_kwargs) -> None:
+                phase_b.append(name)
+
+            return _step_b
+
+        monkeypatch.setattr(
+            Database, "_run_schema_init_steps", _record_b("schema_steps")
+        )
+        monkeypatch.setattr(
+            Database,
+            "_repair_index_only_corruption_if_needed",
+            _record_b("repair"),
+        )
+        monkeypatch.setattr(Database, "_run_backfill_init_steps", _record_b("backfill"))
+        await Database().init()
+        assert phase_b == ["schema_steps", "repair", "backfill"]
+    finally:
+        set_msv_baseline(None)
+
+
+@pytest.mark.asyncio
+async def test_backfill_trade_ledger_rows_keeps_execution_history_complete(
+    tmp_path,
+) -> None:
+    """Value: protects=retired has_legacy_partial backfill guard (an open deal
+    with a partial sell keeps execution_history_complete);
+    fails_when=migration 007 downgrades a partially-sold open trade to
+    execution_history_complete=False; why_new=existing fixture rows carry
+    sold_amount=0, so the retired branch is never discriminated; seam=none;
+    no_claim=does not assert execution-ledger row content."""
+    import model
+
+    db_path = tmp_path / "partial-sell-backfill.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+    try:
+        await model.Trades.create(
+            timestamp="1714726800000",
+            ordersize=100.0,
+            fee=0.1,
+            precision=8,
+            amount=1.0,
+            amount_fee=0.0,
+            price=100.0,
+            symbol="BTC/USDC",
+            orderid="legacy-buy-1",
+            bot="legacy_asap",
+            ordertype="market",
+            baseorder=True,
+            safetyorder=False,
+            direction="long",
+            side="buy",
+        )
+        await model.OpenTrades.create(symbol="BTC/USDC", sold_amount=2.5)
+
+        database = Database()
+        database.db_url = f"sqlite://{db_path}"
+        await database._backfill_trade_ledger_rows()
+
+        open_trade = await model.OpenTrades.get(symbol="BTC/USDC")
+        assert open_trade.execution_history_complete is True
+        assert open_trade.deal_id
+        trade = await model.Trades.get(orderid="legacy-buy-1")
+        assert trade.deal_id == open_trade.deal_id
+    finally:
+        await Tortoise.close_connections()

@@ -321,3 +321,35 @@ async def test_replay_indicators_load_warmup_before_visible_window(
     assert payload["strategies"] == ["ema_swing"]
     assert payload["indicators"][0]["values"][0]["time"] == visible_start
     assert _FakeBuilder.build_calls == [(5, 3)]
+
+
+@pytest.mark.asyncio
+async def test_replay_indicators_legacy_deal_without_strategy_metadata_is_empty() -> (
+    None
+):
+    """Value: protects=post-removal replay contract (executions without strategy
+    metadata render no overlays and never fall back to the runtime config);
+    fails_when=a legacy config backfill is reintroduced or a config snapshot is
+    consulted for a strategy-less deal; why_new=the backfill tests were removed
+    with the backfill and no remaining test feeds a strategy-less execution;
+    seam=none; no_claim=does not assert chart rendering."""
+    _FakeBuilder.calls = []
+    _FakeBuilder.build_calls = []
+    _FakeBuilder.warmup_candles = 0
+
+    async def refuse_config_snapshot() -> dict[str, Any]:
+        raise AssertionError("config snapshot must not backfill legacy strategies")
+
+    service = TradeReplayIndicatorService(
+        _FakeTrades([_execution(None)]),
+        config_snapshot_provider=refuse_config_snapshot,
+    )
+
+    payload = await service.get_indicators(
+        DEAL_ID, "1h", 1_700_000_000_000, 1_700_000_006_000
+    )
+
+    assert payload["strategies"] == []
+    assert payload["indicators"] == []
+    assert payload["source"] == "execution_ledger"
+    assert _FakeBuilder.calls == []
