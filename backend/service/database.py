@@ -942,8 +942,12 @@ class Database:
         into opentrades/placement_intents, and the rebuild must toggle
         ``PRAGMA foreign_keys`` around the drop, which SQLite only allows
         outside a transaction. Every rebuild restores its rows with their
-        original IDs, so incoming references stay valid and each rebuild is
-        resumable (a table whose columns are already gone is a no-op).
+        original IDs, so incoming references stay valid. Each rebuild's
+        mutation phase is one explicit transaction, so an error or a killed
+        process leaves the original table intact; a table whose columns are
+        already gone is a no-op, and a missing table alongside its
+        side table (a crash in an older, non-atomic build) is refused with
+        an actionable error instead of a silent no-op.
         """
         if not self.db_url.startswith("sqlite://"):
             return
@@ -977,6 +981,40 @@ class Database:
         )
 
     @staticmethod
+    async def _assert_no_orphaned_campaign_rebuild_tables(db_url: str) -> None:
+        """Fail closed on a crashed campaign-drop rebuild before schemas run.
+
+        A non-atomic rebuild that crashed between ``DROP TABLE`` and the
+        rename-back leaves the original table missing while its rows sit in
+        the ``<table>_campaign_drop_rebuild`` side table.
+        ``Tortoise.generate_schemas`` would recreate the original table
+        empty before the migration runs, and the rebuild would then no-op
+        silently, losing the stranded rows. This check therefore runs before
+        schema generation.
+        """
+        if not db_url.startswith("sqlite://"):
+            return
+        conn = Tortoise.get_connection("default")
+        for table, _drop_columns in _LEGACY_CAMPAIGN_REBUILDS:
+            _, original_columns = await conn.execute_query(
+                f"PRAGMA table_info({table})"
+            )
+            if original_columns:
+                continue
+            side_table = f"{table}_campaign_drop_rebuild"
+            _, side_columns = await conn.execute_query(
+                f"PRAGMA table_info({side_table})"
+            )
+            if side_columns:
+                raise RuntimeError(
+                    f"Startup aborted: {table} is missing, but an "
+                    f"interrupted campaign-drop rebuild left its rows in "
+                    f"{side_table}. Rename {side_table} back to {table} "
+                    "(or restore from a backup), then start Moonwalker "
+                    "again."
+                )
+
+    @staticmethod
     async def _rebuild_table_without_columns(
         conn: Any,
         table: str,
@@ -993,13 +1031,31 @@ class Database:
         enforcement temporarily disabled so incoming foreign keys (held by
         the accumulation tables) keep their references: the rows are
         restored with their original IDs. The AUTOINCREMENT high-water mark
-        is preserved across the rebuild. A table with foreign keys, or a
-        trigger that references a dropped column, is refused rather than
-        rebuilt; expression and partial indexes are refused as well because
-        the rebuild cannot redeclare them.
+        is preserved across the rebuild. The mutation phase (drop, copy,
+        rename, index, trigger and sequence restore) runs inside one explicit
+        BEGIN...COMMIT transaction, so on failure the original table is left
+        intact. A missing original table alongside its side table (a crash
+        in an older, non-atomic rebuild that committed each statement) is
+        refused rather than silently no-opped: the rows are stranded in the
+        side table and must be recovered first. A table with foreign keys,
+        or a trigger that references a dropped column, is refused rather
+        than rebuilt; expression and partial indexes are refused as well
+        because the rebuild cannot redeclare them.
         """
         _, columns = await conn.execute_query(f"PRAGMA table_info({table})")
         if not columns:
+            side_table = f"{table}_campaign_drop_rebuild"
+            _, side_columns = await conn.execute_query(
+                f"PRAGMA table_info({side_table})"
+            )
+            if side_columns:
+                raise RuntimeError(
+                    f"Startup aborted: {table} is missing, but an "
+                    f"interrupted campaign-drop rebuild left its rows in "
+                    f"{side_table}. Rename {side_table} back to {table} "
+                    "(or restore from a backup), then start Moonwalker "
+                    "again."
+                )
             return
         to_drop = {
             name for name in drop_columns if any(row["name"] == name for row in columns)
@@ -1122,45 +1178,59 @@ class Database:
         if fk_on:
             await conn.execute_query("PRAGMA foreign_keys=OFF")
         try:
-            await conn.execute_query(f"DROP TABLE IF EXISTS {new_table}")
-            await conn.execute_query(f"CREATE TABLE {new_table} ({table_sql})")
-            kept_names = ", ".join(row["name"] for row in kept_columns)
-            await conn.execute_query(
-                f"INSERT INTO {new_table} ({kept_names}) SELECT {kept_names} FROM {table}"
-            )
-            await conn.execute_query(f"DROP TABLE {table}")
-            await conn.execute_query(f"ALTER TABLE {new_table} RENAME TO {table}")
-            for index_name, unique, index_columns in recreated_indexes:
-                unique_sql = "UNIQUE " if unique else ""
+            # An explicit transaction makes the dance atomic: the connection
+            # is autocommit (isolation_level=None), so without it a failure
+            # or a killed process between `DROP TABLE` and the rename-back
+            # would commit the drop and strand every row in the side table.
+            # On failure the rollback restores the original state.
+            await conn.execute_query("BEGIN")
+            try:
+                await conn.execute_query(f"DROP TABLE IF EXISTS {new_table}")
+                await conn.execute_query(f"CREATE TABLE {new_table} ({table_sql})")
+                kept_names = ", ".join(row["name"] for row in kept_columns)
                 await conn.execute_query(
-                    f"CREATE {unique_sql}INDEX {index_name} "
-                    f"ON {table} ({', '.join(index_columns)})"
+                    f"INSERT INTO {new_table} ({kept_names}) "
+                    f"SELECT {kept_names} FROM {table}"
                 )
-            for trigger in triggers:
-                await conn.execute_query(trigger["sql"])
-            if autoincrement:
-                pk_name = next(row["name"] for row in kept_columns if row["pk"])
-                max_rows = (
-                    await conn.execute_query(f"SELECT MAX({pk_name}) AS m FROM {table}")
-                )[1]
-                preserved = (
-                    seq_value if seq_value is not None else (max_rows[0]["m"] or 0)
-                )
-                remaining = (
+                await conn.execute_query(f"DROP TABLE {table}")
+                await conn.execute_query(f"ALTER TABLE {new_table} RENAME TO {table}")
+                for index_name, unique, index_columns in recreated_indexes:
+                    unique_sql = "UNIQUE " if unique else ""
                     await conn.execute_query(
-                        f"SELECT seq FROM sqlite_sequence WHERE name = '{table}'"
+                        f"CREATE {unique_sql}INDEX {index_name} "
+                        f"ON {table} ({', '.join(index_columns)})"
                     )
-                )[1]
-                if remaining:
-                    await conn.execute_query(
-                        f"UPDATE sqlite_sequence SET seq = {preserved} "
-                        f"WHERE name = '{table}'"
+                for trigger in triggers:
+                    await conn.execute_query(trigger["sql"])
+                if autoincrement:
+                    pk_name = next(row["name"] for row in kept_columns if row["pk"])
+                    max_rows = (
+                        await conn.execute_query(
+                            f"SELECT MAX({pk_name}) AS m FROM {table}"
+                        )
+                    )[1]
+                    preserved = (
+                        seq_value if seq_value is not None else (max_rows[0]["m"] or 0)
                     )
-                elif preserved:
-                    await conn.execute_query(
-                        f"INSERT INTO sqlite_sequence (name, seq) "
-                        f"VALUES ('{table}', {preserved})"
-                    )
+                    remaining = (
+                        await conn.execute_query(
+                            f"SELECT seq FROM sqlite_sequence WHERE name = '{table}'"
+                        )
+                    )[1]
+                    if remaining:
+                        await conn.execute_query(
+                            f"UPDATE sqlite_sequence SET seq = {preserved} "
+                            f"WHERE name = '{table}'"
+                        )
+                    elif preserved:
+                        await conn.execute_query(
+                            f"INSERT INTO sqlite_sequence (name, seq) "
+                            f"VALUES ('{table}', {preserved})"
+                        )
+                await conn.execute_query("COMMIT")
+            except Exception:
+                await conn.execute_query("ROLLBACK")
+                raise
         finally:
             if fk_on:
                 await conn.execute_query("PRAGMA foreign_keys=ON")
@@ -1436,6 +1506,7 @@ class Database:
             )
             await self._apply_sqlite_pragmas()
             await bootstrap_sqlite_migration_ledger(db_url)
+            await self._assert_no_orphaned_campaign_rebuild_tables(db_url)
             # Generate the schema
             await Tortoise.generate_schemas()
             # The preflight reads the ledger before any migration callback runs,

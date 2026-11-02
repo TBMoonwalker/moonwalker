@@ -6,6 +6,7 @@ import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from typing import Any
 
 import model
 import pytest
@@ -925,3 +926,123 @@ async def test_contract_drop_rebuild_refuses_expression_and_partial_indexes(
             }
             assert "campaign_id" in columns
             assert ("idx_expr" if table == "expr_indexed" else "idx_partial") in indexes
+
+
+@pytest.mark.asyncio
+async def test_contract_drop_rebuild_rolls_back_when_ddl_fails_mid_dance(
+    tmp_path,
+) -> None:
+    """Value: protects=atomicity of the 021 table rebuild (a statement
+    failure or killed process mid-dance must roll the whole dance back and
+    leave the original table intact); fails_when=the mutation phase
+    autocommits each statement so a failure between DROP TABLE and the
+    rename-back orphans every row in the side table and the next startup
+    silently loses them; why_new=the FK pragma toggle requires the rebuild
+    to run outside in_transaction(), so atomicity must come from an explicit
+    BEGIN...COMMIT; seam=none; no_claim=does not assert production table
+    shapes."""
+    await Tortoise.close_connections()
+    db_path = tmp_path / "contract-drop-rollback.sqlite"
+    with closing(sqlite3.connect(db_path)) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE rollback_victim (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NULL,
+                symbol TEXT NOT NULL
+            );
+            INSERT INTO rollback_victim (campaign_id, symbol)
+            VALUES (NULL, 'A/USDT'), (NULL, 'B/USDT');
+            """
+        )
+        connection.commit()
+
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    conn = Tortoise.get_connection("default")
+    original_execute = conn.execute_query
+
+    async def failing_execute(query: str, *args: Any, **kwargs: Any):
+        result = await original_execute(query, *args, **kwargs)
+        # Simulate a failure (disk error, killed process) right after the
+        # real drop commits its statement but before the rename-back.
+        if "DROP TABLE" in query and "IF EXISTS" not in query:
+            raise RuntimeError("simulated mid-ddl failure")
+        return result
+
+    conn.execute_query = failing_execute  # type: ignore[method-assign]
+    try:
+        with pytest.raises(RuntimeError, match="simulated mid-ddl failure"):
+            await Database._rebuild_table_without_columns(
+                conn, "rollback_victim", ("campaign_id",)
+            )
+        # Foreign-key enforcement is restored even on the failure path.
+        fk_state = (await conn.execute_query("PRAGMA foreign_keys"))[1]
+        assert fk_state[0][0] == 1
+    finally:
+        await Tortoise.close_connections()
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info('rollback_victim')"
+            ).fetchall()
+        }
+        rows = connection.execute(
+            "SELECT symbol FROM rollback_victim ORDER BY id"
+        ).fetchall()
+        side_table = connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE name = 'rollback_victim_campaign_drop_rebuild'"
+        ).fetchall()
+    # The rollback restored the original state: the table is intact with its
+    # rows and campaign column, and the side table is gone.
+    assert "campaign_id" in columns
+    assert [row[0] for row in rows] == ["A/USDT", "B/USDT"]
+    assert side_table == []
+
+
+@pytest.mark.asyncio
+async def test_contract_drop_refuses_orphaned_rebuild_side_table(tmp_path) -> None:
+    """Value: protects=the rows of a table whose 021 rebuild crashed between
+    DROP TABLE and the rename-back (a non-atomic build committed each
+    statement, so a kill in that window strands the rows in the side table);
+    fails_when=the next startup treats the missing table as a silent no-op,
+    applies the migration and loses the rows; why_new=the fail-closed
+    refusal turns an unrecoverable silent loss into an actionable error that
+    names the side table; seam=none; no_claim=does not assert production
+    table shapes."""
+    await Tortoise.close_connections()
+    db_path = tmp_path / "contract-drop-orphan.sqlite"
+    with closing(sqlite3.connect(db_path)) as connection:
+        # The orphan state: the side table holds the rows and the original
+        # table is missing — exactly what a crash between DROP TABLE and the
+        # rename-back leaves behind.
+        connection.executescript(
+            """
+            CREATE TABLE orphan_victim_campaign_drop_rebuild (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL
+            );
+            INSERT INTO orphan_victim_campaign_drop_rebuild (symbol)
+            VALUES ('A/USDT'), ('B/USDT');
+            """
+        )
+        connection.commit()
+
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    conn = Tortoise.get_connection("default")
+    try:
+        with pytest.raises(RuntimeError, match="orphan_victim_campaign_drop_rebuild"):
+            await Database._rebuild_table_without_columns(
+                conn, "orphan_victim", ("campaign_id",)
+            )
+    finally:
+        await Tortoise.close_connections()
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        rows = connection.execute(
+            "SELECT symbol FROM orphan_victim_campaign_drop_rebuild ORDER BY id"
+        ).fetchall()
+    # The refusal left the stranded rows in place for manual recovery.
+    assert [row[0] for row in rows] == ["A/USDT", "B/USDT"]

@@ -277,6 +277,7 @@ async def test_database_init_surfaces_actionable_sqlite_corruption(
         _run_migration_callbacks,
     )
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
+    monkeypatch.setattr(Database, "_assert_no_orphaned_campaign_rebuild_tables", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
@@ -330,6 +331,7 @@ async def test_database_init_reraises_non_corruption_failures(
         _run_migration_callbacks,
     )
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
+    monkeypatch.setattr(Database, "_assert_no_orphaned_campaign_rebuild_tables", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
@@ -386,6 +388,7 @@ async def test_database_init_surfaces_index_rebuild_guidance_for_index_only_corr
         _run_migration_callbacks,
     )
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
+    monkeypatch.setattr(Database, "_assert_no_orphaned_campaign_rebuild_tables", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
@@ -457,6 +460,11 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         _run_migration_callbacks,
     )
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _record("apply_pragmas"))
+    monkeypatch.setattr(
+        Database,
+        "_assert_no_orphaned_campaign_rebuild_tables",
+        _record("assert_no_orphaned_campaign_rebuilds"),
+    )
     monkeypatch.setattr(
         Database, "_ensure_open_trades_columns", _record("ensure_open_trades_columns")
     )
@@ -545,6 +553,7 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "tortoise_init",
         "apply_pragmas",
         "bootstrap_migration_ledger",
+        "assert_no_orphaned_campaign_rebuilds",
         "generate_schemas",
         "ensure_open_trades_columns",
         "ensure_trade_ledger_columns",
@@ -788,6 +797,11 @@ async def test_database_init_msv_preflight_records_baseline_and_is_report_only(
         _record("bootstrap_migration_ledger"),
     )
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _record("apply_pragmas"))
+    monkeypatch.setattr(
+        Database,
+        "_assert_no_orphaned_campaign_rebuild_tables",
+        _record("assert_no_orphaned_campaign_rebuilds"),
+    )
     monkeypatch.setattr(Database, "_run_schema_init_steps", _record("schema_steps"))
     monkeypatch.setattr(
         Database, "_repair_index_only_corruption_if_needed", _record("repair")
@@ -802,6 +816,7 @@ async def test_database_init_msv_preflight_records_baseline_and_is_report_only(
             "tortoise_init",
             "apply_pragmas",
             "bootstrap_migration_ledger",
+            "assert_no_orphaned_campaign_rebuilds",
             "generate_schemas",
             "preflight",
             "schema_steps",
@@ -883,3 +898,59 @@ async def test_backfill_trade_ledger_rows_keeps_execution_history_complete(
         assert trade.deal_id == open_trade.deal_id
     finally:
         await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_database_init_refuses_orphaned_campaign_rebuild_side_table(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A side table left by a crashed, non-atomic 021 rebuild must abort
+    startup BEFORE generate_schemas recreates the missing table empty:
+    after recreation the migration would no-op silently and the stranded
+    rows would be lost."""
+    db_path = tmp_path / "orphan-init.sqlite"
+    con = sqlite3.connect(db_path)
+    con.executescript(
+        """
+        CREATE TABLE opentrades_campaign_drop_rebuild (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL
+        );
+        INSERT INTO opentrades_campaign_drop_rebuild (symbol)
+        VALUES ('A/USDT'), ('B/USDT');
+        """
+    )
+    con.commit()
+    con.close()
+
+    database = Database()
+    monkeypatch.setenv("MOONWALKER_DB_URL", f"sqlite://{db_path}")
+
+    schemas_called = False
+
+    async def fake_generate_schemas(*_args: object, **_kwargs: object) -> None:
+        nonlocal schemas_called
+        schemas_called = True
+
+    monkeypatch.setattr(
+        "service.database.Tortoise.generate_schemas", fake_generate_schemas
+    )
+
+    with pytest.raises(RuntimeError, match="opentrades_campaign_drop_rebuild"):
+        await database.init()
+
+    # The refusal happens before schema generation: the original table was
+    # never recreated and the stranded rows are left intact for recovery.
+    assert schemas_called is False
+    con = sqlite3.connect(db_path)
+    recreated = con.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'opentrades'"
+    ).fetchall()
+    rows = con.execute(
+        "SELECT symbol FROM opentrades_campaign_drop_rebuild ORDER BY id"
+    ).fetchall()
+    con.close()
+    assert recreated == []
+    assert [row[0] for row in rows] == ["A/USDT", "B/USDT"]
+    await Tortoise.close_connections()
