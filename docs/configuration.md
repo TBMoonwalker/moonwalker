@@ -74,9 +74,11 @@ and manual exits, or the [accumulation reference](accumulation.md) for exact rul
 
 Moonwalker now exposes and accepts `trade_mode` as the only supported
 operator-facing lifecycle field. Older stored rows and backup payloads that
-used the since-removed `sidestep` mode are canonicalized during startup and
-restore so existing installs survive the cutover, but `/config/all` and
-supported config writes do not use the removed bridge keys anymore.
+used the since-removed `sidestep` mode carry the pre-4.9 bridge keys
+(`trade_lifecycle_mode`, `dynamic_dca`, `sidestep_campaign_enabled`), which
+the runtime no longer reads; backup restore drops those three keys silently
+so existing installs survive the cutover, and `/config/all` and supported
+config writes do not use them.
 
 ## Configuration Reference
 All supported configuration keys are listed below. Keys marked "(advanced)"
@@ -244,9 +246,10 @@ open-deal reserve estimate, and actual dynamic order sizes may vary.
 Autopilot can optionally stretch the effective limit above the global principal
 limit using realized closed profit:
 
-- Breaking change in `v1.4.0.0`: `autopilot_max_fund` was removed. Only
-  `capital_max_fund` is accepted in config writes, runtime snapshots, and
-  backup restore payloads.
+- Breaking change in `v1.4.0.0`: `autopilot_max_fund` was removed.
+  `capital_max_fund` is the only supported key: live config writes of
+  `autopilot_max_fund` persist as inert rows the runtime never reads, backup
+  exports omit it, and backup restore rejects it.
 - Stretch uses `ClosedTrades.profit` only, not uPNL.
 - Negative realized profit never reduces `capital_max_fund`.
 - `autopilot_profit_stretch_max = 0` means no stretch is added.
