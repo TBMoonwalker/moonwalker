@@ -217,10 +217,10 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A supported prior-release database survives interruption and repeat startup."""
+    """A supported 4.9 database survives interruption, drop, and repeat startup."""
     await Tortoise.close_connections()
-    db_path = tmp_path / "legacy-v4.3.0.sqlite"
-    fixture_sql = (FIXTURE_DIR / "legacy_v4_3_0.sql").read_text(encoding="utf-8")
+    db_path = tmp_path / "legacy-v4.9.0.sqlite"
+    fixture_sql = (FIXTURE_DIR / "legacy_v4_9_0.sql").read_text(encoding="utf-8")
     with closing(sqlite3.connect(db_path)) as connection:
         connection.executescript(fixture_sql)
         connection.commit()
@@ -284,7 +284,7 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             "WHERE symbol = 'BTC/USDC'"
         ).fetchall()
         legacy_closed_trade = connection.execute(
-            "SELECT symbol, profit, amount, cost, close_date "
+            "SELECT symbol, profit, amount, cost, close_date, deal_id, close_reason "
             "FROM closedtrades WHERE symbol = 'ETH/USDC'"
         ).fetchone()
         ai_columns = {
@@ -316,8 +316,33 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
                 "PRAGMA index_list('tradeexecutions')"
             ).fetchall()
         }
+        dropped_columns = {
+            table: {
+                row[1]
+                for row in connection.execute(
+                    f"PRAGMA table_info('{table}')"
+                ).fetchall()
+            }
+            for table in (
+                "opentrades",
+                "trades",
+                "closedtrades",
+                "tradeexecutions",
+                "placement_intents",
+            )
+        }
+        remaining_indexes = {
+            row[1]
+            for table in ("trades", "closedtrades", "tradeexecutions")
+            for row in connection.execute(f"PRAGMA index_list('{table}')").fetchall()
+            if row[1]
+        }
+        spotcampaigns = connection.execute(
+            "SELECT campaign_id, symbol, state FROM spotcampaigns"
+        ).fetchall()
 
-    assert len(ledger_rows) == 19
+    assert len(ledger_rows) == 20
+    assert ("2026-11-01-021-campaign-column-drop", "applied") in ledger_rows
     assert ("2026-10-28-020-manual-stop-valuation", "applied") in ledger_rows
     assert "2026-10-27-019-accumulation-contributions" in {
         version for version, _ in ledger_rows
@@ -341,11 +366,191 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
         2.0,
         100.0,
         "2024-05-02 09:00:00+00:00",
+        "legacy-deal-eth-usdc",
+        "take_profit",
     )
     assert "evaluation_id" in ai_columns
     assert "funds_locked" in upnl_columns
     assert {"strategy_slug", "strategy_version"} <= execution_columns
     assert ("strategy_slug", "strategy_version") in execution_index_columns
+    # The contract migration dropped the campaign channel from every table.
+    for table, columns in dropped_columns.items():
+        assert "campaign_id" not in columns, table
+    assert not (
+        {
+            "reserved_reentry_quote",
+            "waiting_reference_price",
+            "waiting_reference_amount",
+            "waiting_reference_quote",
+            "virtual_waiting_profit",
+            "virtual_waiting_profit_percent",
+            "last_transition_at",
+        }
+        & dropped_columns["opentrades"]
+    )
+    assert "exposure_state" in dropped_columns["opentrades"]
+    assert "lifecycle_mode" in dropped_columns["opentrades"]
+    # Campaign indexes died with their tables; named survivors were recreated.
+    assert not any("campaign" in name for name in remaining_indexes)
+    assert "idx_trades_deal_id_timestamp" in remaining_indexes
+    assert "idx_closedtrades_close_reason" in remaining_indexes
+    assert "idx_tradeexecutions_deal_time" in remaining_indexes
+    # The orphan campaign table and its rows are intentionally untouched.
+    assert spotcampaigns == [("campaign-eth-usdc-2024", "ETH/USDC", "exited")]
+
+
+@pytest.mark.asyncio
+async def test_contract_drop_migration_resumes_after_interruption(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An interrupted contract drop re-runs cleanly and keeps every row."""
+    await Tortoise.close_connections()
+    db_path = tmp_path / "legacy-v4.9.0.sqlite"
+    fixture_sql = (FIXTURE_DIR / "legacy_v4_9_0.sql").read_text(encoding="utf-8")
+    with closing(sqlite3.connect(db_path)) as connection:
+        connection.executescript(fixture_sql)
+        connection.commit()
+
+    monkeypatch.setenv("MOONWALKER_DB_URL", f"sqlite://{db_path}")
+    original_drop = Database._drop_legacy_campaign_columns
+    attempts = 0
+
+    async def interrupted_drop(database: Database) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("simulated contract migration interruption")
+        await original_drop(database)
+
+    monkeypatch.setattr(Database, "_drop_legacy_campaign_columns", interrupted_drop)
+
+    interrupted_database = Database()
+    with pytest.raises(RuntimeError, match="restart.*resume safely"):
+        await interrupted_database.init()
+    await interrupted_database.shutdown()
+    await Tortoise.close_connections()
+
+    # The interrupted drop was recorded as failed and nothing was rebuilt.
+    with closing(sqlite3.connect(db_path)) as connection:
+        failed_row = connection.execute(
+            "SELECT status, error FROM schema_migrations "
+            "WHERE version = '2026-11-01-021-campaign-column-drop'"
+        ).fetchone()
+        open_trade_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info('opentrades')").fetchall()
+        }
+    assert failed_row == ("failed", "simulated contract migration interruption")
+    assert "campaign_id" in open_trade_columns
+
+    resumed_database = Database()
+    await resumed_database.init()
+    await resumed_database.shutdown()
+    await Tortoise.close_connections()
+
+    assert attempts == 2
+    with closing(sqlite3.connect(db_path)) as connection:
+        applied_row = connection.execute(
+            "SELECT status FROM schema_migrations "
+            "WHERE version = '2026-11-01-021-campaign-column-drop'"
+        ).fetchone()
+        open_trade_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info('opentrades')").fetchall()
+        }
+        open_trade = connection.execute(
+            "SELECT symbol, deal_id, lifecycle_mode, exposure_state "
+            "FROM opentrades WHERE symbol = 'BTC/USDC'"
+        ).fetchone()
+        closed_trade = connection.execute(
+            "SELECT symbol, deal_id, close_reason FROM closedtrades "
+            "WHERE symbol = 'ETH/USDC'"
+        ).fetchone()
+    assert applied_row == ("applied",)
+    assert "campaign_id" not in open_trade_columns
+    assert open_trade == (
+        "BTC/USDC",
+        "legacy-deal-btc-usdc",
+        "classic_dca",
+        "long_exposed",
+    )
+    assert closed_trade == (
+        "ETH/USDC",
+        "legacy-deal-eth-usdc",
+        "take_profit",
+    )
+
+
+@pytest.mark.asyncio
+async def test_open_trade_campaign_residue_aborts_startup(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live open-trade campaign residue blocks startup until it is cleared."""
+    await Tortoise.close_connections()
+    db_path = tmp_path / "legacy-v4.9.0.sqlite"
+    fixture_sql = (FIXTURE_DIR / "legacy_v4_9_0.sql").read_text(encoding="utf-8")
+    with closing(sqlite3.connect(db_path)) as connection:
+        connection.executescript(fixture_sql)
+        connection.execute(
+            "UPDATE opentrades SET campaign_id = 'campaign-residue-1' "
+            "WHERE symbol = 'BTC/USDC'"
+        )
+        connection.commit()
+
+    monkeypatch.setenv("MOONWALKER_DB_URL", f"sqlite://{db_path}")
+
+    blocked_database = Database()
+    with pytest.raises(RuntimeError, match="restart.*resume safely") as excinfo:
+        await blocked_database.init()
+    await blocked_database.shutdown()
+    await Tortoise.close_connections()
+
+    cause_message = str(excinfo.value.__cause__)
+    assert "opentrades" in cause_message
+    assert "BTC/USDC" in cause_message
+    assert "Moonwalker will not start until this is resolved" in cause_message
+    assert "docs/operations.md" in cause_message
+
+    # The failed drop rolled back: the residue and the columns are intact.
+    with closing(sqlite3.connect(db_path)) as connection:
+        open_trade_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info('opentrades')").fetchall()
+        }
+        residue = connection.execute(
+            "SELECT symbol, campaign_id FROM opentrades WHERE symbol = 'BTC/USDC'"
+        ).fetchone()
+        failed_row = connection.execute(
+            "SELECT status FROM schema_migrations "
+            "WHERE version = '2026-11-01-021-campaign-column-drop'"
+        ).fetchone()
+    assert "campaign_id" in open_trade_columns
+    assert residue == ("BTC/USDC", "campaign-residue-1")
+    assert failed_row == ("failed",)
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        connection.execute(
+            "UPDATE opentrades SET campaign_id = NULL WHERE symbol = 'BTC/USDC'"
+        )
+        connection.commit()
+
+    resumed_database = Database()
+    await resumed_database.init()
+    await resumed_database.shutdown()
+    await Tortoise.close_connections()
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        open_trade_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info('opentrades')").fetchall()
+        }
+        open_trade = connection.execute(
+            "SELECT symbol, deal_id FROM opentrades WHERE symbol = 'BTC/USDC'"
+        ).fetchone()
+    assert "campaign_id" not in open_trade_columns
+    assert open_trade is not None
 
 
 @pytest.mark.asyncio

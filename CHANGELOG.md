@@ -4,6 +4,21 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Remove historical campaign linkage from the trade database. A new schema
+  migration rebuilds the trade tables without the dormant campaign columns
+  (`campaign_id` on `trades`, `closedtrades`, `tradeexecutions`,
+  `placement_intents`, and `opentrades`, plus the seven unused sidestep-era
+  waiting-state columns on `opentrades`) and drops their indexes. Historical
+  closed trades keep their full trade data, but the campaign they once
+  belonged to is no longer stored or shown, and dashboard row identity falls
+  back to `deal_id` (then the row id).
+- Startup aborts with an action message when an open trade still carries a
+  non-null `campaign_id` residue. The migration does not run until the
+  residue is reviewed and cleared. See "Campaign residue recovery" in
+  `docs/operations.md` for the documented flow.
+
 ### Removed
 
 - The legacy trade-mode bridge keys (`trade_lifecycle_mode`, top-level

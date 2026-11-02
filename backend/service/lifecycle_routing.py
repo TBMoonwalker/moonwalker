@@ -8,8 +8,8 @@ from enum import StrEnum
 from uuid import UUID
 
 import model
+from service.lifecycle_types import TradeLifecycleMode, parse_lifecycle_mode
 from service.order_requests import normalize_order_symbol
-from service.spot_campaign_types import TradeLifecycleMode, parse_lifecycle_mode
 from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction

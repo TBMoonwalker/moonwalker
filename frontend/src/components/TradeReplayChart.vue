@@ -122,7 +122,6 @@ const props = defineProps<{
     startTimestamp: number | string
     endTimestamp?: number | string | null
     dealId?: string | null
-    campaignId?: string | null
     archiveDealId?: string | null
     minTimeframe: TimeframeChoice
     markers: TradeReplayMarker[]
@@ -179,15 +178,6 @@ function toTimestampMs(value: number | string | null | undefined): number | null
     }
     const parsed = Date.parse(String(value))
     return Number.isFinite(parsed) ? parsed : null
-}
-
-function normalizeUuid(value: string | null | undefined): string | null {
-    const normalized = String(value ?? '').trim()
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        normalized,
-    )
-        ? normalized
-        : null
 }
 
 function normalizeCandleRows(payload: unknown): ReplayCandleRow[] {
@@ -259,21 +249,17 @@ async function loadReplayIndicators(
     historyEnd: number | null,
 ): Promise<void> {
     replayIndicators.value = []
-    const campaignId = normalizeUuid(props.campaignId)
-    const dealId = props.dealId ?? props.archiveDealId ?? campaignId
+    const dealId = props.dealId ?? props.archiveDealId
     if (!dealId) {
         return
     }
     const indicatorEnd = historyEnd ?? Date.now()
-    const campaignQuery = campaignId
-        ? `?campaign_id=${encodeURIComponent(campaignId)}`
-        : ''
     try {
         const indicatorUrl =
             `/trades/replay/indicators/${dealId}/` +
             `${timeframe.timerange}/${historyStart}/${indicatorEnd}`
         const payload = await fetchJson<ReplayIndicatorResponse>(
-            `${indicatorUrl}${campaignQuery}`,
+            indicatorUrl,
         )
         replayIndicators.value = Array.isArray(payload.result?.indicators)
             ? payload.result.indicators

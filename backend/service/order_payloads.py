@@ -101,7 +101,6 @@ def build_closed_trade_payloads(
 
     payload: ClosedTradePersistenceRecord = {
         "symbol": symbol,
-        "campaign_id": order_status.get("campaign_id"),
         "so_count": so_count,
         "profit": profit,
         "profit_percent": profit_percent,
@@ -179,7 +178,6 @@ def build_final_sell_executions(
                 if order_status.get("metadata_json")
                 else {}
             ),
-            "campaign_id": order_status.get("campaign_id"),
             "timestamp": str(timestamp),
             "price": float(order_status.get("price") or 0.0),
             "amount": amount,
@@ -221,7 +219,6 @@ def build_buy_trade_payload(
         "price": float(order_status["price"]),
         "symbol": order_status["symbol"],
         "orderid": order_status["orderid"],
-        "campaign_id": order_status.get("campaign_id"),
         "bot": order_status["botname"],
         "ordertype": order_status["ordertype"],
         "baseorder": order_status["baseorder"],
@@ -244,7 +241,6 @@ def build_buy_monitor_payload(order_status: ExchangeOrderPayload) -> dict[str, A
     return {
         "symbol": order_status["symbol"],
         "side": "buy",
-        "campaign_id": order_status.get("campaign_id"),
         "timestamp": order_status["timestamp"],
         "ordersize": order_status["ordersize"],
         "price": order_status["price"],
@@ -284,7 +280,6 @@ def build_manual_buy_trade_payload(
         "amount": float(amount),
         "price": float(price),
         "symbol": normalized_symbol,
-        "campaign_id": trade_data.get("campaign_id"),
         "orderid": (
             f"manual-add-{normalized_symbol.replace('/', '')}-"
             f"{int(timestamp_ms)}-{order_count}"

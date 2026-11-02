@@ -8,8 +8,8 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from service.accumulation.contracts import AccumulationIdentity
+from service.lifecycle_types import TradeLifecycleMode, parse_lifecycle_mode
 from service.order_requests import normalize_order_symbol
-from service.spot_campaign_types import TradeLifecycleMode, parse_lifecycle_mode
 
 
 def _stable_revision(value: Any) -> str:
@@ -34,7 +34,6 @@ class LifecycleSnapshotIdentity:
 
     symbol: str
     deal_id: str | None
-    campaign_id: str | None
     execution_count: int
     config_revision: str
     automation_paused: bool
@@ -65,7 +64,6 @@ class LifecycleSnapshotIdentity:
         return cls(
             symbol=normalize_order_symbol(str(trade.get("symbol") or "")),
             deal_id=_optional_string(trade.get("deal_id")),
-            campaign_id=_optional_string(trade.get("campaign_id")),
             execution_count=execution_count,
             config_revision=build_config_revision(config),
             automation_paused=bool(trade.get("automation_paused", False)),
@@ -86,7 +84,6 @@ class LifecycleSnapshotIdentity:
         return cls(
             symbol=normalize_order_symbol(str(payload.get("symbol") or "")),
             deal_id=_optional_string(payload.get("deal_id")),
-            campaign_id=_optional_string(payload.get("campaign_id")),
             execution_count=int(payload.get("execution_count") or 0),
             config_revision=str(payload.get("config_revision") or ""),
             automation_paused=bool(payload.get("automation_paused", False)),

@@ -190,7 +190,6 @@ class _DummyTradeExecutionsModel:
 
 class _DummyOpenTradeRow:
     deal_id = "a2f3a070-875a-49c3-87cf-06f9514dfac0"
-    campaign_id = None
     execution_history_complete = True
     open_date = "2024-05-01 07:00:00+00:00"
     lifecycle_mode = "sidestep_reentry"

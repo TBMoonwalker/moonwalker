@@ -45,7 +45,6 @@ async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
         payload,
         *,
         create_open_trade,
-        campaign_context=None,
         entry_evaluation=None,
     ):
         persisted.append((symbol, payload, create_open_trade))

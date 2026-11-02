@@ -88,15 +88,10 @@ class TradeReplayIndicatorService:
         timerange: str,
         timestamp_start: str | int | float,
         timestamp_end: str | int | float,
-        *,
-        campaign_id: str | None = None,
     ) -> dict[str, Any]:
         """Return strategy indicator overlays for a replay deal."""
         try:
             normalized_deal_id = str(UUID(str(deal_id)))
-            normalized_campaign_id = (
-                str(UUID(str(campaign_id))) if campaign_id else None
-            )
             start_ms = int(float(timestamp_start))
             end_ms = int(float(timestamp_end))
         except (TypeError, ValueError):
@@ -105,13 +100,7 @@ class TradeReplayIndicatorService:
         if end_ms <= start_ms:
             return self._empty(timerange)
 
-        if normalized_campaign_id:
-            executions = await self.trades.get_trade_executions(
-                normalized_deal_id,
-                campaign_id=normalized_campaign_id,
-            )
-        else:
-            executions = await self.trades.get_trade_executions(normalized_deal_id)
+        executions = await self.trades.get_trade_executions(normalized_deal_id)
         strategy_references = self._execution_strategy_references(executions)
         strategies = self._strategy_names(strategy_references)
         source = "execution_ledger"

@@ -21,7 +21,7 @@ from service.accumulation.state import (
     save_accumulation_observations,
 )
 from service.lifecycle_snapshot import LifecycleSnapshotIdentity, snapshots_match
-from service.spot_campaign_types import parse_lifecycle_mode
+from service.lifecycle_types import parse_lifecycle_mode
 from service.strategy_persistence import delete_custom_strategy
 from tortoise import Tortoise
 from tortoise.exceptions import IntegrityError, OperationalError

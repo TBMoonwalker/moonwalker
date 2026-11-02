@@ -847,7 +847,6 @@ async def test_filled_sell_advances_through_atomic_persistence(
                 "total_cost": 10.0,
                 "current_price": 11.0,
                 "sell_reason": "manual_sell",
-                "campaign_id": "campaign-1",
                 "skip_tp_limit_cancel": True,
             },
             {"exchange": "binance", "dry_run": False},

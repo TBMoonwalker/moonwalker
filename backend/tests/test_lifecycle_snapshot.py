@@ -17,7 +17,6 @@ def _trade(**overrides: Any) -> dict[str, Any]:
     trade = {
         "symbol": "BTC/USDC",
         "deal_id": "deal-1",
-        "campaign_id": "campaign-1",
         "execution_count": 2,
         "safetyorders_count": 1,
         "automation_paused": False,
@@ -54,14 +53,12 @@ def test_snapshot_falls_back_to_safety_order_count_and_normalizes_optional_ids()
             execution_count=None,
             safetyorders_count=2,
             deal_id=" ",
-            campaign_id=None,
         ),
         {"dry_run": True},
     )
 
     assert snapshot.execution_count == 3
     assert snapshot.deal_id is None
-    assert snapshot.campaign_id is None
 
 
 def test_snapshot_never_matches_a_missing_locked_trade() -> None:
@@ -77,7 +74,6 @@ def test_snapshot_never_matches_a_missing_locked_trade() -> None:
     ("changed_state", "changed_config"),
     [
         ({"deal_id": "deal-2"}, None),
-        ({"campaign_id": "campaign-2"}, None),
         ({"execution_count": 3}, None),
         ({"automation_paused": True}, None),
         ({"exposure_state": "flat_waiting_reentry"}, None),

@@ -1,6 +1,6 @@
 """Open trade model."""
 
-from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
+from service.lifecycle_types import TradeExposureState, TradeLifecycleMode
 from tortoise import fields
 from tortoise.models import Model
 
@@ -10,7 +10,6 @@ class OpenTrades(Model):
 
     symbol = fields.CharField(max_length=50, unique=True)
     deal_id = fields.CharField(max_length=36, null=True, unique=True)
-    campaign_id = fields.CharField(max_length=36, null=True)
     lifecycle_mode = fields.CharField(
         max_length=32,
         default=TradeLifecycleMode.CLASSIC_DCA.value,
@@ -49,13 +48,6 @@ class OpenTrades(Model):
     dca_last_decision_json = fields.TextField(null=True)
     automation_paused = fields.BooleanField(default=False)
     automation_paused_at = fields.TextField(null=True)
-    reserved_reentry_quote = fields.FloatField(default=0.0)
-    waiting_reference_price = fields.FloatField(default=0.0)
-    waiting_reference_amount = fields.FloatField(default=0.0)
-    waiting_reference_quote = fields.FloatField(default=0.0)
-    virtual_waiting_profit = fields.FloatField(default=0.0)
-    virtual_waiting_profit_percent = fields.FloatField(default=0.0)
-    last_transition_at = fields.TextField(null=True)
     # Exact decimal strings. NULL means unknown/not initialized, never zero.
     accumulation_net_quantity = fields.TextField(null=True)
     accumulation_remaining_cost = fields.TextField(null=True)

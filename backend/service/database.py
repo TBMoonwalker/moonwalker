@@ -15,12 +15,14 @@ import model
 from service.msv import MINIMUM_SUPPORTED_VERSION, preflight_msv
 from service.replay_candles import archive_replay_candles_for_deal
 from service.schema_migrations import (
+    CONTRACT_DROP_COMPATIBILITY,
     MigrationDefinition,
     bootstrap_sqlite_migration_ledger,
     run_schema_migrations,
 )
 from tortoise import Tortoise
 from tortoise.context import TortoiseContext
+from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/database.log", "database")
 
@@ -33,6 +35,30 @@ _SQLITE_INDEX_CORRUPTION_PATTERNS = (
     re.compile(r"wrong # of entries in index (?P<index>\S+)"),
 )
 ColumnSpec = tuple[str, str]
+
+# Tables and columns removed by the first contract migration (021).  The
+# dead opentrades columns were sidestep-era campaign state that no live code
+# writes; the campaign_id columns carried pre-4.9 campaign linkage that is
+# dropped with its rows' identity falling back to deal_id || id.
+_LEGACY_CAMPAIGN_REBUILDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "opentrades",
+        (
+            "campaign_id",
+            "reserved_reentry_quote",
+            "waiting_reference_price",
+            "waiting_reference_amount",
+            "waiting_reference_quote",
+            "virtual_waiting_profit",
+            "virtual_waiting_profit_percent",
+            "last_transition_at",
+        ),
+    ),
+    ("trades", ("campaign_id",)),
+    ("closedtrades", ("campaign_id",)),
+    ("tradeexecutions", ("campaign_id",)),
+    ("placement_intents", ("campaign_id",)),
+)
 
 
 def _is_sqlite_lock_error(exc: Exception) -> bool:
@@ -296,11 +322,6 @@ class Database:
             ("tickers", "idx_tickers_timestamp", ("timestamp",)),
             ("trades", "idx_trades_symbol", ("symbol",)),
             ("trades", "idx_trades_deal_id_timestamp", ("deal_id", "timestamp")),
-            (
-                "trades",
-                "idx_trades_campaign_id_timestamp",
-                ("campaign_id", "timestamp"),
-            ),
             ("trades", "idx_trades_symbol_baseorder", ("symbol", "baseorder")),
             (
                 "trades",
@@ -308,21 +329,11 @@ class Database:
                 ("symbol", "safetyorder", "baseorder"),
             ),
             ("closedtrades", "idx_closedtrades_close_date", ("close_date",)),
-            (
-                "closedtrades",
-                "idx_closedtrades_campaign_id_close_date",
-                ("campaign_id", "close_date"),
-            ),
             ("closedtrades", "idx_closedtrades_close_reason", ("close_reason",)),
             (
                 "tradeexecutions",
                 "idx_tradeexecutions_deal_time",
                 ("deal_id", "timestamp"),
-            ),
-            (
-                "tradeexecutions",
-                "idx_tradeexecutions_campaign_time",
-                ("campaign_id", "timestamp"),
             ),
             (
                 "tradeexecutions",
@@ -448,18 +459,13 @@ class Database:
 
         connection = Tortoise.get_connection("default")
         table_columns = {
-            "trades": (
-                ("deal_id", "TEXT NULL"),
-                ("campaign_id", "TEXT NULL"),
-            ),
+            "trades": (("deal_id", "TEXT NULL"),),
             "tradeexecutions": (
-                ("campaign_id", "TEXT NULL"),
                 ("strategy_slug", "TEXT NULL"),
                 ("strategy_version", "INTEGER NULL"),
             ),
             "opentrades": (
                 ("deal_id", "TEXT NULL"),
-                ("campaign_id", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 1"),
                 (
                     "lifecycle_mode",
@@ -469,17 +475,9 @@ class Database:
                     "exposure_state",
                     "TEXT NOT NULL DEFAULT 'long_exposed'",
                 ),
-                ("reserved_reentry_quote", "REAL NOT NULL DEFAULT 0.0"),
-                ("waiting_reference_price", "REAL NOT NULL DEFAULT 0.0"),
-                ("waiting_reference_amount", "REAL NOT NULL DEFAULT 0.0"),
-                ("waiting_reference_quote", "REAL NOT NULL DEFAULT 0.0"),
-                ("virtual_waiting_profit", "REAL NOT NULL DEFAULT 0.0"),
-                ("virtual_waiting_profit_percent", "REAL NOT NULL DEFAULT 0.0"),
-                ("last_transition_at", "TEXT NULL"),
             ),
             "closedtrades": (
                 ("deal_id", "TEXT NULL"),
-                ("campaign_id", "TEXT NULL"),
                 ("close_reason", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
             ),
@@ -934,8 +932,159 @@ class Database:
                     description="Separate unsold market valuation from realized returns.",
                     apply=self._ensure_manual_stop_valuation,
                 ),
+                MigrationDefinition(
+                    version="2026-11-01-021-campaign-column-drop",
+                    phase="schema",
+                    description="Drop dormant campaign columns from the trade tables.",
+                    apply=self._drop_legacy_campaign_columns,
+                    compatibility=CONTRACT_DROP_COMPATIBILITY,
+                ),
             )
         )
+
+    async def _drop_legacy_campaign_columns(self) -> None:
+        """Drop the dead campaign columns once every install is at the MSV floor.
+
+        First contract (destructive) migration. Rebuilds the affected tables
+        without the legacy campaign columns and keeps every other field of
+        every row. Aborts startup when a live open trade still carries
+        campaign residue: the drop would silently unlink it from its position.
+        See docs/operations.md, "Campaign residue recovery".
+        """
+        if not self.db_url.startswith("sqlite://"):
+            return
+        async with in_transaction() as conn:
+            await self._assert_no_open_trade_campaign_residue(conn)
+            for table, drop_columns in _LEGACY_CAMPAIGN_REBUILDS:
+                await self._rebuild_table_without_columns(conn, table, drop_columns)
+
+    @staticmethod
+    async def _assert_no_open_trade_campaign_residue(conn: Any) -> None:
+        """Fail closed on live open trades that still reference a campaign."""
+        _, columns = await conn.execute_query("PRAGMA table_info(opentrades)")
+        if not any(row["name"] == "campaign_id" for row in columns):
+            return
+        _, residue_rows = await conn.execute_query(
+            "SELECT symbol FROM opentrades WHERE campaign_id IS NOT NULL"
+        )
+        if not residue_rows:
+            return
+        symbols = ", ".join(sorted(str(row["symbol"]) for row in residue_rows))
+        raise RuntimeError(
+            "Startup aborted: the opentrades table has "
+            f"{len(residue_rows)} open trade row(s) with legacy campaign "
+            f"residue (symbols: {symbols}). Moonwalker will not start until "
+            "this is resolved. Review the open position(s) on the exchange, "
+            "then clear the campaign_id value(s); see docs/operations.md, "
+            '"Campaign residue recovery".'
+        )
+
+    @staticmethod
+    async def _rebuild_table_without_columns(
+        conn: Any,
+        table: str,
+        drop_columns: tuple[str, ...],
+    ) -> None:
+        """Rebuild one SQLite table without the given columns.
+
+        The table is recreated with every kept column, its rows are copied
+        over, and user-created indexes that reference only kept columns are
+        recreated. Unique constraints are re-declared as table constraints.
+        A table with foreign keys or triggers is refused rather than rebuilt,
+        because this helper cannot redeclare those constraints.
+        """
+        _, columns = await conn.execute_query(f"PRAGMA table_info({table})")
+        if not columns:
+            return
+        to_drop = {
+            name for name in drop_columns if any(row["name"] == name for row in columns)
+        }
+        if not to_drop:
+            return
+
+        _, foreign_keys = await conn.execute_query(f"PRAGMA foreign_key_list({table})")
+        if foreign_keys:
+            raise RuntimeError(
+                f"Cannot rebuild {table}: unexpected foreign keys found."
+            )
+        _, triggers = await conn.execute_query(
+            "SELECT name FROM sqlite_master "
+            f"WHERE type = 'trigger' AND tbl_name = '{table}'"
+        )
+        if triggers:
+            raise RuntimeError(f"Cannot rebuild {table}: triggers found.")
+
+        kept_columns = [row for row in columns if row["name"] not in to_drop]
+        autoincrement = False
+        _, create_rows = await conn.execute_query(
+            f"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '{table}'"
+        )
+        if create_rows:
+            autoincrement = "AUTOINCREMENT" in (create_rows[0]["sql"] or "").upper()
+
+        column_defs: list[str] = []
+        for row in kept_columns:
+            column_name = row["name"]
+            if row["pk"]:
+                column_defs.append(
+                    f"{column_name} {row['type'] or 'INTEGER'} PRIMARY KEY"
+                    + (" AUTOINCREMENT" if autoincrement else "")
+                )
+                continue
+            definition = f"{column_name} {row['type'] or 'TEXT'}"
+            if row["notnull"]:
+                definition += " NOT NULL"
+            if row["dflt_value"] is not None:
+                definition += f" DEFAULT {row['dflt_value']}"
+            column_defs.append(definition)
+
+        unique_constraints: list[tuple[str, ...]] = []
+        recreated_indexes: list[tuple[str, bool, tuple[str, ...]]] = []
+        _, index_rows = await conn.execute_query(f"PRAGMA index_list({table})")
+        for index in index_rows:
+            index_name = index["name"]
+            if not index_name:
+                continue
+            _, index_cols = await conn.execute_query(
+                f'PRAGMA index_info("{index_name}")'
+            )
+            index_columns = tuple(
+                row["name"] for row in sorted(index_cols, key=lambda row: row["seqno"])
+            )
+            if not index_columns or any(col in to_drop for col in index_columns):
+                continue
+            if index["origin"] == "pk":
+                continue
+            if bool(index["unique"]) and str(index_name).startswith(
+                "sqlite_autoindex_"
+            ):
+                unique_constraints.append(index_columns)
+            else:
+                recreated_indexes.append(
+                    (index_name, bool(index["unique"]), index_columns)
+                )
+
+        new_table = f"{table}_campaign_drop_rebuild"
+        table_sql = ", ".join(
+            [
+                *column_defs,
+                *(f"UNIQUE ({', '.join(cols)})" for cols in unique_constraints),
+            ]
+        )
+        await conn.execute_query(f"DROP TABLE IF EXISTS {new_table}")
+        await conn.execute_query(f"CREATE TABLE {new_table} ({table_sql})")
+        kept_names = ", ".join(row["name"] for row in kept_columns)
+        await conn.execute_query(
+            f"INSERT INTO {new_table} ({kept_names}) SELECT {kept_names} FROM {table}"
+        )
+        await conn.execute_query(f"DROP TABLE {table}")
+        await conn.execute_query(f"ALTER TABLE {new_table} RENAME TO {table}")
+        for index_name, unique, index_columns in recreated_indexes:
+            unique_sql = "UNIQUE " if unique else ""
+            await conn.execute_query(
+                f"CREATE {unique_sql}INDEX {index_name} "
+                f"ON {table} ({', '.join(index_columns)})"
+            )
 
     async def _ensure_manual_stop_valuation(self) -> None:
         """Add optional unsold valuation fields without rewriting past closes."""

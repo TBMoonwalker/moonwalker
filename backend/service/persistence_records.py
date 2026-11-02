@@ -27,7 +27,6 @@ class TradePersistenceRecord(TypedDict):
     direction: str
     side: str
     deal_id: NotRequired[str | None]
-    campaign_id: NotRequired[str | None]
     signal_name: NotRequired[str | None]
     strategy_name: NotRequired[str | None]
     strategy_slug: NotRequired[str | None]
@@ -43,7 +42,6 @@ class TradeExecutionRecord(TypedDict):
     """Canonical row written to the append-only execution ledger."""
 
     deal_id: str
-    campaign_id: str | None
     symbol: str
     side: str
     role: str
@@ -79,16 +77,8 @@ class OpenTradeLifecycleDefaults(TypedDict):
     """Lifecycle fields required when an open trade is created."""
 
     deal_id: str | None
-    campaign_id: str | None
     lifecycle_mode: str
     exposure_state: str
-    reserved_reentry_quote: float
-    waiting_reference_price: float
-    waiting_reference_amount: float
-    waiting_reference_quote: float
-    virtual_waiting_profit: float
-    virtual_waiting_profit_percent: float
-    last_transition_at: str | None
 
 
 class OpenTradeBuyDefaults(OpenTradeDcaDefaults):
@@ -116,7 +106,6 @@ class OpenTradeUpdateRecord(TypedDict, total=False):
     """Intentionally partial fields for updating an existing active trade."""
 
     deal_id: str | None
-    campaign_id: str | None
     lifecycle_mode: str
     exposure_state: str
     execution_history_complete: bool
@@ -149,13 +138,6 @@ class OpenTradeUpdateRecord(TypedDict, total=False):
     dca_last_decision_json: str | None
     automation_paused: bool
     automation_paused_at: str | None
-    reserved_reentry_quote: float
-    waiting_reference_price: float
-    waiting_reference_amount: float
-    waiting_reference_quote: float
-    virtual_waiting_profit: float
-    virtual_waiting_profit_percent: float
-    last_transition_at: str | None
 
 
 class ClosedTradeSummaryRecord(TypedDict):
@@ -173,7 +155,6 @@ class ClosedTradeSummaryRecord(TypedDict):
     close_date: str | None
     duration: str | None
     deal_id: NotRequired[str | None]
-    campaign_id: NotRequired[str | None]
     execution_history_complete: NotRequired[bool]
     close_reason: NotRequired[str | None]
     valuation_quantity: NotRequired[float | None]
@@ -204,22 +185,6 @@ class UnsellableTradePersistenceRecord(TypedDict):
     unsellable_min_notional: float | None
     unsellable_estimated_notional: float | None
     unsellable_since: str | None
-
-
-class CampaignPersistenceContext(TypedDict, total=False):
-    """Campaign transition values committed with an order mutation."""
-
-    campaign_id: str | None
-    lifecycle_mode: str
-    state: str
-    started_at: str
-    last_transition_at: str
-    current_deal_id: str | None
-    tp_percent: float
-    reserved_quote: float
-    metadata_json: str | None
-    close_reason: str | None
-    summary_overrides: dict[str, Any]
 
 
 class ClosedTradePayloadBundle(TypedDict):

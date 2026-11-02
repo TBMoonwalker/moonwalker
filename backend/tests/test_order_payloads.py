@@ -73,7 +73,6 @@ def test_synthesized_final_sell_execution_keeps_strategy_identity() -> None:
             "symbol": "BTC/USDC",
             "side": "sell",
             "role": "final_sell",
-            "campaign_id": None,
             "timestamp": "1785628800000",
             "price": 110.0,
             "amount": 0.5,

@@ -335,6 +335,37 @@ This corruption path is about the main Moonwalker database file, not the shared
 ticker cache. Full backups already preserve replay archives and trade history
 needed for recovery.
 
+## Campaign residue recovery
+
+The campaign-column removal migration rebuilds the trade tables without the
+legacy campaign columns. Before it runs, startup verifies that no *open*
+trade still references a campaign: if a row in `opentrades` carries a
+non-null `campaign_id`, startup aborts with a message that names the affected
+symbol(s). The migration is not run and the database is left unchanged.
+
+This can only happen on an install that ran a pre-4.9 sidestep-era build with
+an open position; every later release writes `campaign_id` as null.
+
+Recommended recovery flow:
+
+1. Note the affected symbol(s) from the startup log.
+2. For each symbol, review the real open position on the exchange and confirm
+   the local open-trade row matches it (amount, cost, open date).
+3. Once the position is accounted for and the local row is its only record,
+   stop Moonwalker and clear the residue:
+
+   ```sql
+   sqlite3 <path-to-db> \
+     "UPDATE opentrades SET campaign_id = NULL WHERE campaign_id IS NOT NULL;"
+   ```
+
+4. Start Moonwalker again. The migration runs, the campaign columns are
+   dropped, and the open trade keeps being managed by its `deal_id` (or the
+   row's own identity when no deal id exists yet).
+
+Historical (closed) trades are not gated: their campaign values are dropped
+together with the column while all other trade data is preserved.
+
 ## Unsellable Trades
 
 When a sell succeeds only partially, a proactive take-profit order cannot meet

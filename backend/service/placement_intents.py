@@ -153,7 +153,6 @@ _SAFE_REQUEST_KEYS = BUY_RECOVERY_CONTEXT_KEYS | frozenset(
         "baseorder",
         "safetyorder",
         "order_count",
-        "campaign_id",
         "deal_id",
         "sell_reason",
         "type_sell",
@@ -181,7 +180,6 @@ _PLACEMENT_IDENTITY_KEYS = frozenset(
         "baseorder",
         "safetyorder",
         "order_count",
-        "campaign_id",
         "deal_id",
         "sell_reason",
         "type_sell",
@@ -317,7 +315,6 @@ class PlacementIntentService:
         normalized_requested_amount = max(0.0, float(requested_amount or 0.0))
         normalized_reserved_quote = max(0.0, float(reserved_quote or 0.0))
         deal_id = str(order.get("deal_id") or "").strip() or None
-        campaign_id = str(order.get("campaign_id") or "").strip() or None
         maximum_price = (
             float(order["maximum_buy_price"])
             if float(order.get("maximum_buy_price") or 0.0) > 0
@@ -350,7 +347,6 @@ class PlacementIntentService:
                         maximum_price=maximum_price,
                         reserved_quote=normalized_reserved_quote,
                         deal_id=deal_id,
-                        campaign_id=campaign_id,
                         request_json=request_json,
                     )
                     return existing
@@ -403,7 +399,6 @@ class PlacementIntentService:
                         order_type=normalized_order_type,
                         state=PlacementIntentState.PREPARED.value,
                         deal_id=deal_id,
-                        campaign_id=campaign_id,
                         requested_quote=normalized_requested_quote,
                         requested_amount=normalized_requested_amount,
                         maximum_price=maximum_price,
@@ -429,7 +424,6 @@ class PlacementIntentService:
                         maximum_price=maximum_price,
                         reserved_quote=normalized_reserved_quote,
                         deal_id=deal_id,
-                        campaign_id=campaign_id,
                         request_json=request_json,
                     )
                     return concurrent
@@ -595,7 +589,6 @@ class PlacementIntentService:
         maximum_price: float | None,
         reserved_quote: float,
         deal_id: str | None,
-        campaign_id: str | None,
         request_json: str,
     ) -> None:
         """Reject accidental reuse of an operation identity for another effect."""
@@ -622,7 +615,6 @@ class PlacementIntentService:
             maximum_price,
             reserved_quote,
             deal_id,
-            campaign_id,
             _placement_identity_payload(request_json),
         )
         actual = (
@@ -641,7 +633,6 @@ class PlacementIntentService:
             float(intent.maximum_price) if intent.maximum_price is not None else None,
             float(intent.reserved_quote or 0.0),
             str(intent.deal_id) if intent.deal_id is not None else None,
-            str(intent.campaign_id) if intent.campaign_id is not None else None,
             _placement_identity_payload(intent.request_json),
         )
         if actual != expected:

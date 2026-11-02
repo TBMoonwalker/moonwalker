@@ -148,7 +148,7 @@ function handleSorterChange(sorter: unknown): void {
 }
 
 function getClosedTradeRowKey(rowData: ClosedTradeRow): DataTableRowKey {
-    return rowData.deal_id || rowData.campaign_id || rowData.id
+    return rowData.deal_id || rowData.id
 }
 
 function isInteractiveRowTarget(target: EventTarget | null): boolean {

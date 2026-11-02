@@ -17,8 +17,6 @@ export type OpenTradeRow = {
     id: number
     symbol: string
     deal_id?: string | null
-    campaign_id?: string | null
-    campaign_started_at?: string | null
     lifecycle_mode?: string | null
     exposure_state?: string | null
     automation_paused?: boolean
@@ -48,18 +46,12 @@ export type OpenTradeRow = {
     baseorder: OrderData
     safetyorder: OrderData[]
     precision: number
-    campaign_principal_quote?: number
-    campaign_realized_profit?: number
-    campaign_realized_profit_percent?: number
-    campaign_total_profit?: number
-    campaign_total_profit_percent?: number
     display_profit?: number
     display_profit_percent?: number
     unsellable_amount?: number
     unsellable_reason?: string | null
     unsellable_min_notional?: number | null
     unsellable_estimated_notional?: number | null
-    last_transition_at?: string | null
 }
 
 export const TIMEFRAME_CHOICES: TimeframeChoice[] = [
@@ -132,14 +124,10 @@ export function tradeSymbolToRouteParam(value: string): string {
 export function getOpenTradeOpenedAt(
     rowData: Pick<
         OpenTradeRow,
-         'open_date' | 'campaign_started_at'
+         'open_date'
     >,
 ): string {
-    const openDate = String(rowData.open_date ?? '').trim()
-    if (openDate) {
-        return openDate
-     }
-     return String(rowData.campaign_started_at ?? '').trim()
+    return String(rowData.open_date ?? '').trim()
 }
 
 export function getSafetyOrderCount(rowData: OpenTradeRow): number {

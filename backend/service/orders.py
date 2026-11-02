@@ -29,6 +29,7 @@ from service.lifecycle_snapshot import (
     LifecycleSnapshotIdentity,
     snapshots_match,
 )
+from service.lifecycle_types import normalize_close_reason
 from service.monitoring import MonitoringService
 from service.order_intents import (
     build_manual_buy_order_intent,
@@ -68,7 +69,6 @@ from service.placement_reconciliation import (
 from service.placement_recovery import PlacementRecoveryHandler
 from service.placement_workflow import PlacementWorkflow
 from service.sell_fallback_workflow import DurableSellFallback
-from service.spot_campaign_types import normalize_close_reason
 from service.trade_math import calculate_order_size, calculate_so_percentage
 from service.trades import Trades, TradeStateUnavailableError
 from service.trading_contracts import BuyIntent, SellIntent
@@ -441,7 +441,6 @@ class Orders:
             )
             return False
         for key in (
-            "campaign_id",
             "signal_name",
             "strategy_name",
             "strategy_slug",
@@ -484,7 +483,6 @@ class Orders:
         payload = build_buy_trade_payload(order_status)
         persistence_options: dict[str, Any] = {
             "create_open_trade": not bool(order_status["safetyorder"]),
-            "campaign_context": None,
             "entry_evaluation": original_order.get("_ai_entry_evaluation"),
         }
         if placement_operation_id:
@@ -599,9 +597,7 @@ class Orders:
         )
         order_status["close_reason"] = normalized_close_reason
         close_context = await self.__calculate_closed_trade_stats(order_status)
-        close_options: dict[str, Any] = {
-            "campaign_context": None,
-        }
+        close_options: dict[str, Any] = {}
         if placement_operation_id:
             close_options["placement_operation_id"] = placement_operation_id
         if placement_operation_ids:
@@ -1376,11 +1372,6 @@ class Orders:
                         and order.get("sell_reason") is not None
                     ):
                         order_status["close_reason"] = str(order["sell_reason"])
-                    if (
-                        order_status.get("campaign_id") is None
-                        and order.get("campaign_id") is not None
-                    ):
-                        order_status["campaign_id"] = str(order["campaign_id"])
                     partial_amount = float(
                         order_status.get("partial_filled_amount") or 0.0
                     )
@@ -1446,11 +1437,6 @@ class Orders:
                     and order.get("sell_reason") is not None
                 ):
                     order_status["close_reason"] = order["sell_reason"]
-                if (
-                    order_status.get("campaign_id") is None
-                    and order.get("campaign_id") is not None
-                ):
-                    order_status["campaign_id"] = order["campaign_id"]
 
                 await self.placement_intents.transition(
                     active_operation_id,
@@ -1678,14 +1664,6 @@ class Orders:
             return False
         if await self._legacy_lifecycle_rejection(order["symbol"], "buy"):
             return False
-        if str(order.get("campaign_id") or "").strip():
-            logging.info(
-                "Incoming campaign buy order for %s: campaign=%s strategy=%s signal=%s.",
-                order["symbol"],
-                order.get("campaign_id"),
-                order.get("strategy_name"),
-                order.get("signal_name"),
-            )
 
         try:
             existing_trade = await self.trades.get_trades_for_orders(order["symbol"])
@@ -2296,7 +2274,6 @@ class Orders:
             close_context = await self.__calculate_closed_trade_stats(
                 {
                     "symbol": symbol,
-                    "campaign_id": trade.get("campaign_id"),
                     "total_cost": cost,
                     "total_amount": amount,
                     "price": price,
