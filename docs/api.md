@@ -560,6 +560,7 @@ bounded shared ticker history only for older legacy rows.
 | `GET` | `/monitoring/logs` | Return the allowlisted log sources visible in the Monitoring page. |
 | `GET` | `/monitoring/logs/{source}` | Return tailed or backfilled log lines for one allowlisted source. |
 | `GET` | `/monitoring/logs/{source}/download` | Download the current file for one allowlisted log source. |
+| `GET` | `/monitoring/msv` | Report the minimum-supported-version baseline recorded at startup. |
 | `POST` | `/monitoring/test` | Send a Telegram test notification using current or overridden monitoring settings. |
 
 `GET /monitoring/logs/{source}` accepts:

@@ -63,6 +63,23 @@ Moonwalker normalizes several Telethon-compatible target formats:
 - On send errors, Moonwalker retries based on `monitoring_retry_count`.
 - Monitoring errors are logged to `logs/monitoring.log`.
 
+## Minimum Supported Version Baseline
+The dashboard reports the installation's minimum-supported-version (MSV)
+baseline:
+
+- Endpoint: `GET /monitoring/msv`
+- The response carries the minimum supported version (`4.9.0.0`), the floor
+  config migration marker, the baseline status, and an operator-facing summary.
+- Baseline status is one of:
+  - `supported` — the install has run at or after the floor release.
+  - `unsupported` — schema history exists but the floor config migration row
+    is missing; the response includes upgrade guidance.
+  - `fresh` — no migration history; treated as supported.
+  - `unknown` — the startup preflight has not established a baseline yet.
+- The startup preflight is report-only: it never blocks startup and never
+  mutates a ledger. See [operations](operations.md#minimum-supported-version)
+  for the floor rationale and the pre-floor upgrade path.
+
 ## Monitoring Page Logs
 The Monitoring page also exposes a read-only live log viewer for selected
 allowlisted backend log files.
