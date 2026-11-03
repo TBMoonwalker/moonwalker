@@ -376,11 +376,14 @@ export function useAccumulationPanel(symbol?: string) {
     if (disposed || !routeActive || document.hidden || !navigator.onLine) return
     // Resumes from tab visibility or network recovery always refetch: state
     // may have changed while the panel was blind. Only a route reactivation
-    // may reuse a page loaded moments earlier. A no-stream load never skips:
-    // with the stream closed there is no snapshot to restore freshness, so
-    // the reactivation refetches instead of leaving the panel stale.
+    // may reuse a page loaded moments earlier. A no-stream or unavailable
+    // panel never skips: without a working stream there is no snapshot to
+    // restore freshness, so the reactivation refetches instead of leaving
+    // the panel stale (a detail 503 or an 'unavailable' stream message can
+    // set available=false after the page load stamped the window).
     if (options.skipIfFresh && lastPageLoadAt > 0 &&
         streamAvailable.value &&
+        available.value &&
         Date.now() - lastPageLoadAt < RESUME_SKIP_WINDOW_MS) {
       // Deactivation closed the stream; bring it back without refetching.
       connectStream()

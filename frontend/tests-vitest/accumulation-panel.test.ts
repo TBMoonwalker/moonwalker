@@ -920,6 +920,66 @@ it('refetches the accumulation page on in-window reactivation when the page load
   }
 })
 
+// Value: protects=an in-window reactivation after the panel lost
+// availability (a 503 detail fetch sets available=false while the
+// successful page load still stamped the window) refetches the page;
+// with the panel unavailable the stream cannot be reconnected either, so
+// skipping would leave it stale with its actions disabled;
+// fails_when=the skip path fires while available=false, connectStream()
+// early-returns, and the panel stays unavailable until the 30-second
+// window elapses or the user clicks Refresh status;
+// why_new=the skip guard was introduced on this branch (origin/main
+// refetched on every reactivation, auto-retrying this state); the
+// no-stream sibling test covers the page-level flag, not a post-load
+// availability loss;
+// seam=none; no_claim=real network timing (the API uses controlled
+// promises).
+it('refetches the accumulation page on in-window reactivation after the panel lost availability', async () => {
+  api.fetchAccumulationPage.mockReset()
+  api.fetchAccumulationPage.mockResolvedValue({ activations: [{ symbol: 'BTC/USDC' }], next_after: null })
+  api.fetchAccumulationStrategies.mockReset()
+  api.fetchAccumulationStrategies.mockResolvedValue({ versions: [], next_after_id: null })
+  api.fetchAccumulationDetail.mockReset()
+  api.fetchAccumulationDetail.mockResolvedValue(null)
+  api.fetchAccumulationDetail.mockRejectedValueOnce(new Error('detail failed'))
+  api.accumulationErrorStatus.mockReturnValueOnce(503)
+  live.ctl = null
+
+  let panel!: ReturnType<typeof useAccumulationPanel>
+  let now = Date.now()
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now)
+  const Host = defineComponent({ setup() { panel = useAccumulationPanel(); return () => null } })
+  const active = ref(true)
+  const Blank = defineComponent({ name: 'Blank', template: '<div class="blank" />' })
+  const wrapper = mount(
+    defineComponent({
+      setup() {
+        return () => h(KeepAlive, null, { default: () => (active.value ? h(Host) : h(Blank)) })
+      },
+    }),
+  )
+  try {
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(1)
+    // The successful page load stamped the window, but the 503 detail
+    // fetch left the panel unavailable, so no stream is connected.
+    expect(panel.available.value).toBe(false)
+    expect(live.ctl.open).not.toHaveBeenCalled()
+
+    // Reactivating inside the window must still load a page: with the
+    // panel unavailable nothing can restore freshness.
+    active.value = false
+    await nextTick()
+    active.value = true
+    await nextTick()
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(2)
+  } finally {
+    nowSpy.mockRestore()
+    wrapper.unmount()
+  }
+})
+
 // Value: protects=reactivation inside the 30-second window still starts a
 // new page load when the previous request was interrupted by deactivation
 // (an aborted load must not start the skip window);
