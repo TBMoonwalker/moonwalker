@@ -12,6 +12,9 @@ import type { AccumulationAction, AccumulationCommand, AccumulationDetail, Accum
 // Retain an uncertain request across route changes; never replay it automatically.
 const pendingKey = `moonwalker.accumulation.pending:${MOONWALKER_API_ORIGIN}`
 const session = () => window.sessionStorage
+// Reactivations within this window reuse the last loaded page instead of
+// refetching on every menu round trip.
+const RESUME_SKIP_WINDOW_MS = 30_000
 const unresolvedRequest = ref<AccumulationCommand | null>(null)
 
 function restoreRequest(): AccumulationCommand | null {
@@ -76,6 +79,7 @@ export function useAccumulationPanel(symbol?: string) {
   let pageHidden = document.hidden
   let lifecycle = 0
   let reloadAfterPage = false
+  let lastPageLoadAt = 0
   const streamUrl = ref<string>()
   const streamAvailable = ref(true)
   const stream = useWebSocket(streamUrl, {
@@ -214,6 +218,9 @@ export function useAccumulationPanel(symbol?: string) {
       if (!selected.value && rows.value[0]) await selectSymbol(rows.value[0].symbol)
       else if (selected.value) await refreshDetail()
       connectStream()
+      // Stamp only on success: a failed or aborted load must not start the
+      // skip window, or a route round trip would swallow the retry.
+      lastPageLoadAt = Date.now()
     } catch (cause) {
       if (disposed || currentLifecycle !== lifecycle) return
       available.value = false
@@ -365,8 +372,20 @@ export function useAccumulationPanel(symbol?: string) {
     stream.close()
   }
 
-  function resume() {
+  function resume(options: { skipIfFresh?: boolean } = {}) {
     if (disposed || !routeActive || document.hidden || !navigator.onLine) return
+    // Resumes from tab visibility or network recovery always refetch: state
+    // may have changed while the panel was blind. Only a route reactivation
+    // may reuse a page loaded moments earlier. A no-stream load never skips:
+    // with the stream closed there is no snapshot to restore freshness, so
+    // the reactivation refetches instead of leaving the panel stale.
+    if (options.skipIfFresh && lastPageLoadAt > 0 &&
+        streamAvailable.value &&
+        Date.now() - lastPageLoadAt < RESUME_SKIP_WINDOW_MS) {
+      // Deactivation closed the stream; bring it back without refetching.
+      connectStream()
+      return
+    }
     void loadPage()
   }
 
@@ -377,20 +396,23 @@ export function useAccumulationPanel(symbol?: string) {
     else resume()
   }
 
+  function onOnline() {
+    resume()
+  }
   onMounted(() => {
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('offline', suspend)
-    window.addEventListener('online', resume)
+    window.addEventListener('online', onOnline)
     void loadPage()
     void loadStrategies()
 
   })
-  onActivated(() => { if (!routeActive) { routeActive = true; resume() } })
+  onActivated(() => { if (!routeActive) { routeActive = true; resume({ skipIfFresh: true }) } })
   onDeactivated(() => { routeActive = false; suspend() })
   onBeforeUnmount(() => {
     document.removeEventListener('visibilitychange', onVisibilityChange)
     window.removeEventListener('offline', suspend)
-    window.removeEventListener('online', resume)
+    window.removeEventListener('online', onOnline)
     disposed = true
     suspend()
   })

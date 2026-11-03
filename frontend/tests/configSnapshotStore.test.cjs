@@ -329,3 +329,113 @@ test('shared config snapshot store falls back to storage writes for local invali
     assert.equal(typeof payload.id, 'string')
     assert.equal(typeof payload.senderId, 'string')
 })
+
+test('ensureFresh loads the full snapshot when none is held', async () => {
+    const snapshotStore = useSharedConfigSnapshot()
+    const fetchUrls = []
+
+    global.fetch = async (url) => {
+        fetchUrls.push(url)
+        if (String(url).endsWith('/config/all')) {
+            return createJsonResponse({ dry_run: true })
+        }
+        return createJsonResponse({ updated_at: '2026-03-27T09:00:00Z' })
+    }
+
+    const snapshot = await snapshotStore.ensureFresh()
+
+    assert.equal(snapshot.dry_run, true)
+    assert.equal(
+        fetchUrls.filter((url) => String(url).endsWith('/config/all')).length,
+        1,
+    )
+})
+
+test('ensureFresh reuses a fresh snapshot without refetching the full config', async () => {
+    const snapshotStore = useSharedConfigSnapshot()
+    snapshotStore.applySnapshot({ dry_run: true }, '2026-03-27T09:00:00Z')
+    const fetchUrls = []
+
+    global.fetch = async (url) => {
+        fetchUrls.push(url)
+        return createJsonResponse({ updated_at: '2026-03-27T09:00:00Z' })
+    }
+
+    const snapshot = await snapshotStore.ensureFresh()
+
+    assert.equal(snapshot.dry_run, true)
+    assert.equal(
+        fetchUrls.filter((url) => String(url).endsWith('/config/all')).length,
+        0,
+    )
+    assert.equal(
+        fetchUrls.filter((url) => String(url).endsWith('/config/freshness'))
+            .length,
+        1,
+    )
+})
+
+test('ensureFresh refetches the full snapshot when a newer revision is detected', async () => {
+    const snapshotStore = useSharedConfigSnapshot()
+    snapshotStore.applySnapshot(
+        { dry_run: true, config_revision: 1 },
+        '2026-03-27T09:00:00Z',
+    )
+    const fetchUrls = []
+
+    global.fetch = async (url) => {
+        fetchUrls.push(url)
+        if (String(url).endsWith('/config/all')) {
+            return createJsonResponse({
+                dry_run: false,
+                config_revision: 2,
+            })
+        }
+        return createJsonResponse({
+            updated_at: '2026-03-27T09:00:00Z',
+            config_revision: 2,
+        })
+    }
+
+    const snapshot = await snapshotStore.ensureFresh()
+
+    assert.equal(snapshot.dry_run, false)
+    assert.equal(snapshot.config_revision, 2)
+    assert.equal(
+        fetchUrls.filter((url) => String(url).endsWith('/config/all')).length,
+        1,
+    )
+})
+
+// Value: protects=ensureFresh resolves with the held snapshot (freshness
+// status 'unknown') when /config/freshness cannot be reached, without
+// refetching the full config; the router guard treats a thrown error as a
+// load failure, so this keeps navigation usable while offline;
+// fails_when=checkFreshness's catch rethrows (or ensureFresh propagates it),
+// and the guard resolves with a load error that blocks the panel;
+// why_new=the existing ensureFresh tests cover only no-snapshot, fresh and
+// stale;
+// seam=none; no_claim=none (the failure is a controlled fetch rejection).
+test('ensureFresh resolves with the held snapshot when the freshness check cannot be reached', async () => {
+    const snapshotStore = useSharedConfigSnapshot()
+    snapshotStore.applySnapshot({ dry_run: true }, '2026-03-27T09:00:00Z')
+    const fetchUrls = []
+
+    global.fetch = async (url) => {
+        fetchUrls.push(url)
+        throw new Error('network down')
+    }
+
+    const snapshot = await snapshotStore.ensureFresh()
+
+    assert.equal(snapshot.dry_run, true)
+    assert.equal(
+        fetchUrls.filter((url) => String(url).endsWith('/config/all')).length,
+        0,
+    )
+    assert.equal(
+        fetchUrls.filter((url) => String(url).endsWith('/config/freshness'))
+            .length,
+        1,
+    )
+})
