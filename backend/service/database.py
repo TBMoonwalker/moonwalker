@@ -7,6 +7,7 @@ import re
 import sqlite3
 from asyncio import sleep
 from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
@@ -222,6 +223,132 @@ async def optimize_sqlite_connection(db_url: str | None = None) -> None:
         return
     connection = Tortoise.get_connection("default")
     await connection.execute_query("PRAGMA optimize")
+
+
+@dataclass(frozen=True)
+class _TableRebuildPlan:
+    """Read-only description of a SQLite table rebuild and its preserved objects.
+
+    Built by :meth:`Database._plan_rebuild_table_without_columns` from schema
+    inspection and applied by
+    :meth:`Database._apply_rebuild_table_without_columns` inside a single
+    explicit transaction.
+    """
+
+    table: str
+    side_table: str
+    create_body: str
+    insert_columns: tuple[str, ...]
+    indexes: tuple[tuple[str, bool, tuple[str, ...]], ...]
+    triggers: tuple[str, ...]
+    autoincrement: bool
+    primary_key: str | None
+    sequence_value: int | None
+    foreign_keys_enabled: bool
+
+
+async def _plan_rebuild_indexes(
+    conn: Any,
+    table: str,
+    to_drop: set[str],
+) -> tuple[list[tuple[str, ...]], list[tuple[str, bool, tuple[str, ...]]]]:
+    """Return the unique constraints and user indexes preserved across a rebuild.
+
+    Refuses index shapes the rebuild cannot redeclare (expression and partial
+    ``WHERE`` indexes) instead of dropping them silently.
+    """
+    unique_constraints: list[tuple[str, ...]] = []
+    recreated_indexes: list[tuple[str, bool, tuple[str, ...]]] = []
+    _, index_rows = await conn.execute_query(f"PRAGMA index_list({table})")
+    for index in index_rows:
+        index_name = index["name"]
+        if not index_name:
+            continue
+        _, index_cols = await conn.execute_query(f'PRAGMA index_info("{index_name}")')
+        index_columns = tuple(
+            row["name"] for row in sorted(index_cols, key=lambda row: row["seqno"])
+        )
+        if any(col is None for col in index_columns):
+            raise RuntimeError(
+                f"Cannot rebuild {table}: index {index_name} is an "
+                "expression index; the rebuild cannot redeclare it."
+            )
+        if not index_columns or any(col in to_drop for col in index_columns):
+            continue
+        if index["origin"] == "pk":
+            continue
+        _, index_sql_rows = await conn.execute_query(
+            "SELECT sql FROM sqlite_master "
+            f"WHERE type = 'index' AND name = '{index_name}'"
+        )
+        if (
+            index_sql_rows
+            and index_sql_rows[0]["sql"]
+            and re.search(r"\bWHERE\b", index_sql_rows[0]["sql"], re.IGNORECASE)
+        ):
+            raise RuntimeError(
+                f"Cannot rebuild {table}: index {index_name} is a partial "
+                "(WHERE) index; the rebuild cannot redeclare its predicate."
+            )
+        if bool(index["unique"]) and str(index_name).startswith("sqlite_autoindex_"):
+            unique_constraints.append(index_columns)
+        else:
+            recreated_indexes.append((index_name, bool(index["unique"]), index_columns))
+    return unique_constraints, recreated_indexes
+
+
+async def _recreate_rebuild_indexes(
+    conn: Any,
+    table: str,
+    indexes: tuple[tuple[str, bool, tuple[str, ...]], ...],
+) -> None:
+    """Recreate the preserved user indexes on the rebuilt table."""
+    for index_name, unique, index_columns in indexes:
+        unique_sql = "UNIQUE " if unique else ""
+        await conn.execute_query(
+            f"CREATE {unique_sql}INDEX {index_name} "
+            f"ON {table} ({', '.join(index_columns)})"
+        )
+
+
+async def _recreate_rebuild_triggers(
+    conn: Any,
+    triggers: tuple[str, ...],
+) -> None:
+    """Recreate the preserved triggers unchanged on the rebuilt table."""
+    for trigger_sql in triggers:
+        await conn.execute_query(trigger_sql)
+
+
+async def _restore_rebuild_sequence(
+    conn: Any,
+    table: str,
+    primary_key: str | None,
+    autoincrement: bool,
+    sequence_value: int | None,
+) -> None:
+    """Preserve the AUTOINCREMENT high-water mark across the rebuild."""
+    if not autoincrement or primary_key is None:
+        return
+    max_rows = (
+        await conn.execute_query(f"SELECT MAX({primary_key}) AS m FROM {table}")
+    )[1]
+    preserved = (
+        sequence_value if sequence_value is not None else (max_rows[0]["m"] or 0)
+    )
+    remaining = (
+        await conn.execute_query(
+            f"SELECT seq FROM sqlite_sequence WHERE name = '{table}'"
+        )
+    )[1]
+    if remaining:
+        await conn.execute_query(
+            f"UPDATE sqlite_sequence SET seq = {preserved} WHERE name = '{table}'"
+        )
+    elif preserved:
+        await conn.execute_query(
+            f"INSERT INTO sqlite_sequence (name, seq) VALUES ('{table}', {preserved})"
+        )
 
 
 class Database:
@@ -1022,25 +1149,35 @@ class Database:
     ) -> None:
         """Rebuild one SQLite table without the given columns.
 
-        The table is recreated with every kept column, its rows are copied
-        over, and user-created indexes that reference only kept columns are
-        recreated. Unique constraints are re-declared as table constraints.
-        Triggers that reference only kept columns are dropped with the old
-        table and recreated unchanged, because the rebuild renames back to
-        the original table name. The mutation phase runs with foreign-key
-        enforcement temporarily disabled so incoming foreign keys (held by
-        the accumulation tables) keep their references: the rows are
-        restored with their original IDs. The AUTOINCREMENT high-water mark
-        is preserved across the rebuild. The mutation phase (drop, copy,
-        rename, index, trigger and sequence restore) runs inside one explicit
-        BEGIN...COMMIT transaction, so on failure the original table is left
-        intact. A missing original table alongside its side table (a crash
-        in an older, non-atomic rebuild that committed each statement) is
-        refused rather than silently no-opped: the rows are stranded in the
-        side table and must be recovered first. A table with foreign keys,
-        or a trigger that references a dropped column, is refused rather
-        than rebuilt; expression and partial indexes are refused as well
-        because the rebuild cannot redeclare them.
+        Splits into a read-only plan (:meth:`_plan_rebuild_table_without_columns`,
+        which performs every safety refusal) and a single explicit transaction
+        (:meth:`_apply_rebuild_table_without_columns`) that applies it. Nothing
+        in the plan phase mutates the database, and the apply phase is one
+        atomic unit that restores the original table on failure, so the
+        destructive drop/copy/rename dance stays easy to audit and future
+        changes are easier to review.
+        """
+        plan = await Database._plan_rebuild_table_without_columns(
+            conn, table, drop_columns
+        )
+        if plan is not None:
+            await Database._apply_rebuild_table_without_columns(conn, plan)
+
+    @staticmethod
+    async def _plan_rebuild_table_without_columns(
+        conn: Any,
+        table: str,
+        drop_columns: tuple[str, ...],
+    ) -> _TableRebuildPlan | None:
+        """Inspect one table and build a read-only rebuild plan.
+
+        Runs every safety refusal (an orphaned side table, foreign keys, a
+        trigger that references a dropped column, expression or partial
+        indexes) and captures the objects the rebuild must preserve (kept
+        columns, user indexes, triggers, the AUTOINCREMENT high-water mark,
+        and the foreign-key state) without mutating the database. Returns
+        ``None`` when there is nothing to do: the table is absent with no side
+        table, or none of the requested columns are present.
         """
         _, columns = await conn.execute_query(f"PRAGMA table_info({table})")
         if not columns:
@@ -1056,12 +1193,12 @@ class Database:
                     "(or restore from a backup), then start Moonwalker "
                     "again."
                 )
-            return
+            return None
         to_drop = {
             name for name in drop_columns if any(row["name"] == name for row in columns)
         }
         if not to_drop:
-            return
+            return None
 
         _, foreign_keys = await conn.execute_query(f"PRAGMA foreign_key_list({table})")
         if foreign_keys:
@@ -1072,8 +1209,10 @@ class Database:
             "SELECT name, sql FROM sqlite_master "
             f"WHERE type = 'trigger' AND tbl_name = '{table}'"
         )
+        trigger_statements: list[str] = []
         for trigger in triggers:
             trigger_sql = trigger["sql"] or ""
+            trigger_statements.append(trigger_sql)
             for column in to_drop:
                 # SQLite identifiers are case-insensitive and trigger
                 # column references are not validated at CREATE TRIGGER
@@ -1108,52 +1247,11 @@ class Database:
                 definition += f" DEFAULT {row['dflt_value']}"
             column_defs.append(definition)
 
-        unique_constraints: list[tuple[str, ...]] = []
-        recreated_indexes: list[tuple[str, bool, tuple[str, ...]]] = []
-        _, index_rows = await conn.execute_query(f"PRAGMA index_list({table})")
-        for index in index_rows:
-            index_name = index["name"]
-            if not index_name:
-                continue
-            _, index_cols = await conn.execute_query(
-                f'PRAGMA index_info("{index_name}")'
-            )
-            index_columns = tuple(
-                row["name"] for row in sorted(index_cols, key=lambda row: row["seqno"])
-            )
-            if any(col is None for col in index_columns):
-                raise RuntimeError(
-                    f"Cannot rebuild {table}: index {index_name} is an "
-                    "expression index; the rebuild cannot redeclare it."
-                )
-            if not index_columns or any(col in to_drop for col in index_columns):
-                continue
-            if index["origin"] == "pk":
-                continue
-            _, index_sql_rows = await conn.execute_query(
-                "SELECT sql FROM sqlite_master "
-                f"WHERE type = 'index' AND name = '{index_name}'"
-            )
-            if (
-                index_sql_rows
-                and index_sql_rows[0]["sql"]
-                and re.search(r"\bWHERE\b", index_sql_rows[0]["sql"], re.IGNORECASE)
-            ):
-                raise RuntimeError(
-                    f"Cannot rebuild {table}: index {index_name} is a partial "
-                    "(WHERE) index; the rebuild cannot redeclare its predicate."
-                )
-            if bool(index["unique"]) and str(index_name).startswith(
-                "sqlite_autoindex_"
-            ):
-                unique_constraints.append(index_columns)
-            else:
-                recreated_indexes.append(
-                    (index_name, bool(index["unique"]), index_columns)
-                )
+        unique_constraints, recreated_indexes = await _plan_rebuild_indexes(
+            conn, table, to_drop
+        )
 
-        new_table = f"{table}_campaign_drop_rebuild"
-        table_sql = ", ".join(
+        create_body = ", ".join(
             [
                 *column_defs,
                 *(f"UNIQUE ({', '.join(cols)})" for cols in unique_constraints),
@@ -1167,15 +1265,43 @@ class Database:
         # rebuild cannot reset it and reuse deleted row IDs.
         fk_state = (await conn.execute_query("PRAGMA foreign_keys"))[1]
         fk_on = bool(fk_state) and bool(fk_state[0][0])
-        seq_value = None
+        sequence_value = None
         if autoincrement:
             seq_rows = (
                 await conn.execute_query(
                     f"SELECT seq FROM sqlite_sequence WHERE name = '{table}'"
                 )
             )[1]
-            seq_value = seq_rows[0]["seq"] if seq_rows else None
-        if fk_on:
+            sequence_value = seq_rows[0]["seq"] if seq_rows else None
+        primary_key = next((row["name"] for row in kept_columns if row["pk"]), None)
+
+        return _TableRebuildPlan(
+            table=table,
+            side_table=f"{table}_campaign_drop_rebuild",
+            create_body=create_body,
+            insert_columns=tuple(row["name"] for row in kept_columns),
+            indexes=tuple(recreated_indexes),
+            triggers=tuple(trigger_statements),
+            autoincrement=autoincrement,
+            primary_key=primary_key,
+            sequence_value=sequence_value,
+            foreign_keys_enabled=fk_on,
+        )
+
+    @staticmethod
+    async def _apply_rebuild_table_without_columns(
+        conn: Any,
+        plan: _TableRebuildPlan,
+    ) -> None:
+        """Apply a rebuild plan inside one explicit transaction.
+
+        Toggles foreign-key enforcement for the duration (so incoming foreign
+        keys keep their references while the rows are restored with their
+        original IDs), then runs the drop/copy/rename dance plus the index,
+        trigger and sequence restoration as a single atomic unit. On failure
+        the whole dance rolls back, leaving the original table intact.
+        """
+        if plan.foreign_keys_enabled:
             await conn.execute_query("PRAGMA foreign_keys=OFF")
         try:
             # An explicit transaction makes the dance atomic: the connection
@@ -1185,54 +1311,34 @@ class Database:
             # On failure the rollback restores the original state.
             await conn.execute_query("BEGIN")
             try:
-                await conn.execute_query(f"DROP TABLE IF EXISTS {new_table}")
-                await conn.execute_query(f"CREATE TABLE {new_table} ({table_sql})")
-                kept_names = ", ".join(row["name"] for row in kept_columns)
+                await conn.execute_query(f"DROP TABLE IF EXISTS {plan.side_table}")
                 await conn.execute_query(
-                    f"INSERT INTO {new_table} ({kept_names}) "
-                    f"SELECT {kept_names} FROM {table}"
+                    f"CREATE TABLE {plan.side_table} ({plan.create_body})"
                 )
-                await conn.execute_query(f"DROP TABLE {table}")
-                await conn.execute_query(f"ALTER TABLE {new_table} RENAME TO {table}")
-                for index_name, unique, index_columns in recreated_indexes:
-                    unique_sql = "UNIQUE " if unique else ""
-                    await conn.execute_query(
-                        f"CREATE {unique_sql}INDEX {index_name} "
-                        f"ON {table} ({', '.join(index_columns)})"
-                    )
-                for trigger in triggers:
-                    await conn.execute_query(trigger["sql"])
-                if autoincrement:
-                    pk_name = next(row["name"] for row in kept_columns if row["pk"])
-                    max_rows = (
-                        await conn.execute_query(
-                            f"SELECT MAX({pk_name}) AS m FROM {table}"
-                        )
-                    )[1]
-                    preserved = (
-                        seq_value if seq_value is not None else (max_rows[0]["m"] or 0)
-                    )
-                    remaining = (
-                        await conn.execute_query(
-                            f"SELECT seq FROM sqlite_sequence WHERE name = '{table}'"
-                        )
-                    )[1]
-                    if remaining:
-                        await conn.execute_query(
-                            f"UPDATE sqlite_sequence SET seq = {preserved} "
-                            f"WHERE name = '{table}'"
-                        )
-                    elif preserved:
-                        await conn.execute_query(
-                            f"INSERT INTO sqlite_sequence (name, seq) "
-                            f"VALUES ('{table}', {preserved})"
-                        )
+                insert_columns = ", ".join(plan.insert_columns)
+                await conn.execute_query(
+                    f"INSERT INTO {plan.side_table} ({insert_columns}) "
+                    f"SELECT {insert_columns} FROM {plan.table}"
+                )
+                await conn.execute_query(f"DROP TABLE {plan.table}")
+                await conn.execute_query(
+                    f"ALTER TABLE {plan.side_table} RENAME TO {plan.table}"
+                )
+                await _recreate_rebuild_indexes(conn, plan.table, plan.indexes)
+                await _recreate_rebuild_triggers(conn, plan.triggers)
+                await _restore_rebuild_sequence(
+                    conn,
+                    plan.table,
+                    plan.primary_key,
+                    plan.autoincrement,
+                    plan.sequence_value,
+                )
                 await conn.execute_query("COMMIT")
             except Exception:
                 await conn.execute_query("ROLLBACK")
                 raise
         finally:
-            if fk_on:
+            if plan.foreign_keys_enabled:
                 await conn.execute_query("PRAGMA foreign_keys=ON")
 
     async def _ensure_manual_stop_valuation(self) -> None:

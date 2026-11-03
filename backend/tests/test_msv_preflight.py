@@ -8,6 +8,7 @@ from model import AppConfig, ConfigMigration
 from service.config_migrations import run_config_migrations
 from service.msv import (
     FLOOR_CONFIG_MIGRATION_ROW,
+    LEGACY_TRADE_MODE_KEYS,
     MsvStatus,
     evaluate_msv_baseline,
     get_msv_baseline,
@@ -114,6 +115,9 @@ async def test_get_msv_baseline_is_none_before_preflight() -> None:
 @pytest.mark.asyncio
 async def test_floor_marker_keeps_a_fresh_install_supported_on_later_startups() -> None:
     """A clean database receives the floor marker so startup 2 is not pre-floor."""
+    # The preflight runs before config migrations and classifies a clean
+    # database as fresh; only that classification authorizes the marker.
+    set_msv_baseline(await preflight_msv())
     await run_config_migrations()
 
     baseline = await preflight_msv()
@@ -135,6 +139,7 @@ async def test_floor_marker_is_not_written_while_legacy_bridge_rows_exist() -> N
     await run_schema_migrations(
         (MigrationDefinition("000-test-history", "schema", "seed history", _noop),)
     )
+    set_msv_baseline(await preflight_msv())
     await run_config_migrations()
 
     assert (
@@ -144,3 +149,48 @@ async def test_floor_marker_is_not_written_while_legacy_bridge_rows_exist() -> N
     baseline = await preflight_msv()
     assert baseline.status == MsvStatus.UNSUPPORTED
     assert baseline.floor_applied is False
+
+
+@pytest.mark.asyncio
+async def test_floor_marker_is_not_written_for_a_pre_floor_install_without_legacy_keys() -> (
+    None
+):
+    """A pre-floor install keeps its warning even when no legacy keys remain.
+
+    Regression: the marker was previously written whenever the optional legacy
+    bridge keys were absent, so a pre-4.9 install with no residue would flip
+    to ``supported`` on its next startup and lose the upgrade guidance. Only a
+    preflight-classified fresh database may be marked.
+    """
+
+    async def _noop() -> None:
+        return None
+
+    await run_schema_migrations(
+        (MigrationDefinition("000-test-history", "schema", "seed history", _noop),)
+    )
+    assert (
+        await AppConfig.filter(key__in=list(LEGACY_TRADE_MODE_KEYS)).exists() is False
+    )
+    set_msv_baseline(await preflight_msv())
+    await run_config_migrations()
+
+    assert (
+        await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
+        is False
+    )
+    baseline = await preflight_msv()
+    assert baseline.status == MsvStatus.UNSUPPORTED
+    assert baseline.floor_applied is False
+    assert baseline.upgrade_guidance
+
+
+@pytest.mark.asyncio
+async def test_floor_marker_is_withheld_without_a_preflight_baseline() -> None:
+    """Without a preflight baseline the marker is withheld (fail closed)."""
+    set_msv_baseline(None)
+    await run_config_migrations()
+    assert (
+        await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
+        is False
+    )
