@@ -108,11 +108,17 @@ async def serve_vue(path: FromPath[str]) -> File:
 
 
 @get(
-    path=["/control-center", "/monitoring"],
+    path=["/control-center", "/monitoring", "/config", "/settings"],
     include_in_schema=False,
 )
 async def serve_spa_top_level_routes() -> File:
-    """Serve top-level SPA routes that would otherwise collide with API prefixes."""
+    """Serve top-level SPA routes that would otherwise collide with API prefixes.
+
+    These are exact routes: without them Litestar's routing tree lets the
+    matching API prefix (e.g. the config controller's ``/config/*`` handlers)
+    claim the bare path and 404, so the browser never receives the SPA entry
+    and the Vue router's redirect to /control-center never runs.
+    """
     return await _serve_vue_path("")
 
 

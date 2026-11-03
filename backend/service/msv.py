@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from model import ConfigMigration, SchemaMigration
+from model import AppConfig, ConfigMigration, SchemaMigration
+from tortoise.transactions import in_transaction
 
 MINIMUM_SUPPORTED_VERSION = "4.9.0.0"
 
@@ -155,3 +156,43 @@ def set_msv_baseline(baseline: MsvBaseline | None) -> None:
 def get_msv_baseline() -> MsvBaseline | None:
     """Return the most recent baseline, or ``None`` before preflight runs."""
     return _latest_baseline
+
+
+async def record_msv_floor_marker(baseline: MsvBaseline | None) -> None:
+    """Record the floor marker for a fresh install, before schema history.
+
+    Called during database init immediately after the preflight and before
+    schema migrations commit their rows. A fresh install (no pre-migration
+    schema history) is marked at the floor here so an interrupted startup
+    cannot leave schema history without the marker and misreport
+    ``unsupported`` on the next boot. A pre-floor install (schema history
+    already present at preflight) is left unmarked and keeps reporting
+    ``unsupported`` until the operator upgrades through the floor release.
+
+    Args:
+        baseline: The preflight baseline, or ``None`` when the preflight did
+            not run. When unavailable the marker is withheld (fail closed).
+    """
+    if baseline is None or baseline.status != MsvStatus.FRESH:
+        return
+
+    async with in_transaction() as connection:
+        legacy_present = (
+            await AppConfig.filter(key__in=list(LEGACY_TRADE_MODE_KEYS))
+            .using_db(connection)
+            .exists()
+        )
+        if legacy_present:
+            return
+        already_applied = (
+            await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW)
+            .using_db(connection)
+            .exists()
+        )
+        if already_applied:
+            return
+        await ConfigMigration.create(
+            using_db=connection,
+            version=FLOOR_CONFIG_MIGRATION_ROW,
+            backup_json="[]",
+        )

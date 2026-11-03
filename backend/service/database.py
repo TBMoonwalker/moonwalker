@@ -13,7 +13,12 @@ from uuid import uuid4
 
 import helper
 import model
-from service.msv import MINIMUM_SUPPORTED_VERSION, preflight_msv
+from service.msv import (
+    MINIMUM_SUPPORTED_VERSION,
+    MsvBaseline,
+    preflight_msv,
+    record_msv_floor_marker,
+)
 from service.replay_candles import archive_replay_candles_for_deal
 from service.schema_migrations import (
     CONTRACT_DROP_COMPATIBILITY,
@@ -1618,6 +1623,7 @@ class Database:
             # The preflight reads the ledger before any migration callback runs,
             # so it reflects the install's last-known baseline. It is report-only:
             # a preflight failure must never block startup.
+            baseline: MsvBaseline | None = None
             try:
                 baseline = await preflight_msv()
                 if not baseline.supported:
@@ -1629,6 +1635,11 @@ class Database:
                     )
             except Exception:  # noqa: BLE001 - the preflight must never block startup.
                 logging.exception("MSV preflight failed; continuing startup.")
+            # Record the floor marker for a fresh install before schema
+            # migrations commit their rows. If this startup is interrupted
+            # afterwards, the marker is already present, so the next boot
+            # reports supported rather than a false pre-floor baseline.
+            await record_msv_floor_marker(baseline)
             await self._run_schema_init_steps()
             await self._repair_index_only_corruption_if_needed()
             await self._run_backfill_init_steps()

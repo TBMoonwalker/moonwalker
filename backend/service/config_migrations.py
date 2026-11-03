@@ -5,65 +5,19 @@ from __future__ import annotations
 import json
 
 from model import AppConfig, ConfigMigration
-from service.msv import (
-    FLOOR_CONFIG_MIGRATION_ROW,
-    LEGACY_TRADE_MODE_KEYS,
-    MsvStatus,
-    get_msv_baseline,
-)
 from service.signal_settings import SignalSettingsError, serialize_signal_settings
 from tortoise.transactions import in_transaction
 
 SIGNAL_SETTINGS_MIGRATION_VERSION = "2026-07-signal-settings-v1"
 
 
-async def _record_floor_marker() -> None:
-    """Persist the MSV floor marker for a genuinely fresh database only.
-
-    The floor release's trade-mode migration is removed: raw pre-4.9 bridge
-    keys are dropped on restore instead of canonicalized.  The marker row is
-    still written for clean databases because the MSV preflight
-    (``service.msv``) uses its presence to tell a fresh database that has
-    reached the floor from a pre-floor one.
-
-    The marker is written only when the preflight already classified the
-    install as fresh (no pre-migration schema history).  A pre-floor install
-    carries schema history and must keep reporting ``unsupported`` until the
-    operator upgrades through the floor release, even when its optional legacy
-    bridge keys are absent; treating their absence alone as proof of the floor
-    would silently drop the upgrade warning.  When no baseline is available
-    the marker is withheld rather than risk hiding a real warning.
-    """
-    baseline = get_msv_baseline()
-    if baseline is None or baseline.status != MsvStatus.FRESH:
-        return
-
-    async with in_transaction() as connection:
-        already_applied = (
-            await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW)
-            .using_db(connection)
-            .exists()
-        )
-        if already_applied:
-            return
-        legacy_present = (
-            await AppConfig.filter(key__in=list(LEGACY_TRADE_MODE_KEYS))
-            .using_db(connection)
-            .exists()
-        )
-        if legacy_present:
-            return
-        await ConfigMigration.create(
-            using_db=connection,
-            version=FLOOR_CONFIG_MIGRATION_ROW,
-            backup_json="[]",
-        )
-
-
 async def run_config_migrations() -> None:
-    """Apply all configuration migrations once in atomic transactions."""
-    await _record_floor_marker()
+    """Apply all configuration migrations once in atomic transactions.
 
+    The MSV floor marker is not written here: it is recorded during database
+    init, before schema history, by :func:`service.msv.record_msv_floor_marker`
+    so an interrupted fresh startup cannot leave a false pre-floor baseline.
+    """
     async with in_transaction() as connection:
         already_applied = (
             await ConfigMigration.filter(version=SIGNAL_SETTINGS_MIGRATION_VERSION)

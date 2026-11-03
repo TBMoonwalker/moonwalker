@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from controller import config as config_controller
 from controller import frontend as frontend_controller
 from litestar import Litestar
 from litestar.testing import TestClient
@@ -16,6 +17,9 @@ def test_supported_top_level_spa_routes_bypass_api_prefix_404s(
     # Report: .gstack/qa-reports/qa-report-127-0-0-1-2026-03-20.md
     # /config and /settings serve the SPA entry; the Vue router redirects
     # them to /control-center (legacy-migration-removal wave, D16).
+    # The config API controller is registered too: its /config/* handlers make
+    # Litestar's routing tree claim the bare /config path, so the SPA route
+    # must win explicitly (a frontend-only app hides the clash).
     static_dir = tmp_path / "static"
     template_dir = tmp_path / "templates"
     assets_dir = static_dir / "assets"
@@ -35,7 +39,12 @@ def test_supported_top_level_spa_routes_bypass_api_prefix_404s(
     monkeypatch.setattr(frontend_controller, "STATIC_DIR", static_dir)
     monkeypatch.setattr(frontend_controller, "TEMPLATE_DIR", template_dir)
 
-    app = Litestar(route_handlers=frontend_controller.route_handlers)
+    app = Litestar(
+        route_handlers=[
+            *config_controller.route_handlers,
+            *frontend_controller.route_handlers,
+        ]
+    )
     with TestClient(app=app) as client:
         for route in (
             "/control-center",

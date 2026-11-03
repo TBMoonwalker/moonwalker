@@ -758,7 +758,8 @@ async def test_database_init_msv_preflight_records_baseline_and_is_report_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Value: protects=MSV preflight wiring in Database.init (baseline recorded
-    before any migration callback; a preflight failure never blocks startup);
+    before any migration callback, the floor marker recorded before the schema
+    step for a fresh install, and a preflight failure never blocks startup);
     fails_when=a preflight exception aborts init or the baseline is not recorded
     for the reporting surface; why_new=the init ordering test records the
     migration steps but never exercises the preflight seam; seam=none;
@@ -808,6 +809,9 @@ async def test_database_init_msv_preflight_records_baseline_and_is_report_only(
     )
     monkeypatch.setattr(Database, "_run_backfill_init_steps", _record("backfill"))
     monkeypatch.setattr("service.database.preflight_msv", record_preflight)
+    monkeypatch.setattr(
+        "service.database.record_msv_floor_marker", _record("record_floor_marker")
+    )
 
     try:
         await Database().init()
@@ -819,6 +823,7 @@ async def test_database_init_msv_preflight_records_baseline_and_is_report_only(
             "assert_no_orphaned_campaign_rebuilds",
             "generate_schemas",
             "preflight",
+            "record_floor_marker",
             "schema_steps",
             "repair",
             "backfill",
