@@ -25,12 +25,9 @@ from service.config import (
     is_removed_config_key,
     resolve_history_lookback_days,
 )
-from service.config_migrations import (
-    LEGACY_TRADE_MODE_KEYS,
-    canonicalize_trade_mode_rows,
-)
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
+from service.msv import LEGACY_TRADE_MODE_KEYS
 from service.placement_intents import (
     NONTERMINAL_PLACEMENT_STATES,
     TERMINAL_PLACEMENT_STATES,
@@ -47,6 +44,12 @@ logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 BACKUP_SCHEMA_VERSION = 3
 RECOVERY_MANIFEST_SCHEMA_VERSION = 1
 RECOVERY_MANIFEST_DISPOSITION = "quarantine_only"
+
+# Pre-4.9 backups may still carry the raw trade-mode bridge keys. Restore
+# drops them silently (decision D11, 2026-11-01): every legacy representation
+# was equivalent to the default `trade_mode` value (`dynamic_dca`), so
+# dropping them loses nothing and keeps old backups restorable without operator
+# action. See docs/operations.md, "Backup And Restore".
 
 TRADE_TABLE_MODELS: dict[str, type] = {
     "trades": model.Trades,
@@ -122,9 +125,7 @@ class BackupService:
         if backup_payload.get("schema_version", 1) not in {1, 2, 3}:
             raise ValueError("Unsupported backup schema version.")
         config_rows = self._force_safe_restore_config(
-            canonicalize_trade_mode_rows(
-                self._validate_config_rows(backup_payload.get("config"))
-            )
+            self._validate_config_rows(backup_payload.get("config"))
         )
 
         trade_data = backup_payload.get("trade_data")
@@ -135,6 +136,7 @@ class BackupService:
                     safe_fields={"restore_trade_data": restore_trade_data},
                 )
             validated_trade_data = self._validate_trade_data(trade_data)
+            self._assert_no_open_trade_campaign_residue(validated_trade_data)
             if any(validated_trade_data[name] for name in ACCUMULATION_TABLE_MODELS):
                 if not ACCUMULATION_TABLE_MODELS.keys() <= trade_data.keys():
                     raise ValueError("Accumulation backup is missing ownership tables.")
@@ -380,7 +382,9 @@ class BackupService:
                     message="Backup config rows must include key and value_type.",
                     safe_fields={"key": key or None, "value_type": value_type or None},
                 )
-            if is_removed_config_key(key) and key not in LEGACY_TRADE_MODE_KEYS:
+            if key in LEGACY_TRADE_MODE_KEYS:
+                continue
+            if is_removed_config_key(key):
                 raise ValueError(build_removed_config_key_message(key))
             normalized_rows.append(
                 {
@@ -437,6 +441,38 @@ class BackupService:
                 normalized_rows.append(normalized_row)
             validated[table_name] = normalized_rows
         return validated
+
+    @staticmethod
+    def _assert_no_open_trade_campaign_residue(
+        validated_trade_data: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Refuse a full restore whose open trades still reference a campaign.
+
+        Mirrors the startup residue gate in ``Database.init``: the campaign
+        columns were dropped in the 4.9 contract migration, so deserializing
+        a pre-4.9 backup row that still carries ``campaign_id`` would silently
+        lose the campaign linkage without the operator review the startup gate
+        requires. The documented recovery procedure must run first.
+        """
+        residue_rows = [
+            row
+            for row in validated_trade_data.get("open_trades", [])
+            if row.get("campaign_id") is not None
+        ]
+        if not residue_rows:
+            return
+        symbols = ", ".join(
+            sorted(str(row.get("symbol") or "<unknown>") for row in residue_rows)
+        )
+        raise ValueError(
+            "Restore aborted: the backup has "
+            f"{len(residue_rows)} open trade row(s) with legacy campaign "
+            f"residue (symbols: {symbols}). The campaign columns were dropped "
+            "in 4.9, so restoring would silently lose the campaign linkage. "
+            "Review the open position(s) on the exchange, clear the "
+            "campaign_id value(s) in the backup's open-trade rows, then "
+            'retry; see docs/operations.md, "Campaign residue recovery".'
+        )
 
     @classmethod
     def _validate_recovery_manifest(

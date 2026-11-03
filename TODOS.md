@@ -58,6 +58,90 @@ coverage-include regression is caught.
 
 **Priority:** P3
 
+### Remove the three deferred Phase 4 data-compat shims at their concrete floors
+
+**Status:** Deferred by the 2026-11-01 legacy-migration-removal review (D8=A). Each removal is safe only once its recorded floor is passed.
+
+**What:** Remove the three Phase 4 data-compat shims that the shipped 4.9.0.0 MSV floor does not gate: the CSV fee-accounting fallback in `backend/service/trade_math.py` (fee flag, migration 016), the legacy CSV import path, and the `legacy_accumulation_graph` view. Each as a small PR with its fixture/test updated, the same shape as the two shims removed this wave (replay backfill >008, `has_legacy_partial` >007).
+
+**Why:** These three postdate the 4.9.0.0 floor or are not version-gateable at all, so removing them now would break fee accounting on supported 4.9–5.2 installs. Deferring keeps the wave removal-only and ships only what the floor proves safe.
+
+**Pros:** Each removal gates on a concrete, recorded floor: the fee flag at >=5.3.0.0 (016 provenance, commit 04b6990), the CSV import behind a file-format deprecation window, and `legacy_accumulation_graph` on a retention window since 4.0.0.0/c44fd0e (legacy-shape docs persist unmigrated). The shims are read-only fallbacks, so running one more cycle is harmless.
+
+**Cons:** Three fallback paths stay in the codebase past their natural window until the floors are re-checked.
+
+**Context:** Decided in the 2026-11-01 legacy-migration-removal eng review (D8, option A); the two gateable shims landed this wave on `chore/hygiene-logging-serialization-sync-2026-10`. Plan of record: `~/.gstack/projects/TBMoonwalker-moonwalker/legacy-migration-removal-plan-20261101.md`.
+
+**Depends on:** The MSV floor in `backend/service/msv.py` and its record in `docs/operations.md`; the CSV import also needs an operator-visible deprecation window before its removal.
+
+**Priority:** P3
+
+### Decide the migration-ledger prune policy (Phase 5 ledger hygiene)
+
+**Status:** Deferred by the 2026-11-01 legacy-migration-removal review (D6=B); not a PR this wave.
+
+**What:** Decide the retention policy for `schema_migrations` and `config_migrations` rows, which currently grow unbounded across releases. Candidate: a one-time "prune applied ledger rows older than MSV" migration plus a collapse of the `015` (`2026-10-23-015-accumulation-dust-archive`) and `003` (`2026-07-28-003-trade-ledger-expand`) near-duplicate, both gated by MSV and checksum-safe.
+
+**Why:** The ledgers are the only record that a database has applied each migration, but nothing trims them, so every install accumulates one row per applied step forever.
+
+**Pros:** Bounds ledger growth and removes the near-duplicate entry; a gated, checksum-safe step keeps the recovery contract intact.
+
+**Cons:** Pruning touches the recovery contract (the checksums are the resume proof), so the policy must be designed before any row is deleted; a wrong prune makes a healthy database look un-migrated.
+
+**Context:** Phase 5 of the legacy-migration-removal plan; its "What NOT to do" section forbids deleting ledger rows outright, so pruning must go through a gated, checksum-safe step. Deferred via D6 (option B) on 2026-11-01.
+
+**Depends on:** The MSV floor in `backend/service/msv.py`; the checksum contract in `backend/service/schema_migrations.py`.
+
+**Priority:** P3
+
+### Classify backups before restore confirmation
+
+**Status:** Deferred owner decision from the May 2026 trade-modes-reset CEO plan; the original deferral to TODOS.md was never written. Recorded 2026-11-01 (D12=A).
+
+**What:** Quoted verbatim from the trade-modes-reset CEO plan "Deferred to TODOS.md" section: "Add a restore/import review state that classifies backups as Dynamic DCA, Sidestep, or deprecated static before restore confirmation".
+
+**Why:** The restore flow silently drops legacy bridge keys from pre-4.9 backups (this wave's D11), so an operator restoring an old backup gets no indication of what representation the backup carried; a classification screen before confirmation would make that legible.
+
+**Pros:** Restores an explicitly made owner decision to the backlog where it was supposed to live; implementation stays a future wave, with zero scope change to the removal wave.
+
+**Cons:** New restore-flow UI work (a classification screen) unrelated to the removal wave; the underlying silent key-drop behavior stays unexplained until this ships.
+
+**Context:** The trade-modes-reset CEO plan (2026-05-12, branch `feature/code-stabilization`) deferred this item to TODOS.md; the 2026-11-01 legacy-migration-removal eng review (D12, option A) recorded the missing entry.
+
+**Depends on:** Nothing — standalone restore-flow addition, buildable in any future wave.
+
+**Priority:** P3
+
+### Show an unavailable notice on replay charts without indicator series
+
+**Status:** Declined option of D19 (2026-11-01 design review), tracked per D22/R10.
+
+**What:** A muted "Indicator overlays unavailable for this trade" caption on the replay chart when the indicator fetch yields no series (also fixes the existing swallowed-404 case).
+
+**Why:** D19 deferred it to keep the wave removal-only; legacy rows without a deal id now render candles without indicator overlays and no explanation, and without a repo-side record the deliberate silence is undiscoverable in ~6 months.
+
+**Pros:** Honest state per DESIGN.md ("missing feeds are shown as unavailable rather than invented"); fixes a pre-existing silent case (swallowed 404 in `loadReplayIndicators`).
+
+**Cons:** New chart state + copy (~3h human / ~20min CC).
+
+**Context:** `frontend/src/components/TradeReplayChart.vue` `loadReplayIndicators` (silent early return + swallowed 404); the D19 record in the legacy-migration-removal plan.
+
+**Depends on:** Nothing — standalone chart-state addition, buildable in any future wave.
+
+**Priority:** P3
+
+### Extend the campaign residue gate to the full 021 drop set
+
+**Status:** Hardening candidate from the 2026-11-02 pre-landing review (F5, red-team 6/10); the current gate scope is an approved, documented design decision.
+
+**What:** The campaign-residue gate (startup `_assert_no_open_trade_campaign_residue` in `backend/service/database.py` and restore `_assert_no_open_trade_campaign_residue` in `backend/service/backup_restore.py` — the two implementations must stay in sync) aborts startup / refuses a restore only when an `opentrades` row carries `campaign_id IS NOT NULL`. The seven sidestep-era waiting-state columns that migration 021 drops (`waiting_reference_price`, `reserved_reentry_quote`, `waiting_reference_amount`, `waiting_reference_quote`, `virtual_waiting_profit`, `virtual_waiting_profit_percent`, `last_transition_at`) are zeroed silently on rows that still carry them. Extend the assertion to the full drop set (campaign reference OR non-zero waiting state) with a fixture test.
+
+**Why:** In 4.8.x the waiting-state writers were campaign-context paths that propagated `campaign_id`, so the flagged scenario needs an already-inconsistent row on an unsupported 4.8.x direct upgrade. The risk is low and the current scope was approved; recorded rather than extended in this wave.
+
+**Context:** Pre-landing review of `chore/hygiene-logging-serialization-sync-2026-10` (2026-11-02), finding F5; operator decision 2026-11-02 (PR note + TODO, no code change this wave).
+
+**Priority:** P3
+
 ## Dashboard history
 
 ### Evaluate server caching and incremental timeline loading

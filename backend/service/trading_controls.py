@@ -30,10 +30,8 @@ def is_global_trading_paused(config: dict[str, Any] | None) -> bool:
 def resolve_mission_pause_fields(
     *,
     open_trade: dict[str, Any] | None,
-    campaign: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return normalized mission pause fields from existing persistence truth."""
-    _ = campaign
     return {
         "automation_paused": bool((open_trade or {}).get("automation_paused", False)),
         "automation_paused_at": (
@@ -95,7 +93,6 @@ class MissionPauseResult:
     status: str
     message: str
     symbol: str
-    campaign_id: str | None
     automation_paused: bool
 
 
@@ -129,7 +126,6 @@ class TradingControlsService:
             status="lifecycle_required",
             message="Use the accumulation lifecycle controls with a revision and operation ID; legacy pause/resume cannot change this symbol.",
             symbol=symbol,
-            campaign_id=None,
             automation_paused=True,
         )
 
@@ -165,7 +161,6 @@ class TradingControlsService:
             .limit(1)
             .values(
                 "symbol",
-                "campaign_id",
                 "tp_limit_order_id",
                 "automation_paused",
                 "automation_paused_at",
@@ -175,16 +170,12 @@ class TradingControlsService:
         if open_trade is None:
             return None
 
-        campaign_id = str(open_trade.get("campaign_id") or "").strip()
-
         pause_fields = resolve_mission_pause_fields(
             open_trade=open_trade,
-            campaign=None,
         )
         pause_source = str(pause_fields.get("automation_pause_source") or "")
         return {
             "symbol": normalized_symbol,
-            "campaign_id": campaign_id or None,
             "tp_limit_order_id": str(open_trade.get("tp_limit_order_id") or "").strip()
             or None,
             "pause_source": pause_source or "open_trade",
@@ -196,7 +187,6 @@ class TradingControlsService:
         *,
         symbol: str,
         pause_source: str,
-        campaign_id: str | None,
         paused: bool,
     ) -> bool:
         """Persist one mission pause transition on the correct substrate."""
@@ -233,7 +223,6 @@ class TradingControlsService:
                 status="not_found",
                 message="Mission not found.",
                 symbol="",
-                campaign_id=None,
                 automation_paused=False,
             )
 
@@ -245,7 +234,6 @@ class TradingControlsService:
                     status="maintenance",
                     message="Mission changes are paused during maintenance.",
                     symbol=normalized_symbol,
-                    campaign_id=None,
                     automation_paused=False,
                 )
             return await self._pause_mission_prelocked(
@@ -269,7 +257,6 @@ class TradingControlsService:
                 status="not_found",
                 message="Mission not found.",
                 symbol=self._normalize_symbol(symbol),
-                campaign_id=None,
                 automation_paused=False,
             )
 
@@ -278,7 +265,6 @@ class TradingControlsService:
                 status="already_paused",
                 message=f"Automation is already paused for {mission['symbol']}.",
                 symbol=mission["symbol"],
-                campaign_id=mission.get("campaign_id"),
                 automation_paused=True,
             )
 
@@ -300,14 +286,12 @@ class TradingControlsService:
                         "TP limit order could not be canceled safely."
                     ),
                     symbol=mission["symbol"],
-                    campaign_id=mission.get("campaign_id"),
                     automation_paused=False,
                 )
 
         updated = await self._update_mission_pause_state(
             symbol=mission["symbol"],
             pause_source=str(mission.get("pause_source") or "open_trade"),
-            campaign_id=mission.get("campaign_id"),
             paused=True,
         )
         if not updated:
@@ -315,7 +299,6 @@ class TradingControlsService:
                 status="not_found",
                 message="Mission not found.",
                 symbol=mission["symbol"],
-                campaign_id=mission.get("campaign_id"),
                 automation_paused=False,
             )
         trades = await self._get_trades()
@@ -325,7 +308,6 @@ class TradingControlsService:
             status="paused",
             message=f"Paused automation for {mission['symbol']}.",
             symbol=mission["symbol"],
-            campaign_id=mission.get("campaign_id"),
             automation_paused=True,
         )
 
@@ -337,7 +319,6 @@ class TradingControlsService:
                 status="not_found",
                 message="Mission not found.",
                 symbol="",
-                campaign_id=None,
                 automation_paused=False,
             )
 
@@ -349,7 +330,6 @@ class TradingControlsService:
                     status="maintenance",
                     message="Mission changes are paused during maintenance.",
                     symbol=normalized_symbol,
-                    campaign_id=None,
                     automation_paused=False,
                 )
             return await self._resume_mission_prelocked(normalized_symbol)
@@ -366,7 +346,6 @@ class TradingControlsService:
                 status="not_found",
                 message="Mission not found.",
                 symbol=self._normalize_symbol(symbol),
-                campaign_id=None,
                 automation_paused=False,
             )
 
@@ -375,14 +354,12 @@ class TradingControlsService:
                 status="already_resumed",
                 message=f"Automation is already active for {mission['symbol']}.",
                 symbol=mission["symbol"],
-                campaign_id=mission.get("campaign_id"),
                 automation_paused=False,
             )
 
         updated = await self._update_mission_pause_state(
             symbol=mission["symbol"],
             pause_source=str(mission.get("pause_source") or "open_trade"),
-            campaign_id=mission.get("campaign_id"),
             paused=False,
         )
         if not updated:
@@ -390,7 +367,6 @@ class TradingControlsService:
                 status="not_found",
                 message="Mission not found.",
                 symbol=mission["symbol"],
-                campaign_id=mission.get("campaign_id"),
                 automation_paused=True,
             )
         trades = await self._get_trades()
@@ -400,6 +376,5 @@ class TradingControlsService:
             status="resumed",
             message=f"Resumed automation for {mission['symbol']}.",
             symbol=mission["symbol"],
-            campaign_id=mission.get("campaign_id"),
             automation_paused=False,
         )

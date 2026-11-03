@@ -263,7 +263,6 @@ async def mission_pause(symbol: FromPath[str]) -> Any:
                 "error": result.message,
                 "status": result.status,
                 "symbol": result.symbol,
-                "campaign_id": result.campaign_id,
                 "automation_paused": result.automation_paused,
             },
             409,
@@ -273,7 +272,6 @@ async def mission_pause(symbol: FromPath[str]) -> Any:
         "message": result.message,
         "status": result.status,
         "symbol": result.symbol,
-        "campaign_id": result.campaign_id,
         "automation_paused": result.automation_paused,
     }
 
@@ -296,7 +294,6 @@ async def mission_resume(symbol: FromPath[str]) -> Any:
         "message": result.message,
         "status": result.status,
         "symbol": result.symbol,
-        "campaign_id": result.campaign_id,
         "automation_paused": result.automation_paused,
     }
 

@@ -300,60 +300,6 @@ async def test_config_snapshot_returns_defensive_copy(tmp_path, monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_config_snapshot_ignores_removed_legacy_autopilot_max_fund_key(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "test.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
-    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
-
-    import model
-
-    await model.AppConfig.create(
-        key="autopilot_max_fund", value="250", value_type="int"
-    )
-
-    config = Config()
-    await config.load_all()
-
-    snapshot = config.snapshot()
-    assert snapshot["capital_max_fund"] == 0.0
-    assert "autopilot_max_fund" not in snapshot
-    assert config.get("autopilot_max_fund") is None
-
-    await Tortoise.close_connections()
-
-
-@pytest.mark.asyncio
-async def test_config_set_rejects_removed_legacy_autopilot_max_fund_key(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "test.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
-    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
-
-    config = Config()
-    with pytest.raises(
-        ValueError,
-        match=(
-            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
-            "Use 'capital_max_fund' instead."
-        ),
-    ):
-        await config.set("autopilot_max_fund", {"value": 250, "type": "int"})
-
-    await Tortoise.close_connections()
-
-
-@pytest.mark.asyncio
 async def test_config_subscribers_receive_defensive_snapshot(
     tmp_path, monkeypatch
 ) -> None:
@@ -443,7 +389,7 @@ async def test_config_load_all_applies_tp_spike_defaults(tmp_path, monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_config_load_all_clears_removed_keys(tmp_path, monkeypatch) -> None:
+async def test_config_load_all_replaces_snapshot_from_db(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -465,122 +411,6 @@ async def test_config_load_all_clears_removed_keys(tmp_path, monkeypatch) -> Non
     await config.load_all()
 
     assert config.get("timezone") is None
-
-    await Tortoise.close_connections()
-
-
-@pytest.mark.asyncio
-async def test_config_load_all_ignores_removed_trade_mode_rows(
-    tmp_path, monkeypatch
-) -> None:
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "test.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
-    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
-
-    import model
-
-    await model.AppConfig.create(
-        key="trade_lifecycle_mode",
-        value="classic_dca",
-        value_type="str",
-    )
-    await model.AppConfig.create(
-        key="dynamic_dca",
-        value=True,
-        value_type="bool",
-    )
-
-    config = Config()
-    await config.load_all()
-
-    assert config.get("trade_mode") == "dynamic_dca"
-    assert config.snapshot()["trade_mode"] == "dynamic_dca"
-    assert config.get("delisting_protection_enabled") is False
-    assert config.get("delisting_schedule_use_trading_credentials") is False
-    assert config.get("delisting_schedule_api_key") == ""
-    assert config.get("delisting_schedule_api_secret") == ""
-    assert "dynamic_dca" not in config.snapshot()
-    assert "trade_lifecycle_mode" not in config.snapshot()
-    assert "dynamic_dca" not in config.raw_snapshot()
-    assert "trade_lifecycle_mode" not in config.raw_snapshot()
-
-    await Tortoise.close_connections()
-
-
-@pytest.mark.asyncio
-async def test_config_load_all_derives_sidestep_from_legacy_upgrade_rows(
-    tmp_path, monkeypatch
-) -> None:
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "test.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
-    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
-
-    import model
-
-    await model.AppConfig.create(
-        key="trade_lifecycle_mode",
-        value="sidestep_reentry",
-        value_type="str",
-    )
-    await model.AppConfig.create(
-        key="sidestep_campaign_enabled",
-        value=True,
-        value_type="bool",
-    )
-    await model.AppConfig.create(
-        key="sidestep_bearish_strategy",
-        value="ema20_swing_reverse",
-        value_type="str",
-    )
-    await model.AppConfig.create(
-        key="sidestep_reentry_strategy",
-        value="ema20_swing",
-        value_type="str",
-    )
-
-    config = Config()
-    await config.load_all()
-
-    assert config.get("trade_mode") == "dynamic_dca"
-    assert config.snapshot()["trade_mode"] == "dynamic_dca"
-    assert "trade_lifecycle_mode" not in config.snapshot()
-    assert "sidestep_campaign_enabled" not in config.snapshot()
-    assert "trade_lifecycle_mode" not in config.raw_snapshot()
-    assert "sidestep_campaign_enabled" not in config.raw_snapshot()
-    assert (await model.AppConfig.get(key="trade_mode")).value == "dynamic_dca"
-
-    await Tortoise.close_connections()
-
-
-@pytest.mark.asyncio
-async def test_config_set_rejects_removed_trade_mode_bridge_key(
-    tmp_path, monkeypatch
-) -> None:
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "test.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
-    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
-
-    config = Config()
-    with pytest.raises(
-        ValueError,
-        match=(
-            "Config key 'trade_lifecycle_mode' was removed in this release. "
-            "Use 'trade_mode' instead."
-        ),
-    ):
-        await config.set(
-            "trade_lifecycle_mode",
-            {"value": "classic_dca", "type": "str"},
-        )
 
     await Tortoise.close_connections()
 

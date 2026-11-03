@@ -451,11 +451,10 @@ async def test_unavailable_schedule_warns_open_trades_and_notifies_once() -> Non
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("baseorder", "safetyorder", "campaign_id"),
+    ("baseorder", "safetyorder"),
     (
-        (True, False, None),
-        (False, True, None),
-        (True, False, "campaign-1"),
+        (True, False),
+        (False, True),
     ),
 )
 @pytest.mark.usefixtures("classic_lifecycle_route")
@@ -463,7 +462,6 @@ async def test_central_order_guard_blocks_every_buy_role(
     monkeypatch: pytest.MonkeyPatch,
     baseorder: bool,
     safetyorder: bool,
-    campaign_id: str | None,
 ) -> None:
     orders = Orders()
     executed = False
@@ -505,7 +503,6 @@ async def test_central_order_guard_blocks_every_buy_role(
             "ordersize": 25.0,
             "baseorder": baseorder,
             "safetyorder": safetyorder,
-            "campaign_id": campaign_id,
         },
         {"delisting_protection_enabled": True},
     )

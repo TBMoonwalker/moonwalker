@@ -55,11 +55,14 @@ Notes:
 - Dashboard clients can compare `/config/all`'s `config_updated_at` against
   `/config/freshness` so a stale snapshot is not mistaken for a freshly loaded
   one when another tab or client saves between requests.
-- Config update endpoints reject removed legacy keys such as
-  `autopilot_max_fund`, `autopilot_entry_stretch_max_multiplier`,
-  `trade_lifecycle_mode`, `dynamic_dca`, and `sidestep_campaign_enabled`; use
-  `capital_max_fund`, `autopilot_base_order_stretch_max_multiplier`, and
-  canonical `trade_mode` instead.
+- Config update endpoints no longer reject removed legacy keys; writes of
+  them persist as inert rows the runtime never reads. Use the supported keys
+  instead — `capital_max_fund` for `autopilot_max_fund`,
+  `autopilot_base_order_stretch_max_multiplier` for
+  `autopilot_entry_stretch_max_multiplier`, and canonical `trade_mode` for
+  the pre-4.9 bridge keys `trade_lifecycle_mode`, `dynamic_dca`, and
+  `sidestep_campaign_enabled`. Backup restore rejects removed keys other than
+  the three bridge keys, which it drops silently (see the restore section).
 - Generic config saves cannot switch `dry_run` from `true` to `false`; that
   transition is rejected unless it goes through `POST /config/live/activate`.
 - `POST /config/live/activate` expects `{"confirm": true}` and returns `409`
@@ -76,7 +79,8 @@ Notes:
   `confirm: true`, and optional `restore_trade_data`. Restore drains active
   exchange-order work, rejects new order work until replacement completes, and
   leaves the restored instance paused in dry-run mode. Backups containing
-  removed legacy config keys are rejected.
+  removed legacy config keys are rejected, except the three pre-4.9
+  trade-mode bridge keys, which are dropped silently.
 - Full backups use schema 3 and include accumulation ownership, exact balances,
   historical execution records and pinned strategy dependencies. Restore retains
   closing/stopped states and quarantines unfinished orders and commands. Strategy
@@ -556,6 +560,7 @@ bounded shared ticker history only for older legacy rows.
 | `GET` | `/monitoring/logs` | Return the allowlisted log sources visible in the Monitoring page. |
 | `GET` | `/monitoring/logs/{source}` | Return tailed or backfilled log lines for one allowlisted source. |
 | `GET` | `/monitoring/logs/{source}/download` | Download the current file for one allowlisted log source. |
+| `GET` | `/monitoring/msv` | Report the minimum-supported-version baseline recorded at startup. |
 | `POST` | `/monitoring/test` | Send a Telegram test notification using current or overridden monitoring settings. |
 
 `GET /monitoring/logs/{source}` accepts:

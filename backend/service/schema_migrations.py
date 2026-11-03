@@ -15,6 +15,10 @@ MIGRATION_STATUS_RUNNING = "running"
 MIGRATION_STATUS_APPLIED = "applied"
 MIGRATION_STATUS_FAILED = "failed"
 EXPAND_ONLY_COMPATIBILITY = "expand-only:9a56ed9"
+# Marks the first contract (destructive) migration: it rebuilds tables and
+# drops columns, so a failed run must never be silently re-planned as an
+# additive step.
+CONTRACT_DROP_COMPATIBILITY = "contract-drop:2026-11-01-021"
 MAX_MIGRATION_ERROR_LENGTH = 2000
 
 

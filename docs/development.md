@@ -9,7 +9,8 @@ understand and maintain the system without access to an individual machine.
 | Concern | Owner and responsibility |
 |---|---|
 | Application lifecycle | [app.py](../backend/app.py) and [runtime_services.py](../backend/service/runtime_services.py) own startup, supervised tasks, and shutdown. |
-| Configuration | [config.py](../backend/service/config.py) persists settings; [config_contract.py](../backend/service/config_contract.py) defines the shared high-risk configuration contract; [config_migrations.py](../backend/service/config_migrations.py) handles versioned legacy normalization. |
+| Configuration | [config.py](../backend/service/config.py) persists settings; [config_contract.py](../backend/service/config_contract.py) defines the shared high-risk configuration contract; [config_migrations.py](../backend/service/config_migrations.py) applies versioned config migrations (the signal-settings migration). |
+| MSV baseline | [msv.py](../backend/service/msv.py) owns the minimum-supported-version preflight and the floor marker; [database.py](../backend/service/database.py) records the floor marker for a fresh install during init, before schema history. |
 | Signal entry | [signal_runtime.py](../backend/service/signal_runtime.py) coordinates admission; the order service remains the central execution boundary. |
 | Trading data | [trading_contracts.py](../backend/service/trading_contracts.py), [exchange_types.py](../backend/service/exchange_types.py), and [persistence_records.py](../backend/service/persistence_records.py) define intent, execution, and persistence contracts. |
 | AI work | [ai_work_queue.py](../backend/service/ai_work_queue.py) bounds background work; provider transport, analytics, and calibration have separate modules behind the AI Trust facade. |
@@ -34,8 +35,9 @@ For the operator-facing behavior, see [safety-order sizing](dynamic-so.md),
 Dynamic DCA and accumulation are supported trade modes. Accumulation retains
 managed inventory until an explicit sale and does not use DCA's automatic exits.
 Valid accumulation configuration survives reload and backup normalization;
-legacy Sidestep values normalize to Dynamic DCA. Historical Sidestep plans do not
-describe a supported runtime capability. See the [accumulation reference](accumulation.md)
+legacy Sidestep config keys are dropped silently by backup restore and the
+runtime never reads them. Historical Sidestep plans do not describe a
+supported runtime capability. See the [accumulation reference](accumulation.md)
 and [recovery guide](howto-recover-accumulation.md).
 
 The old Control Center audit's proposed theme unification has since been

@@ -88,15 +88,10 @@ class TradeReplayIndicatorService:
         timerange: str,
         timestamp_start: str | int | float,
         timestamp_end: str | int | float,
-        *,
-        campaign_id: str | None = None,
     ) -> dict[str, Any]:
         """Return strategy indicator overlays for a replay deal."""
         try:
             normalized_deal_id = str(UUID(str(deal_id)))
-            normalized_campaign_id = (
-                str(UUID(str(campaign_id))) if campaign_id else None
-            )
             start_ms = int(float(timestamp_start))
             end_ms = int(float(timestamp_end))
         except (TypeError, ValueError):
@@ -105,21 +100,10 @@ class TradeReplayIndicatorService:
         if end_ms <= start_ms:
             return self._empty(timerange)
 
-        if normalized_campaign_id:
-            executions = await self.trades.get_trade_executions(
-                normalized_deal_id,
-                campaign_id=normalized_campaign_id,
-            )
-        else:
-            executions = await self.trades.get_trade_executions(normalized_deal_id)
+        executions = await self.trades.get_trade_executions(normalized_deal_id)
         strategy_references = self._execution_strategy_references(executions)
         strategies = self._strategy_names(strategy_references)
         source = "execution_ledger"
-        if not strategies:
-            strategies = await self._legacy_backfill_strategies(executions)
-            if strategies:
-                source = "legacy_config_backfill"
-                strategy_references = [(strategy, None) for strategy in strategies]
         if await self.trades.is_open_deal(normalized_deal_id):
             active_dca_strategy = await self._active_dca_strategy()
             if active_dca_strategy:
@@ -173,7 +157,7 @@ class TradeReplayIndicatorService:
 
     @staticmethod
     async def _load_config_snapshot() -> dict[str, Any]:
-        """Return the current runtime config snapshot for legacy backfills."""
+        """Return the current runtime config snapshot."""
         return (await Config.instance()).snapshot()
 
     async def _active_dca_strategy(self) -> str:
@@ -221,44 +205,6 @@ class TradeReplayIndicatorService:
             if symbol:
                 return symbol
         return None
-
-    async def _legacy_backfill_strategies(
-        self, executions: list[dict[str, Any]]
-    ) -> list[str]:
-        """Derive visible legacy strategies when old executions lack metadata."""
-        if not executions:
-            return []
-        try:
-            config = await self._config_snapshot_provider()
-        except (RuntimeError, TypeError, ValueError, BaseORMException) as exc:
-            logging.warning(
-                "Failed loading config for legacy replay indicator backfill: %s",
-                exc,
-            )
-            return []
-
-        strategy_candidates: list[Any] = []
-
-        strategy_candidates.extend(
-            [
-                config.get("signal_strategy"),
-                config.get("dca_strategy"),
-            ]
-        )
-        return self._unique_strategy_names(strategy_candidates)
-
-    @staticmethod
-    def _unique_strategy_names(values: list[Any]) -> list[str]:
-        """Return unique non-empty strategy names in input order."""
-        strategies: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            strategy = str(value or "").strip()
-            if not strategy or strategy in seen:
-                continue
-            seen.add(strategy)
-            strategies.append(strategy)
-        return strategies
 
     async def _load_candles(
         self,

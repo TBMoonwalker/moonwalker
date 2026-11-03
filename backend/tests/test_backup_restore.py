@@ -478,9 +478,10 @@ async def test_export_backup_omits_removed_legacy_autopilot_max_fund_key(
 
 
 @pytest.mark.asyncio
-async def test_restore_backup_migrates_legacy_trade_mode_rows(
+async def test_restore_backup_drops_legacy_trade_mode_bridge_keys_silently(
     tmp_path, monkeypatch
 ) -> None:
+    """Pre-4.9 bridge keys are dropped on restore; trade_mode keeps its default."""
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -502,6 +503,11 @@ async def test_restore_backup_migrates_legacy_trade_mode_rows(
                     "value_type": "str",
                 },
                 {"key": "dynamic_dca", "value": True, "value_type": "bool"},
+                {
+                    "key": "sidestep_campaign_enabled",
+                    "value": True,
+                    "value_type": "bool",
+                },
             ],
         },
         restore_trade_data=False,
@@ -509,24 +515,25 @@ async def test_restore_backup_migrates_legacy_trade_mode_rows(
 
     import model
 
-    assert await model.AppConfig.filter(key="trade_mode").values_list(
-        "value", flat=True
-    ) == ["dynamic_dca"]
-    assert (
-        await model.AppConfig.filter(
-            key__in=["trade_lifecycle_mode", "dynamic_dca"]
-        ).exists()
-        is False
-    )
+    persisted_keys = {row.key for row in await model.AppConfig.all()}
+    assert "trade_lifecycle_mode" not in persisted_keys
+    assert "dynamic_dca" not in persisted_keys
+    assert "sidestep_campaign_enabled" not in persisted_keys
+    assert "trade_mode" not in persisted_keys
+    timezone_row = await model.AppConfig.get(key="timezone")
+    assert timezone_row.value == "Europe/Vienna"
+    assert (await Config.instance()).get("trade_mode") == "dynamic_dca"
 
     await Tortoise.close_connections()
     Config._instance = None
 
 
 @pytest.mark.asyncio
-async def test_restore_backup_preflights_trade_mode_before_destructive_writes(
+async def test_restore_backup_drops_bridge_keys_before_destructive_writes(
     tmp_path, monkeypatch
 ) -> None:
+    """Bridge keys are dropped before the replace; a payload without trade_mode
+    removes the existing trade_mode row (full-replace semantics)."""
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -540,7 +547,7 @@ async def test_restore_backup_preflights_trade_mode_before_destructive_writes(
 
     await model.AppConfig.create(
         key="trade_mode",
-        value="dynamic_dca",
+        value="accumulation",
         value_type="str",
     )
 
@@ -549,7 +556,12 @@ async def test_restore_backup_preflights_trade_mode_before_destructive_writes(
         {
             "schema_version": 1,
             "config": [
-                {"key": "trade_mode", "value": "sidestep", "value_type": "str"},
+                {
+                    "key": "trade_lifecycle_mode",
+                    "value": "sidestep_reentry",
+                    "value_type": "str",
+                },
+                {"key": "dynamic_dca", "value": True, "value_type": "bool"},
                 {
                     "key": "dca_strategy",
                     "value": "ema20_swing",
@@ -563,8 +575,10 @@ async def test_restore_backup_preflights_trade_mode_before_destructive_writes(
     persisted_rows = {
         row.key: row.value for row in await model.AppConfig.all().order_by("key")
     }
-    assert persisted_rows["trade_mode"] == "dynamic_dca"
-    assert "sidestep" not in {row.value for row in await model.AppConfig.all()}
+    assert persisted_rows["dca_strategy"] == "ema20_swing"
+    assert "trade_lifecycle_mode" not in persisted_rows
+    assert "dynamic_dca" not in persisted_rows
+    assert "trade_mode" not in persisted_rows
 
     await Tortoise.close_connections()
     Config._instance = None
@@ -604,6 +618,56 @@ async def test_restore_backup_rejects_removed_legacy_autopilot_max_fund_key(
             },
             restore_trade_data=False,
         )
+
+    await Tortoise.close_connections()
+    Config._instance = None
+
+
+@pytest.mark.asyncio
+async def test_restore_refuses_open_trade_campaign_residue_before_writes(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+    monkeypatch.setattr(Config, "instance", classmethod(_fake_config_instance))
+    Config._instance = None
+
+    import model
+
+    await model.AppConfig.create(
+        key="timezone", value="Europe/Vienna", value_type="str"
+    )
+    await model.OpenTrades.create(
+        symbol="LEG/USDC",
+        amount=1.0,
+        cost=10.0,
+        current_price=11.0,
+        avg_price=10.0,
+        open_date="1",
+    )
+
+    backup_service = BackupService()
+    backup_payload = await backup_service.export_backup(include_trade_data=True)
+    # Simulate a pre-4.9 backup: the open-trade row still references a legacy
+    # campaign that the 4.9 contract migration drops from the schema.
+    backup_payload["trade_data"]["open_trades"][0]["campaign_id"] = "campaign-legacy-1"
+
+    with pytest.raises(ValueError, match="legacy campaign residue"):
+        await backup_service.restore_backup(
+            backup_payload,
+            restore_trade_data=True,
+        )
+
+    # The refusal happens before the restore transaction: nothing was written.
+    restored = await model.OpenTrades.all()
+    assert len(restored) == 1
+    assert restored[0].symbol == "LEG/USDC"
+    timezone_row = await model.AppConfig.get(key="timezone")
+    assert timezone_row.value == "Europe/Vienna"
 
     await Tortoise.close_connections()
     Config._instance = None

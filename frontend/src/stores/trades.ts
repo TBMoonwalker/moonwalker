@@ -5,8 +5,6 @@ export type OpenTradeRow = {
   id: number
   symbol: string
   deal_id?: string | null
-  campaign_id?: string | null
-  campaign_started_at?: string | null
   lifecycle_mode?: string | null
   exposure_state?: string | null
   automation_paused?: boolean
@@ -39,15 +37,8 @@ export type OpenTradeRow = {
   unsellable_min_notional?: number | null
   unsellable_estimated_notional?: number | null
   unsellable_since?: string | null
-  reserved_reentry_quote?: number
-  waiting_reference_price?: number
-  waiting_reference_amount?: number
-  waiting_reference_quote?: number
-  virtual_waiting_profit?: number
-  virtual_waiting_profit_percent?: number
   display_profit?: number
   display_profit_percent?: number
-  last_transition_at?: string | null
   key: number
 }
 
@@ -55,7 +46,6 @@ export type ClosedTradeRow = {
   id: number
   symbol: string
   deal_id?: string | null
-  campaign_id?: string | null
   execution_history_complete: boolean
   amount: number | string
   cost: number | string
@@ -202,8 +192,6 @@ export const useTradesStore = defineStore('trades', {
         key: Number(val.id ?? 0),
         open_date: String(val.open_date ?? ''),
         deal_id: val.deal_id ?? null,
-        campaign_id: val.campaign_id ?? null,
-        campaign_started_at: val.campaign_started_at ?? null,
          lifecycle_mode: val.lifecycle_mode ?? null,
          exposure_state: val.exposure_state ?? null,
          automation_paused: Boolean(val.automation_paused ?? false),
@@ -230,17 +218,10 @@ export const useTradesStore = defineStore('trades', {
             ? null
             : Number(val.unsellable_estimated_notional),
         unsellable_since: val.unsellable_since ?? null,
-        reserved_reentry_quote: Number(val.reserved_reentry_quote ?? 0),
-        waiting_reference_price: Number(val.waiting_reference_price ?? 0),
-        waiting_reference_amount: Number(val.waiting_reference_amount ?? 0),
-        waiting_reference_quote: Number(val.waiting_reference_quote ?? 0),
-         virtual_waiting_profit: Number(val.virtual_waiting_profit ?? 0),
-         virtual_waiting_profit_percent: Number(val.virtual_waiting_profit_percent ?? 0),
          display_profit: Number(val.display_profit ?? Number(val.profit ?? 0)),
          display_profit_percent: Number(
            val.display_profit_percent ?? Number(val.profit_percent ?? 0)
           ),
-         last_transition_at: val.last_transition_at ?? null,
         }
     },
     setOpenTrades(raw: any[]) {
@@ -271,7 +252,6 @@ export const useTradesStore = defineStore('trades', {
           close_date: String(val.close_date ?? ''),
           duration: formatDuration(val.duration),
           deal_id: val.deal_id ?? null,
-          campaign_id: val.campaign_id ?? null,
           execution_history_complete: Boolean(val.execution_history_complete ?? false),
           close_reason: val.close_reason ?? null,
           precision: Math.max(tpPrecision, avgPrecision)

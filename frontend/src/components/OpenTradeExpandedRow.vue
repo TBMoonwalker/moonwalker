@@ -79,7 +79,6 @@ type OrderData = {
     symbol: string
     lifecycle_mode?: string | null
      deal_id?: string | null
-     campaign_started_at?: string | null
      tp_price: number
     precision: number
     current_price?: number
@@ -135,7 +134,7 @@ const sortedExecutions = computed(() =>
 )
 const useExecutionHistory = computed(() => sortedExecutions.value.length > 0)
 const replayStartTimestamp = computed(() =>
-    [...declarations.value.map(row => row.timestamp), ...sortedExecutions.value.map(row => row.timestamp)].sort((a, b) => Number(a) - Number(b))[0] ?? props.rowData.baseorder?.timestamp ?? props.rowData.campaign_started_at ?? '',
+    [...declarations.value.map(row => row.timestamp), ...sortedExecutions.value.map(row => row.timestamp)].sort((a, b) => Number(a) - Number(b))[0] ?? props.rowData.baseorder?.timestamp ?? '',
 )
 const chartReady = computed(
     () => (!requiresExecutionHistory.value || executionHistoryResolved.value) && Boolean(replayStartTimestamp.value),

@@ -59,24 +59,16 @@ async def bump_config_revision(conn: Any, expected: int | None = None) -> int:
 
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
+# Pre-4.9 trade-mode bridge keys are no longer handled here; backup restore
+# drops them silently (see backup_restore.LEGACY_TRADE_MODE_KEYS).
 REMOVED_CONFIG_KEY_REPLACEMENTS = {
     "autopilot_max_fund": ("capital_max_fund", "v1.4.0.0"),
-    "trade_lifecycle_mode": ("trade_mode", "this release"),
-    "dynamic_dca": ("trade_mode", "this release"),
-    "sidestep_campaign_enabled": ("trade_mode", "this release"),
     "debug": ("", "this release"),
     "autopilot_entry_stretch_max_multiplier": (
         "autopilot_base_order_stretch_max_multiplier",
         "this release",
     ),
 }
-LEGACY_TRADE_MODE_KEYS = frozenset(
-    {
-        "trade_lifecycle_mode",
-        "dynamic_dca",
-        "sidestep_campaign_enabled",
-    }
-)
 
 HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {
     "1m": "30d",
@@ -314,14 +306,10 @@ class Config:
         based on the value_type field. Also loads strategies and signal plugins.
         """
         await run_config_migrations()
-        entries: list[ConfigEntry] = []
         rows = await AppConfig.all()
-        for row in rows:
-            if row.key in LEGACY_TRADE_MODE_KEYS:
-                continue
-            if is_removed_config_key(row.key):
-                continue
-            entries.append(self.__build_entry(row.key, row.value, row.value_type))
+        entries: list[ConfigEntry] = [
+            self.__build_entry(row.key, row.value, row.value_type) for row in rows
+        ]
         self._store.replace_entries(entries)
         self.__refresh_runtime_metadata()
 
@@ -335,8 +323,6 @@ class Config:
         next_entries = {entry.key: entry for entry in self._store.entries()}
         loaded_keys = set()
         for row in rows:
-            if is_removed_config_key(row.key):
-                continue
             next_entries[row.key] = self.__build_entry(
                 row.key, row.value, row.value_type
             )
@@ -483,12 +469,10 @@ class Config:
         )
 
     def __assert_supported_key(self, key: str) -> None:
-        """Reject config writes for removed keys."""
+        """Reject config writes for server-owned read-only keys."""
         normalized_key = str(key).strip()
         if normalized_key == "accumulation_available":
             raise ValueError("accumulation_available is server-owned and read-only.")
-        if is_removed_config_key(normalized_key):
-            raise ValueError(build_removed_config_key_message(normalized_key))
 
     def __get_strategies(self) -> list[str]:
         """Get the public Strategy Builder strategy slugs.

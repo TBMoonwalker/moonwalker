@@ -297,3 +297,45 @@ async def test_orders_sell_triggers_monitoring_notification(monkeypatch) -> None
         assert notify_calls[0][1]["so_count"] == 1
     finally:
         pass
+
+
+@pytest.mark.asyncio
+async def test_monitoring_msv_endpoint_reports_recorded_baseline() -> None:
+    """Value: protects=/monitoring/msv reporting surface (unknown state before
+    preflight, full baseline payload after; pre-floor reports supported=false);
+    fails_when=the endpoint shape drifts or a pre-floor baseline reports
+    supported=true; why_new=no existing test touches the new endpoint;
+    seam=none; no_claim=does not assert auth or dashboard rendering."""
+    from controller import monitoring as monitoring_controller
+    from litestar import Litestar
+    from litestar.testing import TestClient
+    from service.msv import evaluate_msv_baseline, set_msv_baseline
+
+    try:
+        set_msv_baseline(None)
+        app = Litestar(route_handlers=[monitoring_controller.get_monitoring_msv])
+        with TestClient(app=app) as client:
+            response = client.get("/monitoring/msv")
+            assert response.status_code == 200
+            assert response.json() == {
+                "minimum_supported_version": "4.9.0.0",
+                "status": "unknown",
+                "summary": "baseline not yet established",
+            }
+
+            pre_floor = evaluate_msv_baseline(False, True)
+            set_msv_baseline(pre_floor)
+            response = client.get("/monitoring/msv")
+            assert response.status_code == 200
+            assert response.json() == {
+                "minimum_supported_version": "4.9.0.0",
+                "floor_config_migration": "2026-09-sidestep-removal-v1",
+                "status": "unsupported",
+                "supported": False,
+                "schema_history_present": True,
+                "summary": pre_floor.summary,
+                "upgrade_guidance": pre_floor.upgrade_guidance,
+            }
+            assert response.json()["upgrade_guidance"]
+    finally:
+        set_msv_baseline(None)

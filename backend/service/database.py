@@ -7,19 +7,28 @@ import re
 import sqlite3
 from asyncio import sleep
 from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
 import helper
 import model
+from service.msv import (
+    MINIMUM_SUPPORTED_VERSION,
+    MsvBaseline,
+    preflight_msv,
+    record_msv_floor_marker,
+)
 from service.replay_candles import archive_replay_candles_for_deal
 from service.schema_migrations import (
+    CONTRACT_DROP_COMPATIBILITY,
     MigrationDefinition,
     bootstrap_sqlite_migration_ledger,
     run_schema_migrations,
 )
 from tortoise import Tortoise
 from tortoise.context import TortoiseContext
+from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/database.log", "database")
 
@@ -32,6 +41,30 @@ _SQLITE_INDEX_CORRUPTION_PATTERNS = (
     re.compile(r"wrong # of entries in index (?P<index>\S+)"),
 )
 ColumnSpec = tuple[str, str]
+
+# Tables and columns removed by the first contract migration (021).  The
+# dead opentrades columns were sidestep-era campaign state that no live code
+# writes; the campaign_id columns carried pre-4.9 campaign linkage that is
+# dropped with its rows' identity falling back to deal_id || id.
+_LEGACY_CAMPAIGN_REBUILDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "opentrades",
+        (
+            "campaign_id",
+            "reserved_reentry_quote",
+            "waiting_reference_price",
+            "waiting_reference_amount",
+            "waiting_reference_quote",
+            "virtual_waiting_profit",
+            "virtual_waiting_profit_percent",
+            "last_transition_at",
+        ),
+    ),
+    ("trades", ("campaign_id",)),
+    ("closedtrades", ("campaign_id",)),
+    ("tradeexecutions", ("campaign_id",)),
+    ("placement_intents", ("campaign_id",)),
+)
 
 
 def _is_sqlite_lock_error(exc: Exception) -> bool:
@@ -197,6 +230,132 @@ async def optimize_sqlite_connection(db_url: str | None = None) -> None:
     await connection.execute_query("PRAGMA optimize")
 
 
+@dataclass(frozen=True)
+class _TableRebuildPlan:
+    """Read-only description of a SQLite table rebuild and its preserved objects.
+
+    Built by :meth:`Database._plan_rebuild_table_without_columns` from schema
+    inspection and applied by
+    :meth:`Database._apply_rebuild_table_without_columns` inside a single
+    explicit transaction.
+    """
+
+    table: str
+    side_table: str
+    create_body: str
+    insert_columns: tuple[str, ...]
+    indexes: tuple[tuple[str, bool, tuple[str, ...]], ...]
+    triggers: tuple[str, ...]
+    autoincrement: bool
+    primary_key: str | None
+    sequence_value: int | None
+    foreign_keys_enabled: bool
+
+
+async def _plan_rebuild_indexes(
+    conn: Any,
+    table: str,
+    to_drop: set[str],
+) -> tuple[list[tuple[str, ...]], list[tuple[str, bool, tuple[str, ...]]]]:
+    """Return the unique constraints and user indexes preserved across a rebuild.
+
+    Refuses index shapes the rebuild cannot redeclare (expression and partial
+    ``WHERE`` indexes) instead of dropping them silently.
+    """
+    unique_constraints: list[tuple[str, ...]] = []
+    recreated_indexes: list[tuple[str, bool, tuple[str, ...]]] = []
+    _, index_rows = await conn.execute_query(f"PRAGMA index_list({table})")
+    for index in index_rows:
+        index_name = index["name"]
+        if not index_name:
+            continue
+        _, index_cols = await conn.execute_query(f'PRAGMA index_info("{index_name}")')
+        index_columns = tuple(
+            row["name"] for row in sorted(index_cols, key=lambda row: row["seqno"])
+        )
+        if any(col is None for col in index_columns):
+            raise RuntimeError(
+                f"Cannot rebuild {table}: index {index_name} is an "
+                "expression index; the rebuild cannot redeclare it."
+            )
+        if not index_columns or any(col in to_drop for col in index_columns):
+            continue
+        if index["origin"] == "pk":
+            continue
+        _, index_sql_rows = await conn.execute_query(
+            "SELECT sql FROM sqlite_master "
+            f"WHERE type = 'index' AND name = '{index_name}'"
+        )
+        if (
+            index_sql_rows
+            and index_sql_rows[0]["sql"]
+            and re.search(r"\bWHERE\b", index_sql_rows[0]["sql"], re.IGNORECASE)
+        ):
+            raise RuntimeError(
+                f"Cannot rebuild {table}: index {index_name} is a partial "
+                "(WHERE) index; the rebuild cannot redeclare its predicate."
+            )
+        if bool(index["unique"]) and str(index_name).startswith("sqlite_autoindex_"):
+            unique_constraints.append(index_columns)
+        else:
+            recreated_indexes.append((index_name, bool(index["unique"]), index_columns))
+    return unique_constraints, recreated_indexes
+
+
+async def _recreate_rebuild_indexes(
+    conn: Any,
+    table: str,
+    indexes: tuple[tuple[str, bool, tuple[str, ...]], ...],
+) -> None:
+    """Recreate the preserved user indexes on the rebuilt table."""
+    for index_name, unique, index_columns in indexes:
+        unique_sql = "UNIQUE " if unique else ""
+        await conn.execute_query(
+            f"CREATE {unique_sql}INDEX {index_name} "
+            f"ON {table} ({', '.join(index_columns)})"
+        )
+
+
+async def _recreate_rebuild_triggers(
+    conn: Any,
+    triggers: tuple[str, ...],
+) -> None:
+    """Recreate the preserved triggers unchanged on the rebuilt table."""
+    for trigger_sql in triggers:
+        await conn.execute_query(trigger_sql)
+
+
+async def _restore_rebuild_sequence(
+    conn: Any,
+    table: str,
+    primary_key: str | None,
+    autoincrement: bool,
+    sequence_value: int | None,
+) -> None:
+    """Preserve the AUTOINCREMENT high-water mark across the rebuild."""
+    if not autoincrement or primary_key is None:
+        return
+    max_rows = (
+        await conn.execute_query(f"SELECT MAX({primary_key}) AS m FROM {table}")
+    )[1]
+    preserved = (
+        sequence_value if sequence_value is not None else (max_rows[0]["m"] or 0)
+    )
+    remaining = (
+        await conn.execute_query(
+            f"SELECT seq FROM sqlite_sequence WHERE name = '{table}'"
+        )
+    )[1]
+    if remaining:
+        await conn.execute_query(
+            f"UPDATE sqlite_sequence SET seq = {preserved} WHERE name = '{table}'"
+        )
+    elif preserved:
+        await conn.execute_query(
+            f"INSERT INTO sqlite_sequence (name, seq) VALUES ('{table}', {preserved})"
+        )
+
+
 class Database:
     """Database connection management class for Tortoise ORM.
 
@@ -295,11 +454,6 @@ class Database:
             ("tickers", "idx_tickers_timestamp", ("timestamp",)),
             ("trades", "idx_trades_symbol", ("symbol",)),
             ("trades", "idx_trades_deal_id_timestamp", ("deal_id", "timestamp")),
-            (
-                "trades",
-                "idx_trades_campaign_id_timestamp",
-                ("campaign_id", "timestamp"),
-            ),
             ("trades", "idx_trades_symbol_baseorder", ("symbol", "baseorder")),
             (
                 "trades",
@@ -307,21 +461,11 @@ class Database:
                 ("symbol", "safetyorder", "baseorder"),
             ),
             ("closedtrades", "idx_closedtrades_close_date", ("close_date",)),
-            (
-                "closedtrades",
-                "idx_closedtrades_campaign_id_close_date",
-                ("campaign_id", "close_date"),
-            ),
             ("closedtrades", "idx_closedtrades_close_reason", ("close_reason",)),
             (
                 "tradeexecutions",
                 "idx_tradeexecutions_deal_time",
                 ("deal_id", "timestamp"),
-            ),
-            (
-                "tradeexecutions",
-                "idx_tradeexecutions_campaign_time",
-                ("campaign_id", "timestamp"),
             ),
             (
                 "tradeexecutions",
@@ -447,18 +591,13 @@ class Database:
 
         connection = Tortoise.get_connection("default")
         table_columns = {
-            "trades": (
-                ("deal_id", "TEXT NULL"),
-                ("campaign_id", "TEXT NULL"),
-            ),
+            "trades": (("deal_id", "TEXT NULL"),),
             "tradeexecutions": (
-                ("campaign_id", "TEXT NULL"),
                 ("strategy_slug", "TEXT NULL"),
                 ("strategy_version", "INTEGER NULL"),
             ),
             "opentrades": (
                 ("deal_id", "TEXT NULL"),
-                ("campaign_id", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 1"),
                 (
                     "lifecycle_mode",
@@ -468,17 +607,9 @@ class Database:
                     "exposure_state",
                     "TEXT NOT NULL DEFAULT 'long_exposed'",
                 ),
-                ("reserved_reentry_quote", "REAL NOT NULL DEFAULT 0.0"),
-                ("waiting_reference_price", "REAL NOT NULL DEFAULT 0.0"),
-                ("waiting_reference_amount", "REAL NOT NULL DEFAULT 0.0"),
-                ("waiting_reference_quote", "REAL NOT NULL DEFAULT 0.0"),
-                ("virtual_waiting_profit", "REAL NOT NULL DEFAULT 0.0"),
-                ("virtual_waiting_profit_percent", "REAL NOT NULL DEFAULT 0.0"),
-                ("last_transition_at", "TEXT NULL"),
             ),
             "closedtrades": (
                 ("deal_id", "TEXT NULL"),
-                ("campaign_id", "TEXT NULL"),
                 ("close_reason", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
             ),
@@ -523,28 +654,14 @@ class Database:
         if not self.db_url.startswith("sqlite://"):
             return
 
-        open_rows = await model.OpenTrades.all().values(
-            "symbol",
-            "deal_id",
-            "sold_amount",
-            "execution_history_complete",
-        )
+        open_rows = await model.OpenTrades.all().values("symbol", "deal_id")
         for open_row in open_rows:
             symbol = str(open_row.get("symbol") or "").strip()
             if not symbol:
                 continue
 
             deal_id = str(open_row.get("deal_id") or uuid4())
-            has_legacy_partial = float(open_row.get("sold_amount") or 0.0) > 0
-            execution_history_complete = (
-                bool(open_row.get("execution_history_complete", True))
-                and not has_legacy_partial
-            )
-
-            await model.OpenTrades.filter(symbol=symbol).update(
-                deal_id=deal_id,
-                execution_history_complete=execution_history_complete,
-            )
+            await model.OpenTrades.filter(symbol=symbol).update(deal_id=deal_id)
             await model.Trades.filter(symbol=symbol).update(deal_id=deal_id)
 
             existing_executions = await model.TradeExecutions.filter(
@@ -933,8 +1050,301 @@ class Database:
                     description="Separate unsold market valuation from realized returns.",
                     apply=self._ensure_manual_stop_valuation,
                 ),
+                MigrationDefinition(
+                    version="2026-11-01-021-campaign-column-drop",
+                    phase="schema",
+                    description="Drop dormant campaign columns from the trade tables.",
+                    apply=self._drop_legacy_campaign_columns,
+                    compatibility=CONTRACT_DROP_COMPATIBILITY,
+                ),
             )
         )
+
+    async def _drop_legacy_campaign_columns(self) -> None:
+        """Drop the dead campaign columns once every install is at the MSV floor.
+
+        First contract (destructive) migration. Rebuilds the affected tables
+        without the legacy campaign columns and keeps every other field of
+        every row. Aborts startup when a live open trade still carries
+        campaign residue: the drop would silently unlink it from its position.
+        See docs/operations.md, "Campaign residue recovery".
+
+        The residue check runs in its own transaction and the rebuilds run
+        after it commits: the accumulation tables carry incoming foreign keys
+        into opentrades/placement_intents, and the rebuild must toggle
+        ``PRAGMA foreign_keys`` around the drop, which SQLite only allows
+        outside a transaction. Every rebuild restores its rows with their
+        original IDs, so incoming references stay valid. Each rebuild's
+        mutation phase is one explicit transaction, so an error or a killed
+        process leaves the original table intact; a table whose columns are
+        already gone is a no-op, and a missing table alongside its
+        side table (a crash in an older, non-atomic build) is refused with
+        an actionable error instead of a silent no-op.
+        """
+        if not self.db_url.startswith("sqlite://"):
+            return
+        async with in_transaction():
+            await self._assert_no_open_trade_campaign_residue(
+                Tortoise.get_connection("default")
+            )
+        connection = Tortoise.get_connection("default")
+        for table, drop_columns in _LEGACY_CAMPAIGN_REBUILDS:
+            await self._rebuild_table_without_columns(connection, table, drop_columns)
+
+    @staticmethod
+    async def _assert_no_open_trade_campaign_residue(conn: Any) -> None:
+        """Fail closed on live open trades that still reference a campaign."""
+        _, columns = await conn.execute_query("PRAGMA table_info(opentrades)")
+        if not any(row["name"] == "campaign_id" for row in columns):
+            return
+        _, residue_rows = await conn.execute_query(
+            "SELECT symbol FROM opentrades WHERE campaign_id IS NOT NULL"
+        )
+        if not residue_rows:
+            return
+        symbols = ", ".join(sorted(str(row["symbol"]) for row in residue_rows))
+        raise RuntimeError(
+            "Startup aborted: the opentrades table has "
+            f"{len(residue_rows)} open trade row(s) with legacy campaign "
+            f"residue (symbols: {symbols}). Moonwalker will not start until "
+            "this is resolved. Review the open position(s) on the exchange, "
+            "then clear the campaign_id value(s); see docs/operations.md, "
+            '"Campaign residue recovery".'
+        )
+
+    @staticmethod
+    async def _assert_no_orphaned_campaign_rebuild_tables(db_url: str) -> None:
+        """Fail closed on a crashed campaign-drop rebuild before schemas run.
+
+        A non-atomic rebuild that crashed between ``DROP TABLE`` and the
+        rename-back leaves the original table missing while its rows sit in
+        the ``<table>_campaign_drop_rebuild`` side table.
+        ``Tortoise.generate_schemas`` would recreate the original table
+        empty before the migration runs, and the rebuild would then no-op
+        silently, losing the stranded rows. This check therefore runs before
+        schema generation.
+        """
+        if not db_url.startswith("sqlite://"):
+            return
+        conn = Tortoise.get_connection("default")
+        for table, _drop_columns in _LEGACY_CAMPAIGN_REBUILDS:
+            _, original_columns = await conn.execute_query(
+                f"PRAGMA table_info({table})"
+            )
+            if original_columns:
+                continue
+            side_table = f"{table}_campaign_drop_rebuild"
+            _, side_columns = await conn.execute_query(
+                f"PRAGMA table_info({side_table})"
+            )
+            if side_columns:
+                raise RuntimeError(
+                    f"Startup aborted: {table} is missing, but an "
+                    f"interrupted campaign-drop rebuild left its rows in "
+                    f"{side_table}. Rename {side_table} back to {table} "
+                    "(or restore from a backup), then start Moonwalker "
+                    "again."
+                )
+
+    @staticmethod
+    async def _rebuild_table_without_columns(
+        conn: Any,
+        table: str,
+        drop_columns: tuple[str, ...],
+    ) -> None:
+        """Rebuild one SQLite table without the given columns.
+
+        Splits into a read-only plan (:meth:`_plan_rebuild_table_without_columns`,
+        which performs every safety refusal) and a single explicit transaction
+        (:meth:`_apply_rebuild_table_without_columns`) that applies it. Nothing
+        in the plan phase mutates the database, and the apply phase is one
+        atomic unit that restores the original table on failure, so the
+        destructive drop/copy/rename dance stays easy to audit and future
+        changes are easier to review.
+        """
+        plan = await Database._plan_rebuild_table_without_columns(
+            conn, table, drop_columns
+        )
+        if plan is not None:
+            await Database._apply_rebuild_table_without_columns(conn, plan)
+
+    @staticmethod
+    async def _plan_rebuild_table_without_columns(
+        conn: Any,
+        table: str,
+        drop_columns: tuple[str, ...],
+    ) -> _TableRebuildPlan | None:
+        """Inspect one table and build a read-only rebuild plan.
+
+        Runs every safety refusal (an orphaned side table, foreign keys, a
+        trigger that references a dropped column, expression or partial
+        indexes) and captures the objects the rebuild must preserve (kept
+        columns, user indexes, triggers, the AUTOINCREMENT high-water mark,
+        and the foreign-key state) without mutating the database. Returns
+        ``None`` when there is nothing to do: the table is absent with no side
+        table, or none of the requested columns are present.
+        """
+        _, columns = await conn.execute_query(f"PRAGMA table_info({table})")
+        if not columns:
+            side_table = f"{table}_campaign_drop_rebuild"
+            _, side_columns = await conn.execute_query(
+                f"PRAGMA table_info({side_table})"
+            )
+            if side_columns:
+                raise RuntimeError(
+                    f"Startup aborted: {table} is missing, but an "
+                    f"interrupted campaign-drop rebuild left its rows in "
+                    f"{side_table}. Rename {side_table} back to {table} "
+                    "(or restore from a backup), then start Moonwalker "
+                    "again."
+                )
+            return None
+        to_drop = {
+            name for name in drop_columns if any(row["name"] == name for row in columns)
+        }
+        if not to_drop:
+            return None
+
+        _, foreign_keys = await conn.execute_query(f"PRAGMA foreign_key_list({table})")
+        if foreign_keys:
+            raise RuntimeError(
+                f"Cannot rebuild {table}: unexpected foreign keys found."
+            )
+        _, triggers = await conn.execute_query(
+            "SELECT name, sql FROM sqlite_master "
+            f"WHERE type = 'trigger' AND tbl_name = '{table}'"
+        )
+        trigger_statements: list[str] = []
+        for trigger in triggers:
+            trigger_sql = trigger["sql"] or ""
+            trigger_statements.append(trigger_sql)
+            for column in to_drop:
+                # SQLite identifiers are case-insensitive and trigger
+                # column references are not validated at CREATE TRIGGER
+                # time, so a mixed-case reference must refuse too.
+                if re.search(rf"\b{re.escape(column)}\b", trigger_sql, re.IGNORECASE):
+                    raise RuntimeError(
+                        f"Cannot rebuild {table}: trigger "
+                        f"{trigger['name']} references dropped column {column}."
+                    )
+
+        kept_columns = [row for row in columns if row["name"] not in to_drop]
+        autoincrement = False
+        _, create_rows = await conn.execute_query(
+            f"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '{table}'"
+        )
+        if create_rows:
+            autoincrement = "AUTOINCREMENT" in (create_rows[0]["sql"] or "").upper()
+
+        column_defs: list[str] = []
+        for row in kept_columns:
+            column_name = row["name"]
+            if row["pk"]:
+                column_defs.append(
+                    f"{column_name} {row['type'] or 'INTEGER'} PRIMARY KEY"
+                    + (" AUTOINCREMENT" if autoincrement else "")
+                )
+                continue
+            definition = f"{column_name} {row['type'] or 'TEXT'}"
+            if row["notnull"]:
+                definition += " NOT NULL"
+            if row["dflt_value"] is not None:
+                definition += f" DEFAULT {row['dflt_value']}"
+            column_defs.append(definition)
+
+        unique_constraints, recreated_indexes = await _plan_rebuild_indexes(
+            conn, table, to_drop
+        )
+
+        create_body = ", ".join(
+            [
+                *column_defs,
+                *(f"UNIQUE ({', '.join(cols)})" for cols in unique_constraints),
+            ]
+        )
+        # The rebuild must run with foreign-key enforcement off: SQLite fires
+        # the ON DELETE actions of incoming foreign keys (SET NULL, RESTRICT)
+        # when a parent table is dropped. The rows are restored with their
+        # original IDs, so those references stay valid and must be left
+        # untouched. The high-water mark is captured before the drop so the
+        # rebuild cannot reset it and reuse deleted row IDs.
+        fk_state = (await conn.execute_query("PRAGMA foreign_keys"))[1]
+        fk_on = bool(fk_state) and bool(fk_state[0][0])
+        sequence_value = None
+        if autoincrement:
+            seq_rows = (
+                await conn.execute_query(
+                    f"SELECT seq FROM sqlite_sequence WHERE name = '{table}'"
+                )
+            )[1]
+            sequence_value = seq_rows[0]["seq"] if seq_rows else None
+        primary_key = next((row["name"] for row in kept_columns if row["pk"]), None)
+
+        return _TableRebuildPlan(
+            table=table,
+            side_table=f"{table}_campaign_drop_rebuild",
+            create_body=create_body,
+            insert_columns=tuple(row["name"] for row in kept_columns),
+            indexes=tuple(recreated_indexes),
+            triggers=tuple(trigger_statements),
+            autoincrement=autoincrement,
+            primary_key=primary_key,
+            sequence_value=sequence_value,
+            foreign_keys_enabled=fk_on,
+        )
+
+    @staticmethod
+    async def _apply_rebuild_table_without_columns(
+        conn: Any,
+        plan: _TableRebuildPlan,
+    ) -> None:
+        """Apply a rebuild plan inside one explicit transaction.
+
+        Toggles foreign-key enforcement for the duration (so incoming foreign
+        keys keep their references while the rows are restored with their
+        original IDs), then runs the drop/copy/rename dance plus the index,
+        trigger and sequence restoration as a single atomic unit. On failure
+        the whole dance rolls back, leaving the original table intact.
+        """
+        if plan.foreign_keys_enabled:
+            await conn.execute_query("PRAGMA foreign_keys=OFF")
+        try:
+            # An explicit transaction makes the dance atomic: the connection
+            # is autocommit (isolation_level=None), so without it a failure
+            # or a killed process between `DROP TABLE` and the rename-back
+            # would commit the drop and strand every row in the side table.
+            # On failure the rollback restores the original state.
+            await conn.execute_query("BEGIN")
+            try:
+                await conn.execute_query(f"DROP TABLE IF EXISTS {plan.side_table}")
+                await conn.execute_query(
+                    f"CREATE TABLE {plan.side_table} ({plan.create_body})"
+                )
+                insert_columns = ", ".join(plan.insert_columns)
+                await conn.execute_query(
+                    f"INSERT INTO {plan.side_table} ({insert_columns}) "
+                    f"SELECT {insert_columns} FROM {plan.table}"
+                )
+                await conn.execute_query(f"DROP TABLE {plan.table}")
+                await conn.execute_query(
+                    f"ALTER TABLE {plan.side_table} RENAME TO {plan.table}"
+                )
+                await _recreate_rebuild_indexes(conn, plan.table, plan.indexes)
+                await _recreate_rebuild_triggers(conn, plan.triggers)
+                await _restore_rebuild_sequence(
+                    conn,
+                    plan.table,
+                    plan.primary_key,
+                    plan.autoincrement,
+                    plan.sequence_value,
+                )
+                await conn.execute_query("COMMIT")
+            except Exception:
+                await conn.execute_query("ROLLBACK")
+                raise
+        finally:
+            if plan.foreign_keys_enabled:
+                await conn.execute_query("PRAGMA foreign_keys=ON")
 
     async def _ensure_manual_stop_valuation(self) -> None:
         """Add optional unsold valuation fields without rewriting past closes."""
@@ -1207,8 +1617,29 @@ class Database:
             )
             await self._apply_sqlite_pragmas()
             await bootstrap_sqlite_migration_ledger(db_url)
+            await self._assert_no_orphaned_campaign_rebuild_tables(db_url)
             # Generate the schema
             await Tortoise.generate_schemas()
+            # The preflight reads the ledger before any migration callback runs,
+            # so it reflects the install's last-known baseline. It is report-only:
+            # a preflight failure must never block startup.
+            baseline: MsvBaseline | None = None
+            try:
+                baseline = await preflight_msv()
+                if not baseline.supported:
+                    logging.warning(
+                        "Database baseline is %s; minimum supported version is %s. %s",
+                        baseline.summary,
+                        MINIMUM_SUPPORTED_VERSION,
+                        baseline.upgrade_guidance,
+                    )
+            except Exception:  # noqa: BLE001 - the preflight must never block startup.
+                logging.exception("MSV preflight failed; continuing startup.")
+            # Record the floor marker for a fresh install before schema
+            # migrations commit their rows. If this startup is interrupted
+            # afterwards, the marker is already present, so the next boot
+            # reports supported rather than a false pre-floor baseline.
+            await record_msv_floor_marker(baseline)
             await self._run_schema_init_steps()
             await self._repair_index_only_corruption_if_needed()
             await self._run_backfill_init_steps()

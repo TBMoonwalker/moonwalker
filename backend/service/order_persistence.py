@@ -23,9 +23,9 @@ from service.dca.recovery_sizing import (
     RecoverySizingPolicy,
     normalize_recovery_sizing_mode,
 )
+from service.lifecycle_types import TradeExposureState, TradeLifecycleMode
 from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
 from service.persistence_records import (
-    CampaignPersistenceContext,
     ClosedTradePersistenceRecord,
     ClosedTradeSummaryRecord,
     OpenTradeBuyDefaults,
@@ -43,7 +43,6 @@ from service.placement_intents import (
 )
 from service.replay_candles import archive_replay_candles_for_deal
 from service.replay_repair_queue import replay_repair_queue
-from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
 from service.trade_math import parse_date_to_ms
 from tortoise.expressions import F
 from tortoise.transactions import in_transaction
@@ -55,7 +54,6 @@ logging = helper.LoggerFactory.get_logger(
 SUMMARY_TRADE_KEYS = {
     "symbol",
     "deal_id",
-    "campaign_id",
     "execution_history_complete",
     "so_count",
     "profit",
@@ -83,7 +81,6 @@ TRADE_ROW_KEYS = {
     "price",
     "symbol",
     "deal_id",
-    "campaign_id",
     "orderid",
     "bot",
     "ordertype",
@@ -212,7 +209,6 @@ async def _build_trade_execution_payload(
     strategy_slug, strategy_version = await _resolve_strategy_identity(payload, conn)
     return {
         "deal_id": deal_id,
-        "campaign_id": payload.get("campaign_id"),
         "symbol": str(payload.get("symbol") or ""),
         "side": str(payload.get("side") or "buy"),
         "role": role,
@@ -292,32 +288,13 @@ async def _resolve_open_deal_state(symbol: str, conn: Any) -> tuple[str, bool]:
 
 def _build_open_trade_lifecycle_defaults(
     *,
-    campaign_context: CampaignPersistenceContext | None,
     current_deal_id: str,
 ) -> OpenTradeLifecycleDefaults:
     """Return the canonical live open-trade lifecycle fields for a buy leg."""
-    lifecycle_mode = str(
-        (campaign_context or {}).get("lifecycle_mode")
-        or TradeLifecycleMode.CLASSIC_DCA.value
-    )
     return {
         "deal_id": current_deal_id,
-        "campaign_id": (
-            (campaign_context or {}).get("campaign_id") if campaign_context else None
-        ),
-        "lifecycle_mode": lifecycle_mode,
+        "lifecycle_mode": TradeLifecycleMode.CLASSIC_DCA.value,
         "exposure_state": TradeExposureState.LONG_EXPOSED.value,
-        "reserved_reentry_quote": 0.0,
-        "waiting_reference_price": 0.0,
-        "waiting_reference_amount": 0.0,
-        "waiting_reference_quote": 0.0,
-        "virtual_waiting_profit": 0.0,
-        "virtual_waiting_profit_percent": 0.0,
-        "last_transition_at": (
-            (campaign_context or {}).get("last_transition_at")
-            if campaign_context
-            else None
-        ),
     }
 
 
@@ -333,7 +310,6 @@ def _resolve_open_trade_buy_open_date(
     payload: Mapping[str, Any],
     *,
     existing_open_trade: Any | None,
-    campaign_context: CampaignPersistenceContext | None,
 ) -> str | None:
     """Return the stable original open date for a buy-backed open trade row."""
     existing_open_date = _normalize_preserved_open_date(
@@ -357,7 +333,6 @@ def _build_open_trade_buy_defaults(
     payload: Mapping[str, Any],
     *,
     existing_open_trade: Any | None,
-    campaign_context: CampaignPersistenceContext | None,
 ) -> OpenTradeBuyDefaults:
     """Return immediate open-trade summary fields for a newly filled buy leg."""
     amount = float(payload.get("amount") or 0.0)
@@ -371,7 +346,6 @@ def _build_open_trade_buy_defaults(
     open_date_value = _resolve_open_trade_buy_open_date(
         payload,
         existing_open_trade=existing_open_trade,
-        campaign_context=campaign_context,
     )
 
     return {
@@ -393,7 +367,6 @@ async def persist_buy_trade(
     payload: TradePersistenceRecord,
     *,
     create_open_trade: bool,
-    campaign_context: CampaignPersistenceContext | None = None,
     entry_evaluation: AiTrustEntryGate | None = None,
     placement_operation_id: str | None = None,
 ) -> None:
@@ -410,9 +383,7 @@ async def persist_buy_trade(
             else:
                 deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
 
-            campaign_id: str | None = None
             payload["deal_id"] = deal_id
-            payload["campaign_id"] = campaign_id
             await model.Trades.create(
                 **_build_trade_row_payload(payload),
                 using_db=conn,
@@ -430,18 +401,11 @@ async def persist_buy_trade(
             )
             if create_open_trade:
                 lifecycle_defaults = _build_open_trade_lifecycle_defaults(
-                    campaign_context=(
-                        {
-                            **(campaign_context or {}),
-                            "campaign_id": campaign_id,
-                        }
-                    ),
                     current_deal_id=deal_id,
                 )
                 buy_defaults = _build_open_trade_buy_defaults(
                     payload,
                     existing_open_trade=existing_open_trade,
-                    campaign_context=campaign_context,
                 )
                 open_trade_defaults: OpenTradeCreateRecord = {
                     "symbol": symbol,
@@ -514,7 +478,6 @@ async def persist_closed_trade(
     symbol: str,
     payload: ClosedTradePersistenceRecord,
     *,
-    campaign_context: CampaignPersistenceContext | None = None,
     placement_operation_id: str | None = None,
     placement_operation_ids: Iterable[str] | None = None,
 ) -> None:
@@ -542,23 +505,6 @@ async def persist_closed_trade(
                 source_holding.lifecycle_mode if source_holding is not None else None
             )
             summary_payload["execution_history_complete"] = history_complete
-            summary_payload["campaign_id"] = (
-                campaign_context.get("campaign_id")
-                if campaign_context
-                else payload.get("campaign_id")
-            )
-            summary_payload["close_reason"] = (
-                campaign_context.get("close_reason")
-                if campaign_context
-                else payload.get("close_reason")
-            )
-            summary_overrides = (
-                campaign_context.get("summary_overrides") if campaign_context else None
-            )
-            if isinstance(summary_overrides, dict):
-                for key, value in summary_overrides.items():
-                    if key in SUMMARY_TRADE_KEYS:
-                        summary_payload[key] = value
             closed_open_date = summary_payload.get("open_date")
             closed_close_date = summary_payload.get("close_date")
             await model.ClosedTrades.create(**summary_payload, using_db=conn)
@@ -572,10 +518,7 @@ async def persist_closed_trade(
                     **(
                         await _build_trade_execution_payload(
                             deal_id,
-                            {
-                                **sell_execution,
-                                "campaign_id": summary_payload.get("campaign_id"),
-                            },
+                            sell_execution,
                             role=str(sell_execution.get("role") or "final_sell"),
                             conn=conn,
                         )
@@ -660,15 +603,6 @@ async def persist_manual_buy_add(
         async with in_transaction() as conn:
             deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
             trade_payload["deal_id"] = deal_id
-            open_trade = (
-                await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
-            )
-            campaign_id = (
-                str(open_trade.campaign_id).strip()
-                if open_trade is not None and open_trade.campaign_id
-                else None
-            )
-            trade_payload["campaign_id"] = campaign_id
             await model.Trades.create(
                 **_build_trade_row_payload(trade_payload),
                 using_db=conn,
@@ -685,7 +619,6 @@ async def persist_manual_buy_add(
                 using_db=conn,
             )
             open_trade_payload["deal_id"] = deal_id
-            open_trade_payload["campaign_id"] = campaign_id
             open_trade_payload["execution_history_complete"] = history_complete
             updated = (
                 await model.OpenTrades.filter(symbol=symbol)
@@ -725,9 +658,6 @@ async def persist_partial_sell_execution(
                 return
 
             deal_id = open_trade.deal_id or _create_deal_id()
-            campaign_id = (
-                str(open_trade.campaign_id).strip() if open_trade.campaign_id else None
-            )
             history_complete = bool(open_trade.execution_history_complete) and bool(
                 execution_rows
             )
@@ -765,10 +695,7 @@ async def persist_partial_sell_execution(
                     **(
                         await _build_trade_execution_payload(
                             deal_id,
-                            {
-                                **execution,
-                                "campaign_id": campaign_id,
-                            },
+                            execution,
                             role=str(execution.get("role") or "partial_sell"),
                             conn=conn,
                         )
@@ -820,9 +747,6 @@ async def persist_tp_limit_cancellation(
                 return placement_operation_id is not None
 
             deal_id = open_trade.deal_id or _create_deal_id()
-            campaign_id = (
-                str(open_trade.campaign_id).strip() if open_trade.campaign_id else None
-            )
             updates: dict[str, Any] = {
                 "deal_id": deal_id,
                 "tp_limit_order_id": None,
@@ -844,7 +768,6 @@ async def persist_tp_limit_cancellation(
                             deal_id,
                             {
                                 "symbol": str(status.get("symbol") or symbol),
-                                "campaign_id": campaign_id,
                                 "side": str(status.get("side") or "sell"),
                                 "role": "partial_sell",
                                 "timestamp": (
@@ -908,11 +831,6 @@ async def persist_unsellable_remainder(
             open_trade = (
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
             )
-            campaign_id = (
-                str(open_trade.campaign_id).strip()
-                if open_trade is not None and open_trade.campaign_id
-                else None
-            )
             if partial_amount > 0:
                 history_complete = history_complete and bool(execution_rows)
                 ledger_rows = execution_rows or [
@@ -938,10 +856,7 @@ async def persist_unsellable_remainder(
                         **(
                             await _build_trade_execution_payload(
                                 deal_id,
-                                {
-                                    **execution,
-                                    "campaign_id": campaign_id,
-                                },
+                                execution,
                                 role=str(execution.get("role") or "partial_sell"),
                                 conn=conn,
                             )

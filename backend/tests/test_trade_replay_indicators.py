@@ -243,140 +243,6 @@ async def test_replay_indicators_request_exact_persisted_strategy_version(
 
 
 @pytest.mark.asyncio
-async def test_replay_indicators_collect_all_unique_sidestep_strategies(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Sidestep campaign executions expose all unique persisted strategies."""
-    _FakeBuilder.calls = []
-    _FakeBuilder.build_calls = []
-    _FakeBuilder.warmup_candles = 0
-    service = TradeReplayIndicatorService(
-        _FakeTrades(
-            [
-                _execution("sidestep_exit"),
-                _execution("sidestep_reentry"),
-                _execution("sidestep_exit"),
-            ]
-        )
-    )
-
-    async def fake_load_candles(
-        *args: Any, **kwargs: Any
-    ) -> list[ReplayIndicatorCandle]:
-        return [_candle(0), _candle(1)]
-
-    monkeypatch.setattr(service, "_load_candles", fake_load_candles)
-    monkeypatch.setattr(replay_module, "StrategyChartIndicatorBuilder", _FakeBuilder)
-
-    payload = await service.get_indicators(
-        DEAL_ID, "15m", 1_700_000_000_000, 1_700_000_060_000
-    )
-
-    assert payload["strategies"] == ["sidestep_exit", "sidestep_reentry"]
-    assert _FakeBuilder.calls == [(("sidestep_exit", None), ("sidestep_reentry", None))]
-
-
-@pytest.mark.asyncio
-async def test_replay_indicators_backfill_legacy_missing_strategy_from_config(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Legacy executions without strategy metadata use configured backfill."""
-    _FakeBuilder.calls = []
-    _FakeBuilder.build_calls = []
-    _FakeBuilder.warmup_candles = 0
-
-    async def fake_config() -> dict[str, Any]:
-        return {"signal_strategy": None, "dca_strategy": "ema_swing"}
-
-    service = TradeReplayIndicatorService(
-        _FakeTrades([_execution(None)]),
-        config_snapshot_provider=fake_config,
-    )
-
-    async def fake_load_candles(
-        *args: Any, **kwargs: Any
-    ) -> list[ReplayIndicatorCandle]:
-        return [_candle(0), _candle(1)]
-
-    monkeypatch.setattr(service, "_load_candles", fake_load_candles)
-    monkeypatch.setattr(replay_module, "StrategyChartIndicatorBuilder", _FakeBuilder)
-
-    payload = await service.get_indicators(
-        DEAL_ID, "1h", 1_700_000_000_000, 1_700_000_060_000
-    )
-
-    assert payload["source"] == "legacy_config_backfill"
-    assert payload["strategies"] == ["ema_swing"]
-    assert payload["indicators"][0]["label"] == "EMA 20"
-    assert _FakeBuilder.calls == [(("ema_swing", None),)]
-
-
-@pytest.mark.asyncio
-async def test_open_legacy_replay_keeps_signal_and_active_dca_indicators(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An open legacy deal retains its signal overlay alongside active DCA."""
-    _FakeBuilder.calls = []
-    _FakeBuilder.build_calls = []
-    _FakeBuilder.warmup_candles = 0
-
-    async def fake_config() -> dict[str, Any]:
-        return {"signal_strategy": "ema20_swing", "dca_strategy": "ema_low"}
-
-    service = TradeReplayIndicatorService(
-        _FakeTrades([_execution(None)], open_deal=True),
-        config_snapshot_provider=fake_config,
-    )
-
-    async def fake_load_candles(
-        *args: Any, **kwargs: Any
-    ) -> list[ReplayIndicatorCandle]:
-        return [_candle(0), _candle(1)]
-
-    monkeypatch.setattr(service, "_load_candles", fake_load_candles)
-    monkeypatch.setattr(replay_module, "StrategyChartIndicatorBuilder", _FakeBuilder)
-
-    payload = await service.get_indicators(
-        DEAL_ID, "1h", 1_700_000_000_000, 1_700_000_060_000
-    )
-
-    assert payload["strategies"] == ["ema20_swing", "ema_low"]
-    assert payload["indicators"][0]["label"] == "EMA 20"
-    assert _FakeBuilder.calls == [(("ema20_swing", None), ("ema_low", None))]
-
-
-@pytest.mark.asyncio
-async def test_replay_indicators_return_empty_when_legacy_backfill_has_no_strategy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Legacy executions without configured strategies stay quiet."""
-
-    async def fake_config() -> dict[str, Any]:
-        return {"signal_strategy": None, "dca_strategy": None}
-
-    service = TradeReplayIndicatorService(
-        _FakeTrades([_execution(None)]),
-        config_snapshot_provider=fake_config,
-    )
-
-    async def fail_load_candles(*args: Any) -> list[ReplayIndicatorCandle]:
-        raise AssertionError("strategy-less legacy rows should not load candles")
-
-    monkeypatch.setattr(service, "_load_candles", fail_load_candles)
-
-    payload = await service.get_indicators(
-        DEAL_ID, "1h", 1_700_000_000_000, 1_700_000_060_000
-    )
-
-    assert payload == {
-        "indicators": [],
-        "strategies": [],
-        "timeframe": "1h",
-        "source": "execution_ledger",
-    }
-
-
-@pytest.mark.asyncio
 async def test_replay_indicators_skip_missing_strategy_snapshots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -455,3 +321,35 @@ async def test_replay_indicators_load_warmup_before_visible_window(
     assert payload["strategies"] == ["ema_swing"]
     assert payload["indicators"][0]["values"][0]["time"] == visible_start
     assert _FakeBuilder.build_calls == [(5, 3)]
+
+
+@pytest.mark.asyncio
+async def test_replay_indicators_legacy_deal_without_strategy_metadata_is_empty() -> (
+    None
+):
+    """Value: protects=post-removal replay contract (executions without strategy
+    metadata render no overlays and never fall back to the runtime config);
+    fails_when=a legacy config backfill is reintroduced or a config snapshot is
+    consulted for a strategy-less deal; why_new=the backfill tests were removed
+    with the backfill and no remaining test feeds a strategy-less execution;
+    seam=none; no_claim=does not assert chart rendering."""
+    _FakeBuilder.calls = []
+    _FakeBuilder.build_calls = []
+    _FakeBuilder.warmup_candles = 0
+
+    async def refuse_config_snapshot() -> dict[str, Any]:
+        raise AssertionError("config snapshot must not backfill legacy strategies")
+
+    service = TradeReplayIndicatorService(
+        _FakeTrades([_execution(None)]),
+        config_snapshot_provider=refuse_config_snapshot,
+    )
+
+    payload = await service.get_indicators(
+        DEAL_ID, "1h", 1_700_000_000_000, 1_700_000_006_000
+    )
+
+    assert payload["strategies"] == []
+    assert payload["indicators"] == []
+    assert payload["source"] == "execution_ledger"
+    assert _FakeBuilder.calls == []

@@ -93,7 +93,6 @@ function strategyDetail(strategy: Omit<typeof builtinStrategy, 'duplicated_from'
 const openTrade = {
   id: 1,
   deal_id: 'deal-btc-usdc',
-  campaign_id: 'campaign-btc-usdc',
   symbol: 'BTC/USDC',
   amount: 1,
   cost: 100,

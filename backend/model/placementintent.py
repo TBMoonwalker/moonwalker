@@ -19,7 +19,6 @@ class PlacementIntent(Model):
     order_type = fields.CharField(max_length=32)
     state = fields.CharField(max_length=32)
     deal_id = fields.CharField(max_length=36, null=True)
-    campaign_id = fields.CharField(max_length=36, null=True)
     requested_quote = fields.FloatField(default=0.0)
     requested_amount = fields.FloatField(default=0.0)
     maximum_price = fields.FloatField(null=True)

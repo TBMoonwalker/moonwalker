@@ -140,15 +140,13 @@ test('open trade helpers derive order prices and percentages safely', () => {
      assert.equal(
          getOpenTradeOpenedAt({
              open_date: '2026-05-03T09:00:00+00:00',
-             campaign_started_at: '2026-05-01T08:00:00+00:00',
           }),
            '2026-05-03T09:00:00+00:00',
         )
      assert.equal(
          getOpenTradeOpenedAt({
              open_date: '',
-             campaign_started_at: '2026-05-01T08:00:00+00:00',
           }),
-           '2026-05-01T08:00:00+00:00',
+           '',
         )
  })

@@ -9,12 +9,12 @@ from uuid import UUID
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
+from service.lifecycle_types import TradeExposureState
 from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
 from service.order_persistence import (
     persist_tp_limit_cancellation,
 )
 from service.placement_intents import mark_placement_persisted_in_transaction
-from service.spot_campaign_types import TradeExposureState
 from service.trade_math import has_fee_inclusive_cost, parse_date_to_ms
 from service.trading_controls import resolve_mission_pause_fields
 from tortoise.exceptions import BaseORMException
@@ -150,7 +150,7 @@ class Trades:
     @staticmethod
     def _trade_entry_sort_key(row: dict[str, Any]) -> tuple[int, int, int]:
         """Sort trade rows by the timestamp shown in their respective tables."""
-        entry_value = row.get("open_date") or row.get("campaign_started_at")
+        entry_value = row.get("open_date")
         entry_ms = (
             parse_date_to_ms(str(entry_value).strip())
             if entry_value is not None
@@ -864,11 +864,6 @@ class Trades:
                 "sellable_amount": sellable_amount,
                 "symbol": latest_order["symbol"],
                 "deal_id": latest_order.get("deal_id"),
-                "campaign_id": (
-                    open_trade.get("campaign_id")
-                    if open_trade and open_trade.get("campaign_id") is not None
-                    else latest_order.get("campaign_id")
-                ),
                 "lifecycle_mode": lifecycle_mode,
                 "exposure_state": exposure_state,
                 "direction": latest_order["direction"],
@@ -918,39 +913,6 @@ class Trades:
                 ),
                 "dca_last_decision_json": (
                     open_trade.get("dca_last_decision_json") if open_trade else None
-                ),
-                "last_transition_at": (
-                    open_trade.get("last_transition_at") if open_trade else None
-                ),
-                "reserved_reentry_quote": (
-                    float(open_trade.get("reserved_reentry_quote") or 0.0)
-                    if open_trade
-                    else 0.0
-                ),
-                "waiting_reference_price": (
-                    float(open_trade.get("waiting_reference_price") or 0.0)
-                    if open_trade
-                    else 0.0
-                ),
-                "waiting_reference_amount": (
-                    float(open_trade.get("waiting_reference_amount") or 0.0)
-                    if open_trade
-                    else 0.0
-                ),
-                "waiting_reference_quote": (
-                    float(open_trade.get("waiting_reference_quote") or 0.0)
-                    if open_trade
-                    else 0.0
-                ),
-                "virtual_waiting_profit": (
-                    float(open_trade.get("virtual_waiting_profit") or 0.0)
-                    if open_trade
-                    else 0.0
-                ),
-                "virtual_waiting_profit_percent": (
-                    float(open_trade.get("virtual_waiting_profit_percent") or 0.0)
-                    if open_trade
-                    else 0.0
                 ),
                 **resolve_mission_pause_fields(
                     open_trade=open_trade,

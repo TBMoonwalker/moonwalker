@@ -23,8 +23,9 @@ controls later purchases. CSV can adopt coins already owned. See the
 Dynamic DCA's Expert safeguards offers three safety-order sizing modes: Legacy
 factors, Recovery shadow, and Recovery target. See
 [safety-order sizing](docs/dynamic-so.md) for behavior and budget limits.
-Sidestep is no longer supported. Legacy Sidestep values are normalized during
-startup and restore; valid accumulation records retain their lifecycle.
+Sidestep is no longer supported. The runtime no longer reads the legacy
+Sidestep config keys, and backup restore drops them silently; valid
+accumulation records retain their lifecycle.
 
 ## Disclaimer
 **Moonwalker is meant to be used for educational purposes only. Use with real funds at your own risk**

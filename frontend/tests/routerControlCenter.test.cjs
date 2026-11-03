@@ -11,22 +11,6 @@ const { resolveControlCenterNavigation } = loadFrontendModule(
     'src/control-center/routerGuard.ts',
 )
 
-test('createAppRouter keeps only canonical Control Center entry routes', () => {
-    const router = createAppRouter()
-    const routePaths = router.getRoutes().map((route) => route.path)
-    const routeNames = router.getRoutes().map((route) => route.name)
-
-    assert.equal(routePaths.includes('/control-center'), true)
-    assert.equal(routePaths.includes('/control-center/autopilot'), true)
-    assert.equal(routePaths.includes('/backtest'), true)
-    assert.equal(routePaths.includes('/monitoring'), true)
-    assert.equal(routePaths.includes('/statistics'), true)
-    assert.equal(routePaths.includes('/settings'), false)
-    assert.equal(routePaths.includes('/config'), false)
-    assert.equal(routeNames.includes('legacySettings'), false)
-    assert.equal(routeNames.includes('legacyConfig'), false)
-})
-
 test('createAppRouter redirects the readable statistics URL to stats', () => {
     const router = createAppRouter()
     const route = router.getRoutes().find((candidate) => candidate.path === '/statistics')

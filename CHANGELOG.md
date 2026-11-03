@@ -2,6 +2,70 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [6.0.0.0] - 2026-11-02
+
+### Breaking Changes
+
+- Remove historical campaign linkage from the trade database. A new schema
+  migration rebuilds the trade tables without the dormant campaign columns
+  (`campaign_id` on `trades`, `closedtrades`, `tradeexecutions`,
+  `placement_intents`, and `opentrades`, plus the seven unused sidestep-era
+  waiting-state columns on `opentrades`) and drops their indexes. Historical
+  closed trades keep their full trade data, but the campaign they once
+  belonged to is no longer stored or shown, and dashboard row identity falls
+  back to `deal_id` (then the row id). The rebuild keeps every other column
+  and row, preserves indexes and user triggers that reference only kept
+  columns, keeps row-id sequences and accumulation references intact, and
+  runs each table atomically, so a failed or interrupted rebuild leaves the
+  database exactly as it was.
+- Startup aborts with an action message when an open trade still carries a
+  non-null `campaign_id` residue. The migration does not run until the
+  residue is reviewed and cleared. See "Campaign residue recovery" in
+  `docs/operations.md` for the documented flow.
+- Full backup restores are refused under the same condition: restoring a
+  backup whose open-trade rows still reference a legacy campaign would
+  silently drop that linkage, so the restore aborts before writing anything
+  and names the affected symbols and the recovery procedure.
+- This release supports installations at schema baseline 4.9.0.0 or newer.
+  A startup preflight compares the database's last-known baseline against
+  the minimum supported version; a database below the floor is reported as
+  unsupported, with upgrade guidance, but the preflight never blocks
+  startup.
+
+### Added
+
+- `GET /monitoring/msv` reports the database's baseline against the minimum
+  supported version, so dashboards can show whether the installation sits
+  inside the supported window.
+
+### Changed
+
+- `/config` and `/settings` now serve the dashboard app, which redirects
+  them to the control center; unknown top-level paths go to the trades view.
+  The server no longer rejects these paths outright.
+- Writing a removed config key from the UI or API no longer errors: the
+  value is stored but never read by the runtime. Backup restores still
+  reject most removed keys with a message that names the replacement key.
+- Closed-trade replay no longer falls back to the currently configured
+  strategies for executions recorded without strategy metadata; those
+  historical executions no longer receive a fallback indicator overlay.
+
+### Removed
+
+- The legacy trade-mode bridge keys (`trade_lifecycle_mode`, top-level
+  `dynamic_dca`, `sidestep_campaign_enabled`) are no longer migrated or
+  handled at startup. Restoring a pre-4.9 backup that still carries them
+  drops the three keys silently, because every legacy representation was
+  equivalent to the default `trade_mode` value (`dynamic_dca`), so no
+  setting is lost.
+  The other removed config keys (for example `autopilot_max_fund`) are still
+  rejected on restore with a message that names the replacement key.
+- Restores no longer rewrite legacy `trade_mode` values (such as
+  `sidestep`) to the current default. If a restored backup carries an
+  out-of-contract value, the bot will not start signals until you correct
+  the `trade_mode` setting; the runtime fails closed with a message that
+  names the key.
+
 ## [5.5.1.0] - 2026-10-31
 
 ### Added
@@ -817,11 +881,14 @@ All notable changes to Moonwalker are documented in this file.
 
 ### Breaking Changes
 
-- Remove old-version upgrade bridges. Moonwalker no longer migrates legacy
-  trade-mode config keys (`trade_lifecycle_mode`, `dynamic_dca`,
-  `sidestep_campaign_enabled`), legacy Strategy Builder custom graph shapes,
-  old EMA strategy state tables, old campaign close-row percentage repairs, or
-  the `ema_swing_reverse` compatibility alias.
+- Remove old-version upgrade bridges. This release removed legacy Strategy
+  Builder custom graph shapes, old EMA strategy state tables, old campaign
+  close-row percentage repairs, and the `ema_swing_reverse` compatibility
+  alias. The legacy trade-mode config keys (`trade_lifecycle_mode`,
+  `dynamic_dca`, `sidestep_campaign_enabled`) were not removed in this
+  release: the trade-mode bridge did not exist yet, and the configuration
+  migration that canonicalized it kept running until it was removed in the
+  unreleased entry above.
 - Remove legacy Autopilot and Backtest shims:
   `autopilot_entry_stretch_max_multiplier` is no longer read as a fallback for
   `autopilot_base_order_stretch_max_multiplier`, and direct `Backtest(...)`
