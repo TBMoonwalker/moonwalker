@@ -172,3 +172,63 @@ it('revalidates the timeline on reactivation when a 15-minute bucket boundary wa
     nowSpy.mockRestore()
   }
 })
+
+// Value: protects=the revalidation decision is based on when the cache was
+// last server-verified (loadedAt), not on the mutable last chart point: a
+// realtime point that crosses a 15-minute bucket while the chart is away
+// must not mask the missed bucket, or the stale cache is re-asserted
+// without fetching the new bucket's history;
+// fails_when=a regression compares the last chart point (which the
+// realtime watcher advanced while away) against now and skips the fetch;
+// why_new=the bucket-crossing test only covers the quiet case (no realtime
+// point while away); seam=none; no_claim=real network timing (the API uses
+// a controlled promise; the clock is frozen).
+it('revalidates when a realtime point crossed a bucket while away', async () => {
+  localStorage.clear()
+  vi.mocked(fetchJson).mockReset()
+  vi.mocked(fetchJson).mockResolvedValue([
+    { timestamp: '2026-11-03 08:14:00', profit_overall: 1, funds_locked: 100 },
+  ])
+  let now = new Date('2026-11-03T08:14:30Z').getTime()
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now)
+  try {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const active = ref(true)
+    const Blank = defineComponent({ name: 'Blank', template: '<div class="blank" />' })
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          return () =>
+            h(
+              KeepAlive,
+              null,
+              { default: () => (active.value ? h(UpnlChart, { range: 'all' }) : h(Blank)) },
+            )
+        },
+      }),
+      { global: { plugins: [pinia] } },
+    )
+    await flushPromises()
+    expect(vi.mocked(fetchJson)).toHaveBeenCalledTimes(1)
+    const statistics = useWebSocketDataStore('statistics')
+
+    // Leave, then a realtime point arrives in the new bucket while away.
+    active.value = false
+    await nextTick()
+    now = new Date('2026-11-03T08:16:00Z').getTime()
+    statistics.setRaw(JSON.stringify({ profit_overall: 2, funds_locked: 100, profit_overall_timestamp: '2026-11-03 08:16:00', performance_complete: true }))
+    await flushPromises()
+
+    // Return within the 5-minute TTL: the cache was last verified in the
+    // previous bucket, so the crossed bucket forces a revalidation fetch
+    // even though the last chart point already sits in the new bucket.
+    active.value = true
+    await nextTick()
+    await flushPromises()
+    expect(vi.mocked(fetchJson)).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  } finally {
+    nowSpy.mockRestore()
+  }
+})

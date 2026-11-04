@@ -1,7 +1,7 @@
 import { useAccumulationStrategies } from './useAccumulationStrategies'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useWebSocket } from '@vueuse/core'
-import { accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, sendAccumulationCommand } from '../api/accumulation'
+import { ACTIVATION_PAGE_SIZE, accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, sendAccumulationCommand } from '../api/accumulation'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import { accumulationActions, accumulationClosePredecessor } from '../helpers/accumulation'
 import { createOrderOperationId } from '../helpers/orderMutations'
@@ -46,6 +46,11 @@ export function useAccumulationPanel(symbol?: string) {
   const rows = ref<AccumulationStatus[]>([])
   const portfolio = ref<AccumulationPortfolio | null>(null)
   const next = ref<string | null>(null)
+  // A complete view is fully described by the stream's first page: no
+  // further page exists and the loaded rows fit in one page. A fully
+  // loaded multi-page view also has next===null once its last page is in,
+  // so the row count keeps it out of the complete-view paths.
+  const completeView = () => next.value === null && rows.value.length <= ACTIVATION_PAGE_SIZE
   const selected = ref<string | null>(symbol ?? unresolvedRequest.value?.symbol ?? null)
   const detail = ref<AccumulationDetail | null>(null)
   const loading = ref(false)
@@ -111,9 +116,14 @@ export function useAccumulationPanel(symbol?: string) {
           // disappear while the panel was away: drop the selection so the
           // page below can reconcile. A multi-page view, or a page that
           // still lists the selection, keeps the previous behavior.
-          if (next.value === null && !incoming.some(row => row.symbol === selected.value)) {
+          if (completeView() && !incoming.some(row => row.symbol === selected.value)) {
             selected.value = null
             detail.value = null
+            // The stream is still bound to the vanished symbol, so it would
+            // keep answering with no detail: reconnect without it and let
+            // the server re-bind the first surviving row.
+            stream.close()
+            connectStream()
           } else {
             return
           }
@@ -125,7 +135,7 @@ export function useAccumulationPanel(symbol?: string) {
         // (rows that disappeared while the panel was away come off the
         // page); a multi-page view keeps its later pages, which the page-1
         // snapshot cannot describe.
-        rows.value = next.value === null
+        rows.value = completeView()
           ? [...incoming]
           : [...incoming, ...rows.value.filter(row => !incoming.some(item => item.symbol === row.symbol))]
         if (rows.value.length <= incoming.length) next.value = snapshot.page.next_after
@@ -412,13 +422,13 @@ export function useAccumulationPanel(symbol?: string) {
     // restore freshness, so the reactivation refetches instead of leaving
     // the panel stale (a detail 503 or an 'unavailable' stream message can
     // set available=false after the page load stamped the window).
-    // A multi-page view never skips: the stream snapshot only describes the
-    // first page, so later pages and removed rows would stay stale until
-    // the window elapses; the reactivation refetches instead.
+    // Anything but a complete view never skips: the stream snapshot only
+    // describes the first page, so a view with a further page (or one that
+    // grew past a page while away) refetches on return.
     if (options.skipIfFresh && lastPageLoadAt > 0 &&
         streamAvailable.value &&
         available.value &&
-        next.value === null &&
+        completeView() &&
         Date.now() - lastPageLoadAt < RESUME_SKIP_WINDOW_MS) {
       // Deactivation closed the stream; bring it back without refetching.
       connectStream()

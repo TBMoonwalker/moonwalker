@@ -11,24 +11,25 @@ import { useAccumulationPanel } from '../src/composables/useAccumulationPanel'
 import { accumulationActions } from '../src/helpers/accumulation'
 import type { AccumulationDetail, AccumulationCommand } from '../src/types/accumulation'
 
-const api = vi.hoisted(() => ({ fetchAccumulationPage: vi.fn(), fetchAccumulationDetail: vi.fn(), fetchAccumulationStrategies: vi.fn(), sendAccumulationCommand: vi.fn(), accumulationErrorStatus: vi.fn() }))
+const api = vi.hoisted(() => ({ ACTIVATION_PAGE_SIZE: 25, fetchAccumulationPage: vi.fn(), fetchAccumulationDetail: vi.fn(), fetchAccumulationStrategies: vi.fn(), sendAccumulationCommand: vi.fn(), accumulationErrorStatus: vi.fn() }))
 vi.mock('../src/api/accumulation', () => api)
 const routing = vi.hoisted(() => ({ route: null as any }))
 vi.mock('vue-router', async importOriginal => ({ ...await importOriginal<typeof import('vue-router')>(), useRoute: () => routing.route }))
 
-const live = vi.hoisted(() => ({ options: null as any, socket: {} as any, ctl: null as any }))
+const live = vi.hoisted(() => ({ options: null as any, socket: {} as any, ctl: null as any, openUrls: [] as string[] }))
 vi.mock('@vueuse/core', async importOriginal => {
   const original = await importOriginal<typeof import('@vueuse/core')>()
   const { ref, shallowRef } = await import('vue')
-  return { ...original, useWebSocket: (_url: unknown, options: unknown) => {
+  return { ...original, useWebSocket: (url: unknown, options: unknown) => {
     live.options = options
     live.socket = {}
     const status = ref('OPEN')
     live.ctl = {
       status,
       // Mirror @vueuse/core: closing flips the status to CLOSED, so a
-      // reconnect must go through open().
-      open: vi.fn(() => { status.value = 'OPEN' }),
+      // reconnect must go through open(). The URL is recorded so tests can
+      // assert what the stream re-binds to.
+      open: vi.fn(() => { status.value = 'OPEN'; live.openUrls.push(String((url as { value?: unknown }).value ?? url)) }),
       close: vi.fn(() => { status.value = 'CLOSED' }),
     }
     return { status, ws: shallowRef(live.socket), open: live.ctl.open, close: live.ctl.close }
@@ -1136,6 +1137,128 @@ it('falls back to the HTTP refetch when the stream reconnect delivers no snapsho
     // No snapshot arrives; after the reconnect fallback elapses the panel
     // refetches over HTTP.
     await vi.waitFor(() => expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(2), { timeout: 6000, interval: 100 })
+  } finally {
+    nowSpy.mockRestore()
+    wrapper.unmount()
+  }
+})
+
+// Value: protects=a fully loaded multi-page view (every page already in, so
+// next is null while the rows span more than one page) keeps its
+// later-page rows when a stream snapshot arrives: the page-1 snapshot
+// merges instead of replacing, so holdings beyond the first page do not
+// silently come off the panel;
+// fails_when=a regression treats next===null as a complete view and the
+// snapshot replaces the rows with its first page, dropping the rest;
+// why_new=the skip-window and reconcile tests only use single-page views;
+// seam=none; no_claim=real network timing (the API and the stream use
+// controlled promises).
+it('keeps later-page rows when a stream snapshot arrives on a fully loaded view', async () => {
+  const page1 = Array.from({ length: 25 }, (_, i) => ({ symbol: `S${i}/USDC` }))
+  api.fetchAccumulationPage.mockReset()
+  api.fetchAccumulationPage.mockImplementation((after?: string) =>
+    Promise.resolve(after
+      ? { activations: [{ symbol: 'ZZZ/USDC' }], next_after: null, portfolio: null }
+      : { activations: page1, next_after: 'p2', portfolio: null }),
+  )
+  api.fetchAccumulationStrategies.mockReset()
+  api.fetchAccumulationStrategies.mockResolvedValue({ versions: [], next_after_id: null })
+  api.fetchAccumulationDetail.mockReset()
+  api.fetchAccumulationDetail.mockResolvedValue(snapshot({ symbol: 'S0/USDC' }))
+  live.ctl = null
+
+  let panel!: ReturnType<typeof useAccumulationPanel>
+  const now = Date.now()
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now)
+  const Host = defineComponent({ setup() { panel = useAccumulationPanel(); return () => null } })
+  const wrapper = mount(Host)
+  try {
+    await flushPromises()
+    // Load the second page: the view is fully loaded, rows span two pages
+    // while next is null.
+    await panel.loadPage(true)
+    await flushPromises()
+    expect(panel.rows.value).toHaveLength(26)
+    expect(panel.next.value).toBeNull()
+
+    // A stream snapshot carrying only the first page must merge, not
+    // replace: the later-page row stays on the panel.
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: page1, next_after: 'p2', portfolio: null }, detail: snapshot({ symbol: 'S0/USDC' }) }) })
+    await flushPromises()
+    expect(panel.rows.value).toHaveLength(26)
+    expect(panel.rows.value.some(row => row.symbol === 'ZZZ/USDC')).toBe(true)
+  } finally {
+    nowSpy.mockRestore()
+    wrapper.unmount()
+  }
+})
+
+// Value: protects=a selection whose activation disappeared while the panel
+// was away (the branch's target scenario) recovers: after the rows
+// reconcile, the stream reconnects unbound so the server re-binds the
+// first surviving row, whose detail arrives with the next snapshot — the
+// panel ends with a usable selection, not an unexplained empty detail
+// pane with disabled actions;
+// fails_when=a regression stays bound to the vanished symbol and every
+// later snapshot keeps arriving with no detail, so only a manual click
+// recovers the panel;
+// why_new=the reconcile test covers rows and selection clearing but not the
+// recovery of a usable selection afterwards; seam=none; no_claim=real timer
+// scheduling (the API and the stream use controlled promises).
+it('re-binds the first surviving row after the selected activation disappears while away', async () => {
+  api.fetchAccumulationPage.mockReset()
+  api.fetchAccumulationPage.mockResolvedValue({ activations: [{ symbol: 'BTC/USDC' }, { symbol: 'ETH/USDC' }], next_after: null })
+  api.fetchAccumulationStrategies.mockReset()
+  api.fetchAccumulationStrategies.mockResolvedValue({ versions: [], next_after_id: null })
+  api.fetchAccumulationDetail.mockReset()
+  api.fetchAccumulationDetail.mockResolvedValue(snapshot())
+  live.ctl = null
+  live.openUrls.length = 0
+
+  let panel!: ReturnType<typeof useAccumulationPanel>
+  const now = Date.now()
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now)
+  const Host = defineComponent({ setup() { panel = useAccumulationPanel(); return () => null } })
+  const active = ref(true)
+  const Blank = defineComponent({ name: 'Blank', template: '<div class="blank" />' })
+  const wrapper = mount(
+    defineComponent({
+      setup() {
+        return () => h(KeepAlive, null, { default: () => (active.value ? h(Host) : h(Blank)) })
+      },
+    }),
+  )
+  try {
+    await flushPromises()
+    expect(panel.selected.value).toBe('BTC/USDC')
+
+    // The in-window round trip skips the refetch and reconnects the stream
+    // bound to the selection.
+    active.value = false
+    await nextTick()
+    active.value = true
+    await nextTick()
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(1)
+    expect(live.openUrls.at(-1)).toContain('symbol=BTC%2FUSDC')
+
+    // While away the selection disappeared: the snapshot carries the
+    // surviving page and no detail for the (now gone) selection.
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [{ symbol: 'ETH/USDC' }], next_after: null, portfolio: null }, detail: null }) })
+    await flushPromises()
+    expect(panel.rows.value.map(row => row.symbol)).toEqual(['ETH/USDC'])
+    expect(panel.selected.value).toBeNull()
+    // The stream was reconnected without the vanished symbol so the server
+    // can bind a surviving row.
+    expect(live.openUrls.at(-1)).not.toContain('symbol=')
+
+    // The server's re-bound first row arrives with its detail: the panel
+    // recovers a usable selection without operator input.
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [{ symbol: 'ETH/USDC' }], next_after: null, portfolio: null }, detail: snapshot({ symbol: 'ETH/USDC' }) }) })
+    await flushPromises()
+    expect(panel.selected.value).toBe('ETH/USDC')
+    expect(panel.detail.value?.symbol).toBe('ETH/USDC')
+    expect(panel.fresh.value).toBe(true)
   } finally {
     nowSpy.mockRestore()
     wrapper.unmount()
