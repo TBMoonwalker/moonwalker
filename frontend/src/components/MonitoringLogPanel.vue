@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { fetchJson } from '../api/client'
 import {
   appendMonitoringLogLines,
@@ -59,6 +59,8 @@ const selectedLevel = ref<MonitoringLogLevel>('all')
 const logViewRef = ref<LogViewRef | null>(null)
 
 let pollTimer: number | null = null
+let deactivated = false
+let mounted = true
 
 const levelOptions = [
   { label: 'All levels', value: 'all' },
@@ -265,10 +267,25 @@ watch(paused, (isPaused) => {
 
 onMounted(async () => {
   await loadSources()
-  startPolling()
+  // The initial source request can settle after the cached view was
+  // deactivated, paused or unmounted; start polling only if the panel is
+  // still alive and visible.
+  if (mounted && !deactivated && !paused.value) startPolling()
+})
+
+// KeepAlive caches MonitoringView, so onUnmounted does not fire when the user
+// navigates away; poll only while the log panel is actually visible.
+onActivated(() => {
+  deactivated = false
+  if (!paused.value) startPolling()
+})
+onDeactivated(() => {
+  deactivated = true
+  stopPolling()
 })
 
 onUnmounted(() => {
+  mounted = false
   stopPolling()
 })
 </script>

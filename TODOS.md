@@ -2,6 +2,16 @@
 
 ## Next up
 
+### Periodic price re-evaluation for open trades
+
+**Status:** Identified 2026-11-03 during the YB/USDC stuck-trade investigation (incident: the trade sat above its TP for ~23h without an exit evaluation, and the later manual sell filled ~15% below the stale displayed price).
+
+**What:** Classic DCA TP/SL checks run only when a `ticker_price` event arrives from the per-symbol trade stream; the watcher DCA queue worker is the single production caller of `DcaEngine.process_ticker_data`, and no background task refreshes prices via REST. A dead or silent stream (watchdog per-symbol budget is `max(1800s, candle timeframe)`, 1006 disconnects, quiet pairs, or demo/testnet books) leaves open trades unmanaged — including stops below the last known price — while the UI keeps showing stale prices. Add a periodic open-trade price refresh (e.g. batch REST ticker every N seconds for symbols with open trades) that pushes changed prices through the existing event pipeline, and document the API-load budget and the interaction with `watcher_ohlcv` mode.
+
+**Effort:** L
+
+**Priority:** P2
+
 ### Prepare request bodies and OHLCV helpers for future major upgrades
 
 **Status:** Litestar 2.25.0 and pandas 3.1.0 expose deprecation warnings during

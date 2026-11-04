@@ -33,7 +33,7 @@ use([GridComponent, LegendComponent, TooltipComponent, LineChart, CanvasRenderer
 
 const props = defineProps<{ range: PerformanceRange }>()
 const upnlStore = useUpnlDatastore()
-const { data } = storeToRefs(upnlStore)
+const { data, loadedAt } = storeToRefs(upnlStore)
 const statisticsStore = useWebSocketDataStore('statistics')
 const statisticsData = storeToRefs(statisticsStore)
 const themeStore = useThemeStore()
@@ -216,9 +216,25 @@ onMounted(async () => {
   }
 })
 
+// Format a client-clock moment as a UTC timeline point (the same shape as
+// the server's timestamps) so the bucket comparison reuses one code path.
+function utcPointAt(millis: number): string {
+  const at = new Date(millis)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${at.getUTCFullYear()}-${pad(at.getUTCMonth() + 1)}-${pad(at.getUTCDate())} ${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())}:${pad(at.getUTCSeconds())}`
+}
+
 async function refreshAfterReturn() {
   try {
-    await upnlStore.load_upnl_history_data({ force: true })
+    // A return within the store's 5-minute TTL repaints from the cached
+    // timeline; force a fresh fetch only when a 15-minute bucket boundary
+    // was crossed since the cache was last server-verified (loadedAt),
+    // because the cache predates that bucket's history (TTL expiry alone
+    // never triggers a fetch). Realtime points never count: they are not
+    // verified history and keep arriving while the chart is away.
+    const crossedBucket = loadedAt.value !== null &&
+      toMinuteBucket(utcPointAt(loadedAt.value)) !== toMinuteBucket(utcPointAt(Date.now()))
+    await upnlStore.load_upnl_history_data({ force: crossedBucket })
     if (latestRealtime && routeActive && !document.hidden) {
       pushRealtimePoint(latestRealtime.profitOverall, latestRealtime.fundsLocked, latestRealtime.timestamp)
     }

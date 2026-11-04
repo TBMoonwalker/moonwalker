@@ -31,6 +31,15 @@ Consequently, loading after a page reload still refreshes from the server.
 Successful fetches persist authoritative snapshots. The live overall chart
 tail remains separate from those stored snapshots.
 
+Revisiting a cached view (for example a menu round trip back to Overview)
+goes through the same TTL: while the 5-minute window is fresh, the chart
+repaints from the stored timeline; a longer absence past the TTL, or a
+15-minute data bucket boundary crossed since the timeline was last
+server-verified, triggers a fresh fetch. The router guard follows the
+same idea for the shared config snapshot: it fetches the full config
+once, then revalidates each navigation with the lightweight freshness
+check.
+
 ## Design boundaries
 
 - Keep full snapshots for the bounded, mutable open-trade set.

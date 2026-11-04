@@ -289,6 +289,17 @@ async function checkFreshness(): Promise<{
     }
 }
 
+async function ensureFresh(): Promise<SharedConfigPayload | null> {
+    if (snapshot.value === null) {
+        return loadSnapshot()
+    }
+    const freshness = await checkFreshness()
+    if (freshness.status === 'stale') {
+        return loadSnapshot(true)
+    }
+    return snapshot.value
+}
+
 function applySnapshot(
     nextSnapshot: SharedConfigPayload,
     updatedAt: string | null = getSnapshotUpdatedAt(nextSnapshot)
@@ -379,6 +390,7 @@ export function useSharedConfigSnapshot() {
         hasKnownNewerSnapshot,
         applySnapshot,
         checkFreshness,
+        ensureFresh,
         ensureLoaded: loadSnapshot,
         refresh: () => loadSnapshot(true),
         emitLocalInvalidation,

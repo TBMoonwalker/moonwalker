@@ -127,6 +127,7 @@ are not exposed in the UI and must be set via the API.
 | `sell_order_type` | `string` | Sell execution type for TP/exit orders. Supported values are `market` and `limit`. | `market` |
 | `limit_sell_timeout_sec` | `int` | Timeout in seconds before an unfilled limit sell is treated as timed out. | `60` |
 | `limit_sell_fallback_to_market` | `bool` | Allow a timed-out limit sell to fall back to a market sell when guards still permit it. | `true` |
+| `tp_floor_live_price_fallback` | `bool` | When a TP-driven limit sell times out, allow the market fallback while the live price still meets the TP floor. Off, the position is kept open instead; a market order cannot guarantee the floor (advanced). | `false` |
 | `tp_limit_prearm_enabled` | `bool` | For static limit TP exits, place a standing limit sell before TP is reached. | `false` |
 | `tp_limit_prearm_margin_percent` | `float` | Distance below TP where proactive limit sell arming begins. `0.25` means arm within 0.25% of TP. | `0.25` |
 | `tp_spike_confirm_enabled` | `bool` | Enable TP spike confirmation so a single wick above TP does not immediately trigger a sell. | `false` |
@@ -450,12 +451,21 @@ waits for up to `limit_sell_timeout_sec` seconds.
 If the order is not filled in time and `limit_sell_fallback_to_market` is
 enabled, the bot may fall back to a market sell. That fallback is guarded:
 
-- if TP was the reason for the sell, Moonwalker checks that the live price is
-  still above the allowed fallback floor before sending the market order
-- if the price has already dropped back below that floor, the market fallback is
-  skipped and the trade remains open
+- if TP was the reason for the sell and `tp_floor_live_price_fallback` is
+  disabled (default), the fallback is skipped and the trade remains open: a
+  market order cannot guarantee the TP floor, so Moonwalker waits for a later
+  ticker update instead of risking an exit below it
+- if `tp_floor_live_price_fallback` is enabled, Moonwalker checks that the
+  live price is still at or above the allowed fallback floor before sending
+  the market order
+- if the price has already dropped back below that floor (or cannot be
+  determined), the market fallback is skipped and the trade remains open
 
 This protection is meant to reduce exits at a loss after short-lived spikes.
+On thin order books (for example demo/testnet mode) a TP limit sell may never
+fill while the price hovers around the floor; enabling
+`tp_floor_live_price_fallback` lets such exits complete at market while the
+live price still respects the floor.
 
 If an active limit sell leaves a remainder below the exchange minimum order
 value, Moonwalker records that remainder as Unsellable instead of retrying the

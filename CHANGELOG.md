@@ -2,6 +2,24 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [6.1.0.0] - 2026-11-04
+
+### Added
+
+- `tp_floor_live_price_fallback` (off by default) for limit sell execution: when a take-profit limit sell times out, you can now opt in to completing the exit as a market sell as long as the live price still meets the TP floor. The bot re-checks the live price before sending the fallback and keeps the position open if the price has dropped back below the floor; a market order can never guarantee the floor.
+
+### Changed
+
+- The dashboard no longer refetches the full configuration on every menu click. Navigation now runs a lightweight freshness check and refetches only when another client has actually changed the settings, so moving between pages stays fast.
+- The accumulation panel no longer refetches its page on quick route round trips. The loaded rows are kept, the live status stream is reconnected in place, and if the stream cannot deliver a snapshot within a few seconds the panel falls back to an ordinary refetch instead of going stale.
+- The accumulation page now reflects activations retired while you were away. The retired holding comes off the page, and if it was the one you had selected, the panel re-binds to the first surviving activation so its detail and actions stay usable without extra clicks.
+- The Overview profit chart repaints instantly when you return while the cache is fresh, and fetches fresh history when the cache has expired or a 15-minute data bucket boundary was crossed while you were away.
+- Monitoring logs poll only while the panel is visible. Polling stops when the panel is hidden or paused and resumes when it comes back, so a cached panel no longer keeps requesting logs in the background.
+
+### Fixed
+
+- A take-profit exit that timed out on its limit sell could leave the position open with no visible way to resolve it. The timeout now reaches a deterministic outcome. The position is either kept open deliberately (default) or completed at market while the live price still meets the floor (opt-in via `tp_floor_live_price_fallback`).
+
 ## [6.0.0.0] - 2026-11-02
 
 ### Breaking Changes

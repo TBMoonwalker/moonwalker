@@ -1,7 +1,7 @@
 import { useAccumulationStrategies } from './useAccumulationStrategies'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useWebSocket } from '@vueuse/core'
-import { accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, sendAccumulationCommand } from '../api/accumulation'
+import { ACTIVATION_PAGE_SIZE, accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, sendAccumulationCommand } from '../api/accumulation'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import { accumulationActions, accumulationClosePredecessor } from '../helpers/accumulation'
 import { createOrderOperationId } from '../helpers/orderMutations'
@@ -12,6 +12,12 @@ import type { AccumulationAction, AccumulationCommand, AccumulationDetail, Accum
 // Retain an uncertain request across route changes; never replay it automatically.
 const pendingKey = `moonwalker.accumulation.pending:${MOONWALKER_API_ORIGIN}`
 const session = () => window.sessionStorage
+// Reactivations within this window reuse the last loaded page instead of
+// refetching on every menu round trip.
+const RESUME_SKIP_WINDOW_MS = 30_000
+// If a stream reconnect after a skipped reactivation has not delivered a
+// snapshot by then, fall back to the HTTP refetch.
+const STREAM_RECONNECT_FALLBACK_MS = 3000
 const unresolvedRequest = ref<AccumulationCommand | null>(null)
 
 function restoreRequest(): AccumulationCommand | null {
@@ -40,6 +46,11 @@ export function useAccumulationPanel(symbol?: string) {
   const rows = ref<AccumulationStatus[]>([])
   const portfolio = ref<AccumulationPortfolio | null>(null)
   const next = ref<string | null>(null)
+  // A complete view is fully described by the stream's first page: no
+  // further page exists and the loaded rows fit in one page. A fully
+  // loaded multi-page view also has next===null once its last page is in,
+  // so the row count keeps it out of the complete-view paths.
+  const completeView = () => next.value === null && rows.value.length <= ACTIVATION_PAGE_SIZE
   const selected = ref<string | null>(symbol ?? unresolvedRequest.value?.symbol ?? null)
   const detail = ref<AccumulationDetail | null>(null)
   const loading = ref(false)
@@ -76,6 +87,8 @@ export function useAccumulationPanel(symbol?: string) {
   let pageHidden = document.hidden
   let lifecycle = 0
   let reloadAfterPage = false
+  let lastPageLoadAt = 0
+  let streamFallbackTimer: number | undefined
   const streamUrl = ref<string>()
   const streamAvailable = ref(true)
   const stream = useWebSocket(streamUrl, {
@@ -97,11 +110,34 @@ export function useAccumulationPanel(symbol?: string) {
         if (!Array.isArray(snapshot.page?.activations) ||
             (snapshot.detail !== null && (!snapshot.detail || typeof snapshot.detail.symbol !== 'string' ||
               !Number.isSafeInteger(snapshot.detail.revision) || !Array.isArray(snapshot.detail.operations)))) throw new Error('Invalid snapshot')
-        if (selected.value && snapshot.detail?.symbol !== selected.value) return
-        ++sequence
-        loading.value = false
         const incoming = snapshot.page.activations as AccumulationStatus[]
-        rows.value = [...incoming, ...rows.value.filter(row => !incoming.some(item => item.symbol === row.symbol))]
+        if (selected.value && snapshot.detail?.symbol !== selected.value) {
+          // A complete view that no longer lists the selection saw it
+          // disappear while the panel was away: drop the selection so the
+          // page below can reconcile. A multi-page view, or a page that
+          // still lists the selection, keeps the previous behavior.
+          if (completeView() && !incoming.some(row => row.symbol === selected.value)) {
+            selected.value = null
+            detail.value = null
+            // The stream is still bound to the vanished symbol, so it would
+            // keep answering with no detail: reconnect without it and let
+            // the server re-bind the first surviving row.
+            stream.close()
+            connectStream()
+          } else {
+            return
+          }
+        }
+        ++sequence
+        clearStreamFallback()
+        loading.value = false
+        // A complete view is fully described by the snapshot, so replace it
+        // (rows that disappeared while the panel was away come off the
+        // page); a multi-page view keeps its later pages, which the page-1
+        // snapshot cannot describe.
+        rows.value = completeView()
+          ? [...incoming]
+          : [...incoming, ...rows.value.filter(row => !incoming.some(item => item.symbol === row.symbol))]
         if (rows.value.length <= incoming.length) next.value = snapshot.page.next_after
         const bindSelection = !selected.value && !!snapshot.detail?.symbol
         if (!selected.value) selected.value = snapshot.detail?.symbol ?? null
@@ -114,6 +150,13 @@ export function useAccumulationPanel(symbol?: string) {
       }
     },
   })
+
+  function clearStreamFallback() {
+    if (streamFallbackTimer !== undefined) {
+      window.clearTimeout(streamFallbackTimer)
+      streamFallbackTimer = undefined
+    }
+  }
 
   function connectStream() {
     if (!streamAvailable.value || disposed || !routeActive || document.hidden || !navigator.onLine || !available.value) return
@@ -214,6 +257,10 @@ export function useAccumulationPanel(symbol?: string) {
       if (!selected.value && rows.value[0]) await selectSymbol(rows.value[0].symbol)
       else if (selected.value) await refreshDetail()
       connectStream()
+      // Stamp only on success: a failed or aborted load must not start the
+      // skip window, or a route round trip would swallow the retry.
+      lastPageLoadAt = Date.now()
+      clearStreamFallback()
     } catch (cause) {
       if (disposed || currentLifecycle !== lifecycle) return
       available.value = false
@@ -363,10 +410,40 @@ export function useAccumulationPanel(symbol?: string) {
     pageLoading = false
     reloadAfterPage = false
     stream.close()
+    clearStreamFallback()
   }
 
-  function resume() {
+  function resume(options: { skipIfFresh?: boolean } = {}) {
     if (disposed || !routeActive || document.hidden || !navigator.onLine) return
+    // Resumes from tab visibility or network recovery always refetch: state
+    // may have changed while the panel was blind. Only a route reactivation
+    // may reuse a page loaded moments earlier. A no-stream or unavailable
+    // panel never skips: without a working stream there is no snapshot to
+    // restore freshness, so the reactivation refetches instead of leaving
+    // the panel stale (a detail 503 or an 'unavailable' stream message can
+    // set available=false after the page load stamped the window).
+    // Anything but a complete view never skips: the stream snapshot only
+    // describes the first page, so a view with a further page (or one that
+    // grew past a page while away) refetches on return.
+    if (options.skipIfFresh && lastPageLoadAt > 0 &&
+        streamAvailable.value &&
+        available.value &&
+        completeView() &&
+        Date.now() - lastPageLoadAt < RESUME_SKIP_WINDOW_MS) {
+      // Deactivation closed the stream; bring it back without refetching.
+      connectStream()
+      // A blocked or slow WebSocket cannot restore freshness on its own: if
+      // the reconnect does not deliver a snapshot shortly, fall back to the
+      // HTTP refetch the pre-diff reactivation always performed.
+      clearStreamFallback()
+      streamFallbackTimer = window.setTimeout(() => {
+        streamFallbackTimer = undefined
+        if (!disposed && routeActive && !document.hidden && navigator.onLine && !fresh.value && available.value) {
+          void loadPage()
+        }
+      }, STREAM_RECONNECT_FALLBACK_MS)
+      return
+    }
     void loadPage()
   }
 
@@ -377,20 +454,23 @@ export function useAccumulationPanel(symbol?: string) {
     else resume()
   }
 
+  function onOnline() {
+    resume()
+  }
   onMounted(() => {
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('offline', suspend)
-    window.addEventListener('online', resume)
+    window.addEventListener('online', onOnline)
     void loadPage()
     void loadStrategies()
 
   })
-  onActivated(() => { if (!routeActive) { routeActive = true; resume() } })
+  onActivated(() => { if (!routeActive) { routeActive = true; resume({ skipIfFresh: true }) } })
   onDeactivated(() => { routeActive = false; suspend() })
   onBeforeUnmount(() => {
     document.removeEventListener('visibilitychange', onVisibilityChange)
     window.removeEventListener('offline', suspend)
-    window.removeEventListener('online', resume)
+    window.removeEventListener('online', onOnline)
     disposed = true
     suspend()
   })

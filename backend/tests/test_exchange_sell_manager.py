@@ -208,6 +208,131 @@ async def test_create_spot_sell_preserves_tp_floor_after_limit_timeout() -> None
 
 
 @pytest.mark.asyncio
+async def test_create_spot_sell_live_price_floor_fallback_sells_when_guard_passes() -> (
+    None
+):
+    """Opt-in live-price fallback market-sells while the floor still holds."""
+    exchange = _DummyExchange()
+    manager = ExchangeSellManager(
+        logger=_DummyLogger(),
+        get_exchange=lambda: exchange,
+    )
+
+    async def fake_limit_sell(
+        _order: dict[str, object], _config: dict[str, object]
+    ) -> dict[str, object]:
+        return {
+            "requires_market_fallback": True,
+            "limit_cancel_confirmed": True,
+            "fallback_reason": "limit_order_timeout",
+            "symbol": "ZK/USDC",
+            "remaining_amount": 1272.4,
+            "partial_filled_amount": 0.0,
+            "partial_avg_price": 0.0,
+        }
+
+    async def fake_market_fallback(
+        _order: dict[str, object],
+        _config: dict[str, object],
+        _limit_status: dict[str, object],
+    ) -> dict[str, object] | None:
+        exchange.market_sell_calls += 1
+        return {
+            "type": "sold_check",
+            "symbol": "ZK/USDC",
+            "total_amount": 1272.4,
+            "price": 0.0096,
+        }
+
+    async def fake_guard(_order: dict[str, object], _config: dict[str, object]) -> bool:
+        return True
+
+    result = await manager.create_spot_sell(
+        order={
+            "symbol": "ZK/USDC",
+            "fallback_min_price": 0.0095338243,
+            "total_cost": 11.0,
+        },
+        config={
+            "sell_order_type": "limit",
+            "limit_sell_fallback_to_market": True,
+            "limit_sell_fallback_tp_guard": True,
+            "tp_floor_live_price_fallback": True,
+        },
+        context=SellRoutingContext(
+            create_spot_limit_sell=fake_limit_sell,
+            create_spot_market_sell=fake_market_fallback,
+            create_spot_market_fallback=fake_market_fallback,
+            can_fallback_to_market_sell=fake_guard,
+        ),
+    )
+
+    assert result is not None
+    assert result["type"] == "sold_check"
+    assert exchange.market_sell_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_create_spot_sell_live_price_floor_fallback_keeps_open_when_guard_fails() -> (
+    None
+):
+    """Opt-in live-price fallback still keeps the position open below the floor."""
+    exchange = _DummyExchange()
+    manager = ExchangeSellManager(
+        logger=_DummyLogger(),
+        get_exchange=lambda: exchange,
+    )
+
+    async def fake_limit_sell(
+        _order: dict[str, object], _config: dict[str, object]
+    ) -> dict[str, object]:
+        return {
+            "requires_market_fallback": True,
+            "limit_cancel_confirmed": True,
+            "fallback_reason": "limit_order_timeout",
+            "symbol": "ZK/USDC",
+            "remaining_amount": 1272.4,
+            "partial_filled_amount": 0.0,
+            "partial_avg_price": 0.0,
+        }
+
+    async def fake_market_fallback(
+        _order: dict[str, object],
+        _config: dict[str, object],
+        _limit_status: dict[str, object],
+    ) -> dict[str, object] | None:
+        raise AssertionError("guarded fallback must not market-sell below the floor")
+
+    async def fake_guard(_order: dict[str, object], _config: dict[str, object]) -> bool:
+        return False
+
+    result = await manager.create_spot_sell(
+        order={
+            "symbol": "ZK/USDC",
+            "fallback_min_price": 0.0095338243,
+        },
+        config={
+            "sell_order_type": "limit",
+            "limit_sell_fallback_to_market": True,
+            "limit_sell_fallback_tp_guard": True,
+            "tp_floor_live_price_fallback": True,
+        },
+        context=SellRoutingContext(
+            create_spot_limit_sell=fake_limit_sell,
+            create_spot_market_sell=fake_market_fallback,
+            create_spot_market_fallback=fake_market_fallback,
+            can_fallback_to_market_sell=fake_guard,
+        ),
+    )
+
+    assert result is not None
+    assert result["type"] == "partial_sell"
+    assert result["symbol"] == "ZK/USDC"
+    assert result["remaining_amount"] == pytest.approx(1272.4)
+    assert exchange.market_sell_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_create_spot_sell_marks_below_minimum_limit_remainder_unsellable() -> (
     None
 ):
