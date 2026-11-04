@@ -532,8 +532,10 @@ The optional `mode=dynamic_dca` or `mode=unknown` filter scopes the closed-trade
 analytics to the last two years. `unattributed_trades` counts closed records in
 that period whose lifecycle mode is unknown. AI Trust remains independently
 scoped across modes. Omitting `mode` retains the unfiltered response. Older
-closed records are attributed to accumulation only when matching deal,
-activation and order evidence is available; other records remain unclassified.
+closed records are attributed to accumulation when matching deal, activation and
+order evidence is available, and to classic DCA when their mode is provable (the
+closure predates accumulation on that database, or the database never ran
+accumulation); other records remain unclassified.
 
 ## Market Data
 

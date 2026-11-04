@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +92,110 @@ async def test_closed_trade_mode_backfill_requires_matching_deal_evidence(
     assert wrong_symbol.lifecycle_mode is None
     assert unknown.lifecycle_mode is None
     assert explicit.lifecycle_mode == "classic_dca"
+
+
+@pytest.mark.asyncio
+async def test_legacy_closed_trade_attribution_when_accumulation_never_ran(
+    _migration_database,
+) -> None:
+    """Closures on an install without activations are provably classic DCA."""
+    legacy = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2024-05-02 09:00:00+00:00"
+    )
+    recent = await model.ClosedTrades.create(
+        symbol="ETH/USDC", deal_id="deal-1", close_date="2026-11-01 09:00:00+00:00"
+    )
+    accumulation = await model.ClosedTrades.create(
+        symbol="SOL/USDC", deal_id="deal-2", lifecycle_mode="accumulation"
+    )
+    dca = await model.ClosedTrades.create(
+        symbol="XRP/USDC", deal_id="deal-3", lifecycle_mode="classic_dca"
+    )
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._attribute_legacy_closed_trade_modes()
+    await database._attribute_legacy_closed_trade_modes()
+    await legacy.refresh_from_db()
+    await recent.refresh_from_db()
+    await accumulation.refresh_from_db()
+    await dca.refresh_from_db()
+    assert legacy.lifecycle_mode == "classic_dca"
+    assert recent.lifecycle_mode == "classic_dca"
+    assert accumulation.lifecycle_mode == "accumulation"
+    assert dca.lifecycle_mode == "classic_dca"
+
+
+@pytest.mark.asyncio
+async def test_legacy_closed_trade_attribution_conservative_on_accumulation_installs(
+    _migration_database,
+) -> None:
+    """With activations present, only closures predating accumulation are attributed."""
+    await model.AccumulationActivation.create(symbol="BTC/USDC", account_scope="test")
+    await model.SchemaMigration.create(
+        version="2026-10-17-009-accumulation-foundation",
+        phase="schema",
+        description="Add accumulation identities and exact inventory totals.",
+        checksum="f" * 64,
+        compatibility=EXPAND_ONLY_COMPATIBILITY,
+        status=MIGRATION_STATUS_APPLIED,
+        applied_at=datetime(2026, 10, 18, tzinfo=timezone.utc),
+    )
+    old = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2026-10-17 00:00:00+00:00"
+    )
+    new = await model.ClosedTrades.create(
+        symbol="ETH/USDC", deal_id="deal-1", close_date="2026-11-01 00:00:00+00:00"
+    )
+    undated = await model.ClosedTrades.create(symbol="SOL/USDC")
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._attribute_legacy_closed_trade_modes()
+    await old.refresh_from_db()
+    await new.refresh_from_db()
+    await undated.refresh_from_db()
+    assert old.lifecycle_mode == "classic_dca"
+    assert new.lifecycle_mode is None
+    assert undated.lifecycle_mode is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_closed_trade_attribution_when_accumulation_tables_absent(
+    _migration_database,
+) -> None:
+    """A pre-accumulation install (no activation table) attributes every NULL closure."""
+    legacy = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2023-08-20 12:00:00+00:00"
+    )
+    connection = Tortoise.get_connection("default")
+    await connection.execute_query("DROP TABLE accumulation_activations")
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._attribute_legacy_closed_trade_modes()
+    await legacy.refresh_from_db()
+    assert legacy.lifecycle_mode == "classic_dca"
+
+
+@pytest.mark.asyncio
+async def test_backfill_init_steps_apply_legacy_attribution(
+    _migration_database,
+) -> None:
+    """The attribution step runs through the startup data-migration runner."""
+    await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2025-01-01 00:00:00+00:00"
+    )
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._run_backfill_init_steps()
+    row = await model.SchemaMigration.get(
+        version="2026-11-04-022-legacy-closed-trade-attribution"
+    )
+    assert row.status == MIGRATION_STATUS_APPLIED
+    trade = await model.ClosedTrades.first()
+    assert trade is not None
+    assert trade.lifecycle_mode == "classic_dca"
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -365,9 +470,12 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             ).fetchall()
         }
 
-    assert len(ledger_rows) == 20
+    assert len(ledger_rows) == 21
     assert ("2026-11-01-021-campaign-column-drop", "applied") in ledger_rows
     assert ("2026-10-28-020-manual-stop-valuation", "applied") in ledger_rows
+    assert "2026-11-04-022-legacy-closed-trade-attribution" in {
+        version for version, _ in ledger_rows
+    }
     assert "2026-10-27-019-accumulation-contributions" in {
         version for version, _ in ledger_rows
     }

@@ -547,6 +547,11 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "_drop_legacy_campaign_columns",
         _record("drop_legacy_campaign_columns"),
     )
+    monkeypatch.setattr(
+        Database,
+        "_attribute_legacy_closed_trade_modes",
+        _record("attribute_legacy_closed_trade_modes"),
+    )
     await database.init()
 
     assert calls == [
@@ -577,6 +582,7 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "drop_legacy_campaign_columns",
         "repair_index_only_corruption_if_needed",
         "backfill_trade_ledger_rows",
+        "attribute_legacy_closed_trade_modes",
     ]
 
 

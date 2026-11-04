@@ -22,6 +22,7 @@ from service.msv import (
 from service.replay_candles import archive_replay_candles_for_deal
 from service.schema_migrations import (
     CONTRACT_DROP_COMPATIBILITY,
+    MIGRATION_STATUS_APPLIED,
     MigrationDefinition,
     bootstrap_sqlite_migration_ledger,
     run_schema_migrations,
@@ -65,6 +66,12 @@ _LEGACY_CAMPAIGN_REBUILDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("tradeexecutions", ("campaign_id",)),
     ("placement_intents", ("campaign_id",)),
 )
+
+# The first migration that made accumulation trading possible on a database.
+# A closure older than this row's ledger timestamp cannot be an accumulation
+# trade, because the activation that an accumulation trade requires could not
+# have existed yet.
+FIRST_ACCUMULATION_MIGRATION_VERSION = "2026-10-17-009-accumulation-foundation"
 
 
 def _is_sqlite_lock_error(exc: Exception) -> bool:
@@ -745,6 +752,66 @@ class Database:
                 close_date=closed_row.get("close_date"),
                 allow_missing_archive_exchange_repair=True,
                 allow_live_snapshot_exchange_repair=True,
+            )
+
+    async def _attribute_legacy_closed_trade_modes(self) -> None:
+        """Attribute legacy closures whose lifecycle mode is provable.
+
+        The mode-aware statistics view scopes closed trades by lifecycle_mode
+        and leaves NULL rows unclassified, which hides pre-feature DCA history
+        from the DCA view. A closure predating the first accumulation
+        migration on this database cannot be an accumulation trade, and
+        activations persist across closes, so a database without activations
+        has never run accumulation. The lifecycle enum has exactly two
+        values, so a provably non-accumulation closure is classic DCA. The
+        update only fills NULL values, so the step is idempotent.
+        """
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, activation_columns = await connection.execute_query(
+            "PRAGMA table_info(accumulation_activations)"
+        )
+        if activation_columns:
+            _, activation_rows = await connection.execute_query(
+                "SELECT COUNT(*) AS n FROM accumulation_activations"
+            )
+            if activation_rows[0]["n"] > 0:
+                # An accumulation install: only closures that predate
+                # accumulation on this database are provable.
+                _, era_rows = await connection.execute_query(
+                    "SELECT applied_at FROM schema_migrations "
+                    "WHERE version = ? AND status = ?",
+                    [
+                        FIRST_ACCUMULATION_MIGRATION_VERSION,
+                        MIGRATION_STATUS_APPLIED,
+                    ],
+                )
+                if not era_rows:
+                    return
+                updated, _ = await connection.execute_query(
+                    "UPDATE closedtrades AS closed SET lifecycle_mode = 'classic_dca' "
+                    "WHERE closed.lifecycle_mode IS NULL "
+                    "AND datetime(closed.close_date) IS NOT NULL "
+                    "AND datetime(closed.close_date) < datetime(?)",
+                    [era_rows[0]["applied_at"]],
+                )
+                if updated:
+                    logging.info(
+                        "Attributed %s pre-accumulation closed trade(s) to classic DCA.",
+                        updated,
+                    )
+                return
+        # The accumulation tables never existed, or no activation was ever
+        # created: no closure here can be an accumulation trade.
+        updated, _ = await connection.execute_query(
+            "UPDATE closedtrades SET lifecycle_mode = 'classic_dca' "
+            "WHERE lifecycle_mode IS NULL"
+        )
+        if updated:
+            logging.info(
+                "Attributed %s legacy closed trade(s) to classic DCA.",
+                updated,
             )
 
     async def _ensure_open_trades_columns(self) -> None:
@@ -1594,6 +1661,12 @@ class Database:
                     phase="data",
                     description="Backfill deal identity and execution-ledger rows.",
                     apply=self._backfill_trade_ledger_rows,
+                ),
+                MigrationDefinition(
+                    version="2026-11-04-022-legacy-closed-trade-attribution",
+                    phase="data",
+                    description="Attribute legacy closed trades whose lifecycle mode is provably classic DCA.",
+                    apply=self._attribute_legacy_closed_trade_modes,
                 ),
             )
         )
