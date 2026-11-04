@@ -6,10 +6,12 @@ import type { AccumulationCommand, AccumulationCommandResult, AccumulationDetail
 // page, so the panel uses it to tell a complete view apart from a fully
 // loaded multi-page one.
 export const ACTIVATION_PAGE_SIZE = 25
+// The strategies page size for the panel's strategy list fetch.
+export const STRATEGY_PAGE_SIZE = 50
 
 export async function fetchAccumulationStrategies(afterId = 0): Promise<AccumulationStrategyPage> {
   return (await axios.get<AccumulationStrategyPage>(buildMoonwalkerApiUrl('/accumulation/strategies'), {
-    params: { after_id: afterId, limit: 50 },
+    params: { after_id: afterId, limit: STRATEGY_PAGE_SIZE },
   })).data
 }
 
