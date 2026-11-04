@@ -90,6 +90,9 @@ Behavior:
 - Transport: polling over HTTP, not WebSocket
 - The UI polls for newer complete lines and can request older lines when you
   scroll to the top of the log panel.
+- Polling runs only while the panel is active and unpaused: it stops when you
+  pause the panel or navigate to another page, and resumes when the panel
+  becomes active again.
 
 Supported query parameters for `GET /monitoring/logs/{source}`:
 - `limit`: max lines to return per request, capped server-side

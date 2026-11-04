@@ -52,6 +52,10 @@ export const useUpnlDatastore = defineStore('upnl', () => {
 
   async function load_upnl_history_data(options: { force?: boolean } = {}): Promise<UpnlPoint[]> {
    if (!options.force && hasFreshCache()) {
+    // A fresh cache means the data was server-verified at `loadedAt`
+    // (inside the TTL), so it may be shown again without a new fetch —
+    // even after a deactivation invalidated the pending state.
+    historyVerified.value = true
     return data.value
    }
    if (options.force && pendingForcedLoad) return pendingForcedLoad

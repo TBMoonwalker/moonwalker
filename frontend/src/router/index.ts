@@ -76,7 +76,10 @@ export function createAppRouter(
         }
         const snapshotStore = useSharedConfigSnapshot()
         try {
-            await snapshotStore.ensureLoaded(false)
+            // Load the full config once; afterwards every navigation only
+            // runs the lightweight freshness check and refetches when a
+            // newer snapshot is detected (no /config/all per menu click).
+            await snapshotStore.ensureFresh()
         } catch {
             return resolveControlCenterNavigation(to, {
                 loadError: snapshotStore.loadError.value,
