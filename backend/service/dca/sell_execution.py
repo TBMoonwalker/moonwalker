@@ -85,7 +85,11 @@ class DcaSellManager(ExchangeSellManager):
                 )
 
             fallback_min_price = safe_float(order.get("fallback_min_price"))
-            if fallback_min_price and fallback_min_price > 0:
+            if (
+                fallback_min_price
+                and fallback_min_price > 0
+                and not bool(config.get("tp_floor_live_price_fallback", False))
+            ):
                 self._logger.info(
                     "Keeping the remaining %s position open after the limit sell "
                     "fallback because a market order cannot guarantee the minimum "
