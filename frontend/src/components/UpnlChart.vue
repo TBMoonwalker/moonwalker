@@ -216,9 +216,23 @@ onMounted(async () => {
   }
 })
 
+// Format the current time as a UTC timeline point (the same shape as the
+// server's timestamps) so the bucket comparison reuses one code path.
+function utcPointNow(): string {
+  const now = new Date(Date.now())
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`
+}
+
 async function refreshAfterReturn() {
   try {
-    await upnlStore.load_upnl_history_data({ force: true })
+    // A return within the store's 5-minute TTL repaints from the cached
+    // timeline; force a fresh fetch only when a 15-minute bucket boundary
+    // was crossed while the chart was away, because the cache predates that
+    // bucket's history (TTL expiry alone never triggers a fetch).
+    const last = data.value[data.value.length - 1]
+    const crossedBucket = !!last && toMinuteBucket(last.timestamp) !== toMinuteBucket(utcPointNow())
+    await upnlStore.load_upnl_history_data({ force: crossedBucket })
     if (latestRealtime && routeActive && !document.hidden) {
       pushRealtimePoint(latestRealtime.profitOverall, latestRealtime.fundsLocked, latestRealtime.timestamp)
     }

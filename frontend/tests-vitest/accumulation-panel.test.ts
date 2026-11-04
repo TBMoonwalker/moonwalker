@@ -980,6 +980,168 @@ it('refetches the accumulation page on in-window reactivation after the panel lo
   }
 })
 
+// Value: protects=a multi-page view (the loaded page has a further page)
+// refetches on in-window reactivation instead of skipping: the stream
+// snapshot only describes the first page, so later pages and removed rows
+// would otherwise stay stale until the window elapses;
+// fails_when=a regression skips the multi-page view and repeated short
+// round trips never repair the later pages;
+// why_new=the in-window skip tests only cover complete (single-page)
+// loads; seam=none; no_claim=real network timing (the API uses controlled
+// promises).
+it('refetches the accumulation page on in-window reactivation when the page has a further page', async () => {
+  api.fetchAccumulationPage.mockReset()
+  api.fetchAccumulationPage.mockResolvedValue({ activations: [{ symbol: 'BTC/USDC' }, { symbol: 'ETH/USDC' }], next_after: 'page-2' })
+  api.fetchAccumulationStrategies.mockReset()
+  api.fetchAccumulationStrategies.mockResolvedValue({ versions: [], next_after_id: null })
+  api.fetchAccumulationDetail.mockReset()
+  api.fetchAccumulationDetail.mockResolvedValue(snapshot())
+  live.ctl = null
+
+  let panel!: ReturnType<typeof useAccumulationPanel>
+  const now = Date.now()
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now)
+  const Host = defineComponent({ setup() { panel = useAccumulationPanel(); return () => null } })
+  const active = ref(true)
+  const Blank = defineComponent({ name: 'Blank', template: '<div class="blank" />' })
+  const wrapper = mount(
+    defineComponent({
+      setup() {
+        return () => h(KeepAlive, null, { default: () => (active.value ? h(Host) : h(Blank)) })
+      },
+    }),
+  )
+  try {
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(1)
+    expect(panel.next.value).toBe('page-2')
+
+    // A multi-page view cannot be skipped: the reactivation refetches.
+    active.value = false
+    await nextTick()
+    active.value = true
+    await nextTick()
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(2)
+  } finally {
+    nowSpy.mockRestore()
+    wrapper.unmount()
+  }
+})
+
+// Value: protects=a complete view (no further page) reconciles its rows
+// against the stream snapshot: a holding that disappeared while the panel
+// was away comes off the page and its selection is dropped, instead of
+// staying visible;
+// fails_when=a regression keeps merging the snapshot into the cached rows
+// and the removed row stays visible after the round trip;
+// why_new=the in-window skip tests assert the refetch/skip decision but
+// not the row merge against a shrunken page; seam=none; no_claim=real
+// network timing (the API and the stream use controlled promises).
+it('drops a row that disappeared while away when the loaded page is complete', async () => {
+  api.fetchAccumulationPage.mockReset()
+  api.fetchAccumulationPage.mockResolvedValue({ activations: [{ symbol: 'BTC/USDC' }], next_after: null })
+  api.fetchAccumulationStrategies.mockReset()
+  api.fetchAccumulationStrategies.mockResolvedValue({ versions: [], next_after_id: null })
+  api.fetchAccumulationDetail.mockReset()
+  api.fetchAccumulationDetail.mockResolvedValue(snapshot())
+  live.ctl = null
+
+  let panel!: ReturnType<typeof useAccumulationPanel>
+  const now = Date.now()
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now)
+  const Host = defineComponent({ setup() { panel = useAccumulationPanel(); return () => null } })
+  const active = ref(true)
+  const Blank = defineComponent({ name: 'Blank', template: '<div class="blank" />' })
+  const wrapper = mount(
+    defineComponent({
+      setup() {
+        return () => h(KeepAlive, null, { default: () => (active.value ? h(Host) : h(Blank)) })
+      },
+    }),
+  )
+  try {
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(1)
+    expect(panel.rows.value.map(row => row.symbol)).toEqual(['BTC/USDC'])
+
+    // The complete view is skipped on in-window reactivation; the stream
+    // reconnects instead of refetching.
+    active.value = false
+    await nextTick()
+    active.value = true
+    await nextTick()
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(1)
+    expect(live.ctl.open).toHaveBeenCalled()
+
+    // While away the holding disappeared: the snapshot carries the empty
+    // page and no detail for the (now gone) selection.
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [], next_after: null, portfolio: null }, detail: null }) })
+    await flushPromises()
+    expect(panel.rows.value).toEqual([])
+    expect(panel.selected.value).toBeNull()
+  } finally {
+    nowSpy.mockRestore()
+    wrapper.unmount()
+  }
+})
+
+// Value: protects=when the stream reconnect after a skipped reactivation
+// cannot deliver a snapshot (blocked or failed WebSocket), the panel falls
+// back to the HTTP refetch instead of staying stale until the 30-second
+// window elapses;
+// fails_when=a regression drops the fallback timer and the panel stays
+// disabled (actions off) for the whole window even though HTTP works;
+// why_new=the in-window skip tests assume the snapshot arrives or cover
+// the no-skip path; seam=none; no_claim=real timer scheduling (the
+// fallback is a real 3-second setTimeout; the API uses controlled
+// promises).
+it('falls back to the HTTP refetch when the stream reconnect delivers no snapshot', async () => {
+  api.fetchAccumulationPage.mockReset()
+  api.fetchAccumulationPage.mockResolvedValue({ activations: [{ symbol: 'BTC/USDC' }], next_after: null })
+  api.fetchAccumulationStrategies.mockReset()
+  api.fetchAccumulationStrategies.mockResolvedValue({ versions: [], next_after_id: null })
+  api.fetchAccumulationDetail.mockReset()
+  api.fetchAccumulationDetail.mockResolvedValue(snapshot())
+  live.ctl = null
+
+  let panel!: ReturnType<typeof useAccumulationPanel>
+  const now = Date.now()
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now)
+  const Host = defineComponent({ setup() { panel = useAccumulationPanel(); return () => null } })
+  const active = ref(true)
+  const Blank = defineComponent({ name: 'Blank', template: '<div class="blank" />' })
+  const wrapper = mount(
+    defineComponent({
+      setup() {
+        return () => h(KeepAlive, null, { default: () => (active.value ? h(Host) : h(Blank)) })
+      },
+    }),
+  )
+  try {
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(1)
+
+    // The in-window round trip skips the refetch and only reconnects the
+    // (faked, snapshotless) stream.
+    active.value = false
+    await nextTick()
+    active.value = true
+    await nextTick()
+    await flushPromises()
+    expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(1)
+    expect(live.ctl.open).toHaveBeenCalledTimes(2)
+
+    // No snapshot arrives; after the reconnect fallback elapses the panel
+    // refetches over HTTP.
+    await vi.waitFor(() => expect(api.fetchAccumulationPage).toHaveBeenCalledTimes(2), { timeout: 6000, interval: 100 })
+  } finally {
+    nowSpy.mockRestore()
+    wrapper.unmount()
+  }
+})
+
 // Value: protects=reactivation inside the 30-second window still starts a
 // new page load when the previous request was interrupted by deactivation
 // (an aborted load must not start the skip window);

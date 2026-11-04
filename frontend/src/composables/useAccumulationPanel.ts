@@ -15,6 +15,9 @@ const session = () => window.sessionStorage
 // Reactivations within this window reuse the last loaded page instead of
 // refetching on every menu round trip.
 const RESUME_SKIP_WINDOW_MS = 30_000
+// If a stream reconnect after a skipped reactivation has not delivered a
+// snapshot by then, fall back to the HTTP refetch.
+const STREAM_RECONNECT_FALLBACK_MS = 3000
 const unresolvedRequest = ref<AccumulationCommand | null>(null)
 
 function restoreRequest(): AccumulationCommand | null {
@@ -80,6 +83,7 @@ export function useAccumulationPanel(symbol?: string) {
   let lifecycle = 0
   let reloadAfterPage = false
   let lastPageLoadAt = 0
+  let streamFallbackTimer: number | undefined
   const streamUrl = ref<string>()
   const streamAvailable = ref(true)
   const stream = useWebSocket(streamUrl, {
@@ -101,11 +105,29 @@ export function useAccumulationPanel(symbol?: string) {
         if (!Array.isArray(snapshot.page?.activations) ||
             (snapshot.detail !== null && (!snapshot.detail || typeof snapshot.detail.symbol !== 'string' ||
               !Number.isSafeInteger(snapshot.detail.revision) || !Array.isArray(snapshot.detail.operations)))) throw new Error('Invalid snapshot')
-        if (selected.value && snapshot.detail?.symbol !== selected.value) return
-        ++sequence
-        loading.value = false
         const incoming = snapshot.page.activations as AccumulationStatus[]
-        rows.value = [...incoming, ...rows.value.filter(row => !incoming.some(item => item.symbol === row.symbol))]
+        if (selected.value && snapshot.detail?.symbol !== selected.value) {
+          // A complete view that no longer lists the selection saw it
+          // disappear while the panel was away: drop the selection so the
+          // page below can reconcile. A multi-page view, or a page that
+          // still lists the selection, keeps the previous behavior.
+          if (next.value === null && !incoming.some(row => row.symbol === selected.value)) {
+            selected.value = null
+            detail.value = null
+          } else {
+            return
+          }
+        }
+        ++sequence
+        clearStreamFallback()
+        loading.value = false
+        // A complete view is fully described by the snapshot, so replace it
+        // (rows that disappeared while the panel was away come off the
+        // page); a multi-page view keeps its later pages, which the page-1
+        // snapshot cannot describe.
+        rows.value = next.value === null
+          ? [...incoming]
+          : [...incoming, ...rows.value.filter(row => !incoming.some(item => item.symbol === row.symbol))]
         if (rows.value.length <= incoming.length) next.value = snapshot.page.next_after
         const bindSelection = !selected.value && !!snapshot.detail?.symbol
         if (!selected.value) selected.value = snapshot.detail?.symbol ?? null
@@ -118,6 +140,13 @@ export function useAccumulationPanel(symbol?: string) {
       }
     },
   })
+
+  function clearStreamFallback() {
+    if (streamFallbackTimer !== undefined) {
+      window.clearTimeout(streamFallbackTimer)
+      streamFallbackTimer = undefined
+    }
+  }
 
   function connectStream() {
     if (!streamAvailable.value || disposed || !routeActive || document.hidden || !navigator.onLine || !available.value) return
@@ -221,6 +250,7 @@ export function useAccumulationPanel(symbol?: string) {
       // Stamp only on success: a failed or aborted load must not start the
       // skip window, or a route round trip would swallow the retry.
       lastPageLoadAt = Date.now()
+      clearStreamFallback()
     } catch (cause) {
       if (disposed || currentLifecycle !== lifecycle) return
       available.value = false
@@ -370,6 +400,7 @@ export function useAccumulationPanel(symbol?: string) {
     pageLoading = false
     reloadAfterPage = false
     stream.close()
+    clearStreamFallback()
   }
 
   function resume(options: { skipIfFresh?: boolean } = {}) {
@@ -381,12 +412,26 @@ export function useAccumulationPanel(symbol?: string) {
     // restore freshness, so the reactivation refetches instead of leaving
     // the panel stale (a detail 503 or an 'unavailable' stream message can
     // set available=false after the page load stamped the window).
+    // A multi-page view never skips: the stream snapshot only describes the
+    // first page, so later pages and removed rows would stay stale until
+    // the window elapses; the reactivation refetches instead.
     if (options.skipIfFresh && lastPageLoadAt > 0 &&
         streamAvailable.value &&
         available.value &&
+        next.value === null &&
         Date.now() - lastPageLoadAt < RESUME_SKIP_WINDOW_MS) {
       // Deactivation closed the stream; bring it back without refetching.
       connectStream()
+      // A blocked or slow WebSocket cannot restore freshness on its own: if
+      // the reconnect does not deliver a snapshot shortly, fall back to the
+      // HTTP refetch the pre-diff reactivation always performed.
+      clearStreamFallback()
+      streamFallbackTimer = window.setTimeout(() => {
+        streamFallbackTimer = undefined
+        if (!disposed && routeActive && !document.hidden && navigator.onLine && !fresh.value && available.value) {
+          void loadPage()
+        }
+      }, STREAM_RECONNECT_FALLBACK_MS)
       return
     }
     void loadPage()
