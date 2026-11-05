@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,7 @@ import model
 import pytest
 import pytest_asyncio
 from model import SchemaMigration, UnsellableTrades
-from service.database import Database
+from service.database import Database, _is_provably_pre_era
 from service.schema_migrations import (
     EXPAND_ONLY_COMPATIBILITY,
     MIGRATION_STATUS_APPLIED,
@@ -91,6 +92,324 @@ async def test_closed_trade_mode_backfill_requires_matching_deal_evidence(
     assert wrong_symbol.lifecycle_mode is None
     assert unknown.lifecycle_mode is None
     assert explicit.lifecycle_mode == "classic_dca"
+
+
+@pytest.mark.asyncio
+async def test_legacy_closed_trade_attribution_when_accumulation_never_ran(
+    _migration_database,
+) -> None:
+    """Closures on an install without activations are provably classic DCA."""
+    legacy = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2024-05-02 09:00:00+00:00"
+    )
+    recent = await model.ClosedTrades.create(
+        symbol="ETH/USDC", deal_id="deal-1", close_date="2026-11-01 09:00:00+00:00"
+    )
+    accumulation = await model.ClosedTrades.create(
+        symbol="SOL/USDC", deal_id="deal-2", lifecycle_mode="accumulation"
+    )
+    dca = await model.ClosedTrades.create(
+        symbol="XRP/USDC", deal_id="deal-3", lifecycle_mode="classic_dca"
+    )
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._attribute_legacy_closed_trade_modes()
+    await database._attribute_legacy_closed_trade_modes()
+    await legacy.refresh_from_db()
+    await recent.refresh_from_db()
+    await accumulation.refresh_from_db()
+    await dca.refresh_from_db()
+    assert legacy.lifecycle_mode == "classic_dca"
+    assert recent.lifecycle_mode == "classic_dca"
+    assert accumulation.lifecycle_mode == "accumulation"
+    assert dca.lifecycle_mode == "classic_dca"
+
+
+@pytest.mark.asyncio
+async def test_legacy_closed_trade_attribution_conservative_on_accumulation_installs(
+    _migration_database,
+) -> None:
+    """With activations present, only closures predating accumulation are attributed."""
+    await model.AccumulationActivation.create(symbol="BTC/USDC", account_scope="test")
+    await model.SchemaMigration.create(
+        version="2026-10-17-009-accumulation-foundation",
+        phase="schema",
+        description="Add accumulation identities and exact inventory totals.",
+        checksum="f" * 64,
+        compatibility=EXPAND_ONLY_COMPATIBILITY,
+        status=MIGRATION_STATUS_APPLIED,
+        applied_at=datetime(2026, 10, 18, tzinfo=timezone.utc),
+    )
+    old = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2026-10-17 00:00:00+00:00"
+    )
+    new = await model.ClosedTrades.create(
+        symbol="ETH/USDC", deal_id="deal-1", close_date="2026-11-01 00:00:00+00:00"
+    )
+    undated = await model.ClosedTrades.create(symbol="SOL/USDC")
+    pre_epoch = await model.ClosedTrades.create(
+        symbol="BTC/USDC",
+        close_date=str(int(datetime(2026, 10, 1, tzinfo=timezone.utc).timestamp())),
+    )
+    pre_epoch_millis = await model.ClosedTrades.create(
+        symbol="ETH/USDC",
+        close_date=str(
+            int(datetime(2026, 10, 1, tzinfo=timezone.utc).timestamp() * 1000)
+        ),
+    )
+    post_epoch = await model.ClosedTrades.create(
+        symbol="SOL/USDC",
+        close_date=str(int(datetime(2026, 11, 1, tzinfo=timezone.utc).timestamp())),
+    )
+    # Value: protects=evidence-predicate hardening of 022 era gating:
+    # ambiguous digit strings and malformed garbage never crash the
+    # migration nor write a mode; fails_when=a parse failure escapes the
+    # candidate loop (startup blocked on every retry) or a compact-ISO
+    # digit string is attributed from its 1970-epoch misparse;
+    # why_new=the epoch rows above prove the accepted formats, not the
+    # rejection of ambiguous or malformed shapes; seam=none;
+    # no_claim=does not exercise the never-ran branch.
+    compact_iso = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="20261101"
+    )
+    malformed = await model.ClosedTrades.create(symbol="ETH/USDC", close_date="9" * 309)
+
+    era_bound = datetime(2026, 10, 18, tzinfo=timezone.utc)
+    # The parser-failure guard behind the length gate: values the parser
+    # itself cannot convert are unparseable, never a raise.
+    assert _is_provably_pre_era("2026-10-17 00:00:00+00:00", era_bound)
+    assert not _is_provably_pre_era(10**400, era_bound)
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._attribute_legacy_closed_trade_modes()
+    await old.refresh_from_db()
+    await new.refresh_from_db()
+    await undated.refresh_from_db()
+    await pre_epoch.refresh_from_db()
+    await pre_epoch_millis.refresh_from_db()
+    await post_epoch.refresh_from_db()
+    await compact_iso.refresh_from_db()
+    await malformed.refresh_from_db()
+    assert old.lifecycle_mode == "classic_dca"
+    assert new.lifecycle_mode is None
+    assert undated.lifecycle_mode is None
+    # Numeric close_date formats (epoch seconds and millis) parse through the
+    # app's mixed-format parser, so pre-era closures in those shapes are
+    # attributed too; post-era ones stay unattributed.
+    assert pre_epoch.lifecycle_mode == "classic_dca"
+    assert pre_epoch_millis.lifecycle_mode == "classic_dca"
+    assert post_epoch.lifecycle_mode is None
+    # Ambiguous digit strings (a compact YYYYMMDD value parses as a 1970
+    # epoch) and malformed garbage are never era evidence: both rows stay
+    # unattributed, and the malformed row must not abort the migration.
+    assert compact_iso.lifecycle_mode is None
+    assert malformed.lifecycle_mode is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_closed_trade_attribution_when_accumulation_tables_absent(
+    _migration_database,
+) -> None:
+    """A pre-accumulation install (no activation table) attributes every NULL closure."""
+    legacy = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2023-08-20 12:00:00+00:00"
+    )
+    connection = Tortoise.get_connection("default")
+    await connection.execute_query("DROP TABLE accumulation_activations")
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._attribute_legacy_closed_trade_modes()
+    await legacy.refresh_from_db()
+    assert legacy.lifecycle_mode == "classic_dca"
+
+
+@pytest.mark.asyncio
+async def test_backfill_init_steps_apply_legacy_attribution(
+    _migration_database,
+) -> None:
+    """The attribution step runs through the startup data-migration runner."""
+    await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2025-01-01 00:00:00+00:00"
+    )
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._run_backfill_init_steps()
+    row = await model.SchemaMigration.get(
+        version="2026-11-04-022-legacy-closed-trade-attribution"
+    )
+    assert row.status == MIGRATION_STATUS_APPLIED
+    trade = await model.ClosedTrades.first()
+    assert trade is not None
+    assert trade.lifecycle_mode == "classic_dca"
+
+
+# Generated by the ship-workflow test coverage audit (generation pass 1).
+@pytest.mark.asyncio
+async def test_legacy_closed_trade_attribution_skips_without_applied_era_row(
+    _migration_database,
+) -> None:
+    """Value: protects=conservative no-op of 022 attribution when activations
+    exist but no applied 009 ledger row proves the accumulation era;
+    fails_when=attribution runs without era evidence and closures with unknown
+    accumulation start are written as classic_dca; why_new=the conservative
+    test supplies the era row and the never-ran test bypasses the era lookup,
+    so this fallback branch is unexercised; seam=none;
+    no_claim=does not assert ledger bookkeeping beyond the era query result."""
+    await model.AccumulationActivation.create(symbol="BTC/USDC", account_scope="test")
+    old = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2020-01-01 00:00:00+00:00"
+    )
+    undated = await model.ClosedTrades.create(symbol="SOL/USDC")
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._attribute_legacy_closed_trade_modes()
+    await old.refresh_from_db()
+    await undated.refresh_from_db()
+    assert old.lifecycle_mode is None
+    assert undated.lifecycle_mode is None
+
+    # A failed era row is not applied evidence either.
+    await model.SchemaMigration.create(
+        version="2026-10-17-009-accumulation-foundation",
+        phase="schema",
+        description="Add accumulation identities and exact inventory totals.",
+        checksum="f" * 64,
+        compatibility=EXPAND_ONLY_COMPATIBILITY,
+        status=MIGRATION_STATUS_FAILED,
+    )
+    await database._attribute_legacy_closed_trade_modes()
+    await old.refresh_from_db()
+    await undated.refresh_from_db()
+    assert old.lifecycle_mode is None
+    assert undated.lifecycle_mode is None
+
+
+# Generated by the ship-workflow test coverage audit (generation pass 1).
+@pytest.mark.asyncio
+async def test_legacy_closed_trade_attribution_is_sqlite_only(
+    _migration_database,
+) -> None:
+    """Value: protects=SQLite-only guard of the 022 attribution (a non-SQLite
+    backend must never receive this step's PRAGMA/UPDATE SQL at startup);
+    fails_when=the guard is dropped and a non-SQLite install crashes on
+    SQLite-specific SQL or is mutated by it; why_new=every other attribution
+    test runs on a sqlite:// URL; seam=none;
+    no_claim=does not open a real non-SQLite connection."""
+    legacy = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2024-05-02 09:00:00+00:00"
+    )
+
+    database = Database()
+    database.db_url = "postgres://moonwalker"
+    await database._attribute_legacy_closed_trade_modes()
+    await legacy.refresh_from_db()
+    assert legacy.lifecycle_mode is None
+
+
+# Generated by the ship-workflow test coverage audit (generation pass 2).
+@pytest.mark.asyncio
+async def test_legacy_closed_trade_attribution_skips_with_unparseable_era_bound(
+    _migration_database,
+) -> None:
+    """Value: protects=022 era-gate no-op when the applied 009 ledger row's
+    applied_at does not parse (garbage or NULL); no closure is attributed from
+    an unprovable accumulation era; fails_when=the era_bound None guard is
+    dropped and startup crashes, or a permissive fallback writes classic_dca
+    without era proof; why_new=the skips test covers absent
+    and failed era rows, the conservative test a parseable bound, leaving the
+    unparseable-bound early return unexercised; seam=none; no_claim=fabricates
+    a corrupted ledger row the ORM runner never writes; asserts no
+    bookkeeping."""
+    await model.AccumulationActivation.create(symbol="BTC/USDC", account_scope="test")
+    old = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="2026-10-01 00:00:00+00:00"
+    )
+    undated = await model.ClosedTrades.create(symbol="SOL/USDC")
+
+    connection = Tortoise.get_connection("default")
+    await connection.execute_query(
+        "INSERT INTO schema_migrations "
+        "(version, phase, description, checksum, compatibility, status, applied_at) "
+        "VALUES (?, 'schema', 'corrupted era row', ?, ?, 'applied', ?)",
+        [
+            "2026-10-17-009-accumulation-foundation",
+            "f" * 64,
+            EXPAND_ONLY_COMPATIBILITY,
+            "not-a-timestamp",
+        ],
+    )
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._attribute_legacy_closed_trade_modes()
+    await old.refresh_from_db()
+    await undated.refresh_from_db()
+    assert old.lifecycle_mode is None
+    assert undated.lifecycle_mode is None
+
+    # A NULL applied_at is equally unprovable era evidence.
+    await connection.execute_query(
+        "UPDATE schema_migrations SET applied_at = NULL "
+        "WHERE version = '2026-10-17-009-accumulation-foundation'"
+    )
+    await database._attribute_legacy_closed_trade_modes()
+    await old.refresh_from_db()
+    assert old.lifecycle_mode is None
+
+
+# Generated by the ship-workflow test coverage audit (generation pass 2).
+@pytest.mark.asyncio
+async def test_legacy_closed_trade_attribution_spans_update_chunks(
+    _migration_database,
+) -> None:
+    """Value: protects=022 chunked UPDATE boundary: every provably pre-era NULL
+    closure is attributed even past one 500-id chunk, and a rerun changes
+    nothing; fails_when=the chunk loop strides faster than its chunk width or a
+    slice drops tail rows, leaving late closures NULL forever, or a rerun
+    mutates attributed rows; why_new=no existing test exceeds 500 candidates,
+    so the multi-chunk loop and its idempotent rerun on the accumulation
+    install branch are unexercised; seam=none; no_claim=does not assert the
+    logged update count or the UPDATE rowcount."""
+    await model.AccumulationActivation.create(symbol="BTC/USDC", account_scope="test")
+    await model.SchemaMigration.create(
+        version="2026-10-17-009-accumulation-foundation",
+        phase="schema",
+        description="Add accumulation identities and exact inventory totals.",
+        checksum="f" * 64,
+        compatibility=EXPAND_ONLY_COMPATIBILITY,
+        status=MIGRATION_STATUS_APPLIED,
+        applied_at=datetime(2026, 10, 18, tzinfo=timezone.utc),
+    )
+    # 510 pre-era closures force the UPDATE across the 500-id chunk boundary;
+    # 10 post-era closures must survive the same pass unattributed.
+    pre_era = [
+        model.ClosedTrades(symbol="BTC/USDC", close_date="2026-10-01T00:00:00+00:00")
+        for _ in range(510)
+    ]
+    post_era = [
+        model.ClosedTrades(symbol="ETH/USDC", close_date="2026-11-01T00:00:00+00:00")
+        for _ in range(10)
+    ]
+    await model.ClosedTrades.bulk_create(pre_era + post_era)
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._attribute_legacy_closed_trade_modes()
+    await database._attribute_legacy_closed_trade_modes()
+
+    connection = Tortoise.get_connection("default")
+    _, counts = await connection.execute_query(
+        "SELECT lifecycle_mode AS mode, COUNT(*) AS n "
+        "FROM closedtrades GROUP BY lifecycle_mode"
+    )
+    assert {(row["mode"], row["n"]) for row in counts} == {
+        ("classic_dca", 510),
+        (None, 10),
+    }
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -285,8 +604,8 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             "WHERE symbol = 'BTC/USDC'"
         ).fetchall()
         legacy_closed_trade = connection.execute(
-            "SELECT symbol, profit, amount, cost, close_date, deal_id, close_reason "
-            "FROM closedtrades WHERE symbol = 'ETH/USDC'"
+            "SELECT symbol, profit, amount, cost, close_date, deal_id, close_reason, "
+            "lifecycle_mode FROM closedtrades WHERE symbol = 'ETH/USDC'"
         ).fetchone()
         ai_columns = {
             row[1]
@@ -365,9 +684,12 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             ).fetchall()
         }
 
-    assert len(ledger_rows) == 20
+    assert len(ledger_rows) == 21
     assert ("2026-11-01-021-campaign-column-drop", "applied") in ledger_rows
     assert ("2026-10-28-020-manual-stop-valuation", "applied") in ledger_rows
+    assert "2026-11-04-022-legacy-closed-trade-attribution" in {
+        version for version, _ in ledger_rows
+    }
     assert "2026-10-27-019-accumulation-contributions" in {
         version for version, _ in ledger_rows
     }
@@ -384,6 +706,14 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
     assert open_trade[4] == 1
     assert trade == ("BTC/USDC", "legacy-buy-1", open_trade[3])
     assert executions == [("BTC/USDC", "legacy-buy-1", "base_order")]
+    # Extended by the ship-workflow test coverage audit (generation pass 2).
+    # Value: protects=e2e data outcome of 022 on a real 4.9 database: after the
+    # full startup pipeline the legacy closure is attributed to classic_dca;
+    # fails_when=022 is unwired from the data-phase runner, ordered where it
+    # never runs, or the no-activation branch misbehaves and the closure stays
+    # NULL; why_new=the fixture test asserted ledger
+    # bookkeeping only, and the unit tests call the step directly on fresh
+    # schemas; seam=none; no_claim=does not assert the other closed-trade rows.
     assert legacy_closed_trade == (
         "ETH/USDC",
         4.0,
@@ -392,6 +722,7 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
         "2024-05-02 09:00:00+00:00",
         "legacy-deal-eth-usdc",
         "take_profit",
+        "classic_dca",
     )
     assert "evaluation_id" in ai_columns
     assert "funds_locked" in upnl_columns

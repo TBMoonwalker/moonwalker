@@ -8,6 +8,7 @@ import sqlite3
 from asyncio import sleep
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ from service.msv import (
 from service.replay_candles import archive_replay_candles_for_deal
 from service.schema_migrations import (
     CONTRACT_DROP_COMPATIBILITY,
+    MIGRATION_STATUS_APPLIED,
     MigrationDefinition,
     bootstrap_sqlite_migration_ledger,
     run_schema_migrations,
@@ -66,6 +68,12 @@ _LEGACY_CAMPAIGN_REBUILDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("placement_intents", ("campaign_id",)),
 )
 
+# The first migration that made accumulation trading possible on a database.
+# A closure older than this row's ledger timestamp cannot be an accumulation
+# trade, because the activation that an accumulation trade requires could not
+# have existed yet.
+FIRST_ACCUMULATION_MIGRATION_VERSION = "2026-10-17-009-accumulation-foundation"
+
 
 def _is_sqlite_lock_error(exc: Exception) -> bool:
     """Return True if exception indicates SQLite lock contention."""
@@ -80,6 +88,35 @@ def _is_sqlite_malformed_error(exc: Exception) -> bool:
     if not isinstance(exc, sqlite3.DatabaseError):
         return False
     return "database disk image is malformed" in str(exc).lower()
+
+
+# Digit-string lengths that unambiguously name epoch timestamps for a
+# crypto-era database: 10 digits are epoch seconds, 13 digits are epoch
+# millis. Other digit lengths are ambiguous (a compact YYYYMMDD date such
+# as "20261101" parses as a 1970 epoch), so they never count as
+# attribution evidence.
+_UNAMBIGUOUS_EPOCH_DIGIT_LENGTHS = (10, 13)
+
+
+def _is_provably_pre_era(close_date: Any, era_bound: datetime) -> bool:
+    """Return True when a closure date parses and strictly predates era_bound.
+
+    Uses the application's mixed-format parser (ISO strings, epoch
+    seconds/millis, digit strings) so era gating matches every date shape
+    the app writes to closedtrades.close_date. Digit strings of an
+    ambiguous length are never used as evidence, and parser failures (for
+    example overflow on absurdly long digit strings) mark the date
+    unparseable: the row stays unattributed instead of failing startup.
+    """
+    if isinstance(close_date, str):
+        digits = close_date.strip()
+        if digits.isdigit() and len(digits) not in _UNAMBIGUOUS_EPOCH_DIGIT_LENGTHS:
+            return False
+    try:
+        close = helper.parse_datetime(close_date)
+    except (OverflowError, ValueError, OSError):
+        return False
+    return close is not None and close < era_bound
 
 
 def _resolve_sqlite_db_path(db_url: str) -> str:
@@ -745,6 +782,87 @@ class Database:
                 close_date=closed_row.get("close_date"),
                 allow_missing_archive_exchange_repair=True,
                 allow_live_snapshot_exchange_repair=True,
+            )
+
+    async def _attribute_legacy_closed_trade_modes(self) -> None:
+        """Attribute legacy closures whose lifecycle mode is provable.
+
+        The mode-aware statistics view scopes closed trades by lifecycle_mode
+        and leaves NULL rows unclassified, which hides pre-feature DCA history
+        from the DCA view. A closure predating the first accumulation
+        migration on this database cannot be an accumulation trade, and
+        activations persist across closes, so a database without activations
+        has never run accumulation. The lifecycle enum has exactly two
+        values, so a provably non-accumulation closure is classic DCA. Era
+        gating parses close dates with the application's mixed-format
+        parser; unparseable dates stay unattributed. The update only fills
+        NULL values, so the step is idempotent.
+        """
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, activation_columns = await connection.execute_query(
+            "PRAGMA table_info(accumulation_activations)"
+        )
+        if activation_columns:
+            _, activation_rows = await connection.execute_query(
+                "SELECT COUNT(*) AS n FROM accumulation_activations"
+            )
+            if activation_rows[0]["n"] > 0:
+                # An accumulation install: only closures that predate
+                # accumulation on this database are provable.
+                _, era_rows = await connection.execute_query(
+                    "SELECT applied_at FROM schema_migrations "
+                    "WHERE version = ? AND status = ?",
+                    [
+                        FIRST_ACCUMULATION_MIGRATION_VERSION,
+                        MIGRATION_STATUS_APPLIED,
+                    ],
+                )
+                if not era_rows:
+                    return
+                era_bound = helper.parse_datetime(era_rows[0]["applied_at"])
+                if era_bound is None:
+                    return
+                # close_date carries the app's mixed date formats (ISO,
+                # epoch seconds/millis, digit strings), so candidate dates
+                # are parsed with the same helper the rest of the codebase
+                # uses; unparseable dates stay unattributed.
+                _, candidates = await connection.execute_query(
+                    "SELECT id, close_date FROM closedtrades "
+                    "WHERE lifecycle_mode IS NULL"
+                )
+                provable_ids = [
+                    row["id"]
+                    for row in candidates
+                    if _is_provably_pre_era(row["close_date"], era_bound)
+                ]
+                updated = 0
+                for start in range(0, len(provable_ids), 500):
+                    chunk = provable_ids[start : start + 500]
+                    placeholders = ", ".join("?" * len(chunk))
+                    done, _ = await connection.execute_query(
+                        "UPDATE closedtrades SET lifecycle_mode = 'classic_dca' "
+                        f"WHERE id IN ({placeholders}) AND lifecycle_mode IS NULL",
+                        chunk,
+                    )
+                    updated += done
+                if updated:
+                    logging.info(
+                        "Attributed %s pre-accumulation closed trade(s) to classic DCA.",
+                        updated,
+                    )
+                return
+        # The accumulation tables never existed, or no activation was ever
+        # created: no closure here can be an accumulation trade.
+        updated, _ = await connection.execute_query(
+            "UPDATE closedtrades SET lifecycle_mode = 'classic_dca' "
+            "WHERE lifecycle_mode IS NULL"
+        )
+        if updated:
+            logging.info(
+                "Attributed %s legacy closed trade(s) to classic DCA.",
+                updated,
             )
 
     async def _ensure_open_trades_columns(self) -> None:
@@ -1594,6 +1712,12 @@ class Database:
                     phase="data",
                     description="Backfill deal identity and execution-ledger rows.",
                     apply=self._backfill_trade_ledger_rows,
+                ),
+                MigrationDefinition(
+                    version="2026-11-04-022-legacy-closed-trade-attribution",
+                    phase="data",
+                    description="Attribute legacy closed trades whose lifecycle mode is provably classic DCA.",
+                    apply=self._attribute_legacy_closed_trade_modes,
                 ),
             )
         )
