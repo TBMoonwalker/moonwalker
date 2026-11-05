@@ -2,6 +2,12 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [6.2.0.0] - 2026-11-05
+
+### Fixed
+
+- The Dynamic DCA statistics view now shows your full closed-trade history again. Closures from before the trading-lifecycle feature were left unclassified and disappeared from the DCA view and its totals. On the next startup the bot now marks each closure whose classic DCA mode is provable (it closed before accumulation existed on that database, or the database never ran accumulation) as classic DCA, and leaves unprovable closures unclassified rather than guessing.
+
 ## [6.1.0.0] - 2026-11-04
 
 ### Added
