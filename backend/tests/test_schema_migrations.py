@@ -13,7 +13,7 @@ import model
 import pytest
 import pytest_asyncio
 from model import SchemaMigration, UnsellableTrades
-from service.database import Database
+from service.database import Database, _is_provably_pre_era
 from service.schema_migrations import (
     EXPAND_ONLY_COMPATIBILITY,
     MIGRATION_STATUS_APPLIED,
@@ -162,6 +162,24 @@ async def test_legacy_closed_trade_attribution_conservative_on_accumulation_inst
         symbol="SOL/USDC",
         close_date=str(int(datetime(2026, 11, 1, tzinfo=timezone.utc).timestamp())),
     )
+    # Value: protects=evidence-predicate hardening of 022 era gating:
+    # ambiguous digit strings and malformed garbage never crash the
+    # migration nor write a mode; fails_when=a parse failure escapes the
+    # candidate loop (startup blocked on every retry) or a compact-ISO
+    # digit string is attributed from its 1970-epoch misparse;
+    # why_new=the epoch rows above prove the accepted formats, not the
+    # rejection of ambiguous or malformed shapes; seam=none;
+    # no_claim=does not exercise the never-ran branch.
+    compact_iso = await model.ClosedTrades.create(
+        symbol="BTC/USDC", close_date="20261101"
+    )
+    malformed = await model.ClosedTrades.create(symbol="ETH/USDC", close_date="9" * 309)
+
+    era_bound = datetime(2026, 10, 18, tzinfo=timezone.utc)
+    # The parser-failure guard behind the length gate: values the parser
+    # itself cannot convert are unparseable, never a raise.
+    assert _is_provably_pre_era("2026-10-17 00:00:00+00:00", era_bound)
+    assert not _is_provably_pre_era(10**400, era_bound)
 
     database = Database()
     database.db_url = f"sqlite://{_migration_database}"
@@ -172,6 +190,8 @@ async def test_legacy_closed_trade_attribution_conservative_on_accumulation_inst
     await pre_epoch.refresh_from_db()
     await pre_epoch_millis.refresh_from_db()
     await post_epoch.refresh_from_db()
+    await compact_iso.refresh_from_db()
+    await malformed.refresh_from_db()
     assert old.lifecycle_mode == "classic_dca"
     assert new.lifecycle_mode is None
     assert undated.lifecycle_mode is None
@@ -181,6 +201,11 @@ async def test_legacy_closed_trade_attribution_conservative_on_accumulation_inst
     assert pre_epoch.lifecycle_mode == "classic_dca"
     assert pre_epoch_millis.lifecycle_mode == "classic_dca"
     assert post_epoch.lifecycle_mode is None
+    # Ambiguous digit strings (a compact YYYYMMDD value parses as a 1970
+    # epoch) and malformed garbage are never era evidence: both rows stay
+    # unattributed, and the malformed row must not abort the migration.
+    assert compact_iso.lifecycle_mode is None
+    assert malformed.lifecycle_mode is None
 
 
 @pytest.mark.asyncio

@@ -90,14 +90,32 @@ def _is_sqlite_malformed_error(exc: Exception) -> bool:
     return "database disk image is malformed" in str(exc).lower()
 
 
+# Digit-string lengths that unambiguously name epoch timestamps for a
+# crypto-era database: 10 digits are epoch seconds, 13 digits are epoch
+# millis. Other digit lengths are ambiguous (a compact YYYYMMDD date such
+# as "20261101" parses as a 1970 epoch), so they never count as
+# attribution evidence.
+_UNAMBIGUOUS_EPOCH_DIGIT_LENGTHS = (10, 13)
+
+
 def _is_provably_pre_era(close_date: Any, era_bound: datetime) -> bool:
     """Return True when a closure date parses and strictly predates era_bound.
 
     Uses the application's mixed-format parser (ISO strings, epoch
     seconds/millis, digit strings) so era gating matches every date shape
-    the app writes to closedtrades.close_date.
+    the app writes to closedtrades.close_date. Digit strings of an
+    ambiguous length are never used as evidence, and parser failures (for
+    example overflow on absurdly long digit strings) mark the date
+    unparseable: the row stays unattributed instead of failing startup.
     """
-    close = helper.parse_datetime(close_date)
+    if isinstance(close_date, str):
+        digits = close_date.strip()
+        if digits.isdigit() and len(digits) not in _UNAMBIGUOUS_EPOCH_DIGIT_LENGTHS:
+            return False
+    try:
+        close = helper.parse_datetime(close_date)
+    except (OverflowError, ValueError, OSError):
+        return False
     return close is not None and close < era_bound
 
 
