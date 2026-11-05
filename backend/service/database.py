@@ -8,6 +8,7 @@ import sqlite3
 from asyncio import sleep
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -87,6 +88,17 @@ def _is_sqlite_malformed_error(exc: Exception) -> bool:
     if not isinstance(exc, sqlite3.DatabaseError):
         return False
     return "database disk image is malformed" in str(exc).lower()
+
+
+def _is_provably_pre_era(close_date: Any, era_bound: datetime) -> bool:
+    """Return True when a closure date parses and strictly predates era_bound.
+
+    Uses the application's mixed-format parser (ISO strings, epoch
+    seconds/millis, digit strings) so era gating matches every date shape
+    the app writes to closedtrades.close_date.
+    """
+    close = helper.parse_datetime(close_date)
+    return close is not None and close < era_bound
 
 
 def _resolve_sqlite_db_path(db_url: str) -> str:
@@ -763,8 +775,10 @@ class Database:
         migration on this database cannot be an accumulation trade, and
         activations persist across closes, so a database without activations
         has never run accumulation. The lifecycle enum has exactly two
-        values, so a provably non-accumulation closure is classic DCA. The
-        update only fills NULL values, so the step is idempotent.
+        values, so a provably non-accumulation closure is classic DCA. Era
+        gating parses close dates with the application's mixed-format
+        parser; unparseable dates stay unattributed. The update only fills
+        NULL values, so the step is idempotent.
         """
         if not self.db_url.startswith("sqlite://"):
             return
@@ -789,13 +803,32 @@ class Database:
                 )
                 if not era_rows:
                     return
-                updated, _ = await connection.execute_query(
-                    "UPDATE closedtrades AS closed SET lifecycle_mode = 'classic_dca' "
-                    "WHERE closed.lifecycle_mode IS NULL "
-                    "AND datetime(closed.close_date) IS NOT NULL "
-                    "AND datetime(closed.close_date) < datetime(?)",
-                    [era_rows[0]["applied_at"]],
+                era_bound = helper.parse_datetime(era_rows[0]["applied_at"])
+                if era_bound is None:
+                    return
+                # close_date carries the app's mixed date formats (ISO,
+                # epoch seconds/millis, digit strings), so candidate dates
+                # are parsed with the same helper the rest of the codebase
+                # uses; unparseable dates stay unattributed.
+                _, candidates = await connection.execute_query(
+                    "SELECT id, close_date FROM closedtrades "
+                    "WHERE lifecycle_mode IS NULL"
                 )
+                provable_ids = [
+                    row["id"]
+                    for row in candidates
+                    if _is_provably_pre_era(row["close_date"], era_bound)
+                ]
+                updated = 0
+                for start in range(0, len(provable_ids), 500):
+                    chunk = provable_ids[start : start + 500]
+                    placeholders = ", ".join("?" * len(chunk))
+                    done, _ = await connection.execute_query(
+                        "UPDATE closedtrades SET lifecycle_mode = 'classic_dca' "
+                        f"WHERE id IN ({placeholders}) AND lifecycle_mode IS NULL",
+                        chunk,
+                    )
+                    updated += done
                 if updated:
                     logging.info(
                         "Attributed %s pre-accumulation closed trade(s) to classic DCA.",
