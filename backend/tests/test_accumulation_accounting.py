@@ -535,9 +535,13 @@ async def test_two_dashboards_cannot_rebind_the_same_revision_twice(accounting_d
     ).account_scope == "rotated-account-scope"
 
 
-async def _persist(order, operation_id="buy-1"):
+async def _persist(order, operation_id="buy-1", config=None):
     return await persist_accumulation_order(
-        operation_id, order, account_scope="account-1", exchange_name="binance"
+        operation_id,
+        order,
+        account_scope="account-1",
+        exchange_name="binance",
+        config=config if config is not None else {"exchange": "binance"},
     )
 
 
@@ -1462,7 +1466,11 @@ async def test_invalid_evidence_or_ownership_never_changes_inventory(
         report = _order(side="sell", filled="5", cost="50")
     with pytest.raises(AccumulationStateError):
         await persist_accumulation_order(
-            placement.operation_id, report, account_scope=scope, exchange_name="binance"
+            placement.operation_id,
+            report,
+            account_scope=scope,
+            exchange_name="binance",
+            config={"exchange": "binance"},
         )
     assert (
         await model.OpenTrades.get(symbol="BTC/USDC")

@@ -113,3 +113,24 @@ async def test_runtime_services_attempt_every_close_after_failure(
         await services.shutdown()
 
     assert closed == ["data", "statistics_exchange", "orders"]
+
+
+def test_proxy_monkeypatch_undo_restores_class_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Patch through the proxy; pytest 9.2.0 undoes with delattr on the proxy.
+
+    The proxy forwards writes to the underlying service, so undo() must delete
+    the shadowed instance attribute there and restore the class method without
+    raising. Regression guard for the pytest 9.1.1 -> 9.2.0 toolchain bump:
+    9.2.0 records NOTSET for forwarded setattr targets and undoes them via
+    delattr, which the proxy must forward (RuntimeServiceProxy.__delattr__).
+    """
+    reset_runtime_services_for_testing()
+    services = get_runtime_services()
+    proxy = RuntimeServiceProxy("orders")
+    original = type(services.orders).close
+
+    monkeypatch.setattr(proxy, "close", lambda: None)
+    assert proxy.close is not original
+    # Fixture teardown after this body must restore the class method.

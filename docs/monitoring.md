@@ -5,6 +5,10 @@ Moonwalker monitoring sends Telegram messages for executed trades:
 - `trade.buy`
 - `trade.sell`
 
+Both classic DCA trade finalization and accumulation fill settlement emit these
+events through the shared `MonitoringService`; there is one send path for both
+trading modes.
+
 The implementation uses [Telethon](https://docs.telethon.dev/en/stable/).
 
 ## Configuration Keys

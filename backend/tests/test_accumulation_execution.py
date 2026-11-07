@@ -720,6 +720,7 @@ async def test_fee_incomplete_partial_fill_retains_commitment(env):
         {**client.response, "fees": [{"currency": "USDC", "cost": "0.1"}]},
         account_scope=accumulation_account_scope(config),
         exchange_name="binance",
+        config=config,
     )
     assert Decimal(
         (await model.OpenTrades.all().first()).accumulation_remaining_cost
@@ -4913,6 +4914,7 @@ async def test_accumulation_order_logs_report_real_effects_without_duplicate_fil
             json.loads(intent.result_json),
             account_scope=accumulation_account_scope(config),
             exchange_name="binance",
+            config=config,
         )
     before = len([item for item in caplog.records if item.name == "orders"])
     await executor.execute(operation)

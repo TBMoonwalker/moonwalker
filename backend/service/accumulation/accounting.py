@@ -30,6 +30,7 @@ from service.accumulation.ownership_evidence import (
 )
 from service.accumulation.return_totals import record_return_delta
 from service.accumulation.strategy import SUPPORTED_TIMEFRAMES
+from service.accumulation.trade_notifications import notify_accumulation_trade
 from service.database import run_sqlite_write_with_retry
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.placement_intents import deserialize_placement_payload
@@ -132,17 +133,20 @@ async def persist_accumulation_order(
     *,
     account_scope: str,
     exchange_name: str,
+    config: dict[str, Any],
     repair_operation_id: str | None = None,
 ) -> AccumulationAccountingResult:
     """Apply cumulative exchange evidence exactly once under the symbol lock.
 
     Late fills are accounted even while paused, closing or expired. Settlement
     requires explicit terminal status and complete fee evidence. Unknown outcomes
-    have no synthetic report and leave the existing commitment untouched.
+    have no synthetic report and leave the existing commitment untouched. A fill
+    that newly settles is announced through the shared monitoring service after
+    the write commits; a failed send never affects the committed accounting.
     """
     report = AccumulationFill.from_order(order)
 
-    async def persist() -> tuple[AccumulationAccountingResult, bool]:
+    async def persist() -> tuple[AccumulationAccountingResult, bool, bool]:
         async with in_transaction() as conn:
             placement = await model.PlacementIntent.get_or_none(
                 operation_id=operation_id
@@ -169,6 +173,7 @@ async def persist_accumulation_order(
                 if repair.status == "applied":
                     return (
                         AccumulationAccountingResult(operation_id, True, False, None),
+                        False,
                         False,
                     )
                 if (
@@ -234,6 +239,9 @@ async def persist_accumulation_order(
             ).using_db(conn)
             if checkpoint and checkpoint.activation_id != activation.id:
                 raise AccumulationStateError("Checkpoint ownership is inconsistent.")
+            checkpoint_settled = bool(
+                checkpoint and checkpoint.terminal and checkpoint.fees_complete
+            )
             if checkpoint and (
                 Decimal(checkpoint.filled) == Decimal(report.filled)
                 and Decimal(checkpoint.quote_cost) == Decimal(report.quote_cost)
@@ -254,6 +262,7 @@ async def persist_accumulation_order(
                         if checkpoint.inventory_json
                         else None,
                     ),
+                    False,
                     False,
                 )
             if repair is None and placement.state not in {
@@ -522,12 +531,13 @@ async def persist_accumulation_order(
                     json.loads(inventory.serialize()) if holding else None,
                 ),
                 True,
+                settled and not checkpoint_settled,
             )
 
     async with lifecycle_mutation_coordinator.mutation(report.symbol) as admitted:
         if not admitted:
             raise AccumulationStateError("Accounting is paused during maintenance.")
-        result, accounting_changed = await run_sqlite_write_with_retry(
+        result, accounting_changed, newly_settled = await run_sqlite_write_with_retry(
             persist, "persisting accumulation fill"
         )
     if accounting_changed:
@@ -540,6 +550,8 @@ async def persist_accumulation_order(
             quote_cost=report.quote_cost,
         )
     accumulation_input_notifications.publish()
+    if newly_settled:
+        await notify_accumulation_trade(report, config)
     return result
 
 

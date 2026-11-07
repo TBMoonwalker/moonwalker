@@ -169,6 +169,12 @@ class RuntimeServiceProxy(Generic[ServiceT]):
             return
         setattr(self._resolve(), name, value)
 
+    def __delattr__(self, name: str) -> None:
+        if name == "_service_name":
+            object.__delattr__(self, name)
+            return
+        delattr(self._resolve(), name)
+
 
 @overload
 def runtime_service_proxy(service_name: Literal["orders"]) -> Orders: ...

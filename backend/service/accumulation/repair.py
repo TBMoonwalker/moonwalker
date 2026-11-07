@@ -220,6 +220,7 @@ class AccumulationOrderRepair:
             lookup_order,
             account_scope=scope,
             exchange_name=config["exchange"].lower(),
+            config=config,
             repair_operation_id=operation_id,
         )
         await row.refresh_from_db()

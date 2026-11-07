@@ -374,6 +374,7 @@ async def test_partial_fill_counts_cost_once_and_reflected_hold_once(portfolio_d
         },
         account_scope="account",
         exchange_name="binance",
+        config=CONFIG,
     )
     assert await usable(evidence_before_fill) is None
     assert (await load_pending_capital())[row.operation_id] == 100

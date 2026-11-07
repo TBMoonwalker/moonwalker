@@ -320,6 +320,7 @@ class AccumulationBuyExecutor:
                 evidence,
                 account_scope=inputs.funding.account_scope,
                 exchange_name=inputs.funding.exchange_name,
+                config=config,
             )
         except AccumulationStateError:
             logging.warning(
