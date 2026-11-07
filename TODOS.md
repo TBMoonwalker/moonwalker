@@ -2,20 +2,36 @@
 
 ## Next up
 
-### Prepare request bodies and OHLCV helpers for future major upgrades
+### Upgrade to Litestar 3.x and pandas 4.x after release
 
-**Status:** Litestar 2.25.0 and pandas 3.1.0 expose deprecation warnings during
-CI on 2026-10-23. All 1,855 backend tests pass on these versions.
+**Status:** Recorded 2026-11-07 as the follow-up of the completed "Prepare
+request bodies and OHLCV helpers for future major upgrades" entry. Neither
+major is released yet (litestar 2.25.0 and pandas 3.1.1 are current as of
+2026-11-07); start each only once upstream releases it.
 
-Before upgrading Litestar to 3.x, replace unmarked `data` request parameters
-with explicit body markers such as `JSONBody[...]` in backtest, configuration
-and strategy controllers. Preserve strict payload validation and verify the
-existing malformed/unknown-field regression tests.
+**What:** Upgrade the two held major-version Python dependencies in dedicated,
+separately tested changesets:
+- `litestar` 2.25.0 -> 3.x (implicit reserved-kwarg body inference is removed
+  in 3.0; the prep wave already marks all ten body parameters with
+  `JSONBody[...]`, so the bump is expected to be validation of the markers
+  plus full-suite re-verification under the new major).
+- `pandas` 3.1.1 -> 4.x (PDEP-8 `inplace` keyword removal; the prep wave
+  already replaces all seven `inplace=True` calls in
+  `backend/service/data_ohlcv.py` with explicit reassignments).
 
-Before upgrading pandas to 4.x, replace deprecated `inplace=True` DataFrame
-operations in `backend/service/data_ohlcv.py` with explicit assignments. Verify
-candle timestamps, resampling, duplicate removal and history serialization.
-Do not suppress the warnings or bundle either major upgrade into a lock refresh.
+**Why:** The prep wave is complete, but the upgrades themselves must not ride
+along: each is a major with its own compatibility review, and neither appears
+in `pip list --outdated` until it releases, so this entry is their backlog
+home.
+
+**Constraints:** No bundling into a lock refresh — each upgrade ships as its
+own changeset with the full backend CI green. The no-warning guard tests
+(app-creation Litestar guard, `Pandas4Warning` helper guard) must stay green;
+if pandas 4.0 renames or splits `Pandas4Warning`, update the guard's category
+match within the same changeset.
+
+**Depends on:** Upstream releases of litestar 3.x and pandas 4.x. The prep
+entry's plan of record carries the re-verification checklist.
 
 **Priority:** P2
 
@@ -232,6 +248,45 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Prepare request bodies and OHLCV helpers for future major upgrades
+
+**Status:** Completed 2026-11-07. Litestar 2.25.0 and pandas 3.1.x no longer
+expose the deprecation warnings this entry named: all ten unmarked `data`
+body parameters are `JSONBody[...]`-marked and all seven `inplace=True` calls
+in `backend/service/data_ohlcv.py` are explicit reassignments. No warnings
+were suppressed (no CI filter changes) and no dependency versions changed;
+the future majors are tracked by the "Upgrade to Litestar 3.x and pandas 4.x
+after release" entry in Next up.
+
+**What shipped:**
+- `JSONBody[...]` on all ten unmarked `data` parameters:
+  `backend/controller/backtest.py` (run_backtest),
+  `backend/controller/config.py` (activate_live_trading, pause_trading,
+  resume_trading, deny_symbol, restore_backup), `backend/controller/
+  strategies.py` (duplicate/create/validate/save). Strict payload validation
+  preserved: the msgspec.Struct DTOs keep `forbid_unknown_fields`, the dict
+  handlers keep app-level validation, and the existing malformed/unknown-field
+  regression tests pass unmodified.
+- Explicit reassignment at all seven deprecated call sites in
+  `backend/service/data_ohlcv.py` (`rows_to_dataframe`,
+  `serialize_ohlcv_dataframe`, `resample_ohlcv_data`); candle timestamps,
+  resampling, duplicate removal and history serialization verified by the
+  existing suite plus new regression tests.
+- New regression guards: an app-creation test asserting no Litestar
+  "Reserved kwarg" deprecation for the three controllers; a helper test
+  asserting no `pandas.errors.Pandas4Warning` (matched by category); a
+  duplicate-removal first-wins test; a partial-candle sanitization test (a
+  lost `rows_to_dataframe` dropna corrupts resampled bucket values that no
+  other test catches — probe-verified 2026-11-07); HTTP-boundary TestClient
+  cases for the changed dict handlers (malformed JSON / non-object body ->
+  400, path+body binding on PUT /strategies/{slug}).
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/fixed-todos-eng-review-20261107-105742.md`
+
+**Effort:** M
+
+**Priority:** P2
 
 ### Periodic price re-evaluation for open trades
 

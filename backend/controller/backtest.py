@@ -6,6 +6,7 @@ from typing import Any
 import helper
 from controller.responses import json_response
 from litestar.handlers import post
+from litestar.params import JSONBody
 from service.accumulation.backtest import run_accumulation_backtest
 from service.accumulation.contracts import AccumulationStateError
 from service.accumulation.state import AccumulationConflictError
@@ -16,7 +17,7 @@ logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller")
 
 
 @post("/backtest/run")
-async def run_backtest(data: dict[str, Any]) -> Any:
+async def run_backtest(data: JSONBody[dict[str, Any]]) -> Any:
     """Run a backtest with the given parameters."""
     return await _run_backtest(data)
 

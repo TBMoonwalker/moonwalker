@@ -1,14 +1,17 @@
 import json
+import warnings
 from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
 import service.data as data_module
 from dateutil import tz
+from pandas.errors import Pandas4Warning
 from service.data import Data
 from service.data_ohlcv import (
     build_live_candle_payload,
     resample_ohlcv_data,
+    rows_to_dataframe,
     serialize_ohlcv_dataframe,
 )
 
@@ -299,3 +302,91 @@ def test_candle_serialization_preserves_timezone_instants(
     assert [row["time"] for row in records] == [
         datetime(*parts, tzinfo=UTC).timestamp() for parts in utc_times
     ]
+
+
+def test_ohlcv_helpers_emit_no_pandas4_deprecations() -> None:
+    """The OHLCV helpers must not call pandas APIs removed in pandas 4.x."""
+    rows = [
+        {
+            "timestamp": 1_700_000_000_000,
+            "open": 1.0,
+            "high": 1.2,
+            "low": 0.8,
+            "close": 1.1,
+            "volume": 10.0,
+        },
+        {
+            "timestamp": 1_700_000_060_000,
+            "open": 2.0,
+            "high": 2.2,
+            "low": 1.8,
+            "close": 2.1,
+            "volume": 20.0,
+        },
+    ]
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        frame = rows_to_dataframe(rows)
+        resampled = resample_ohlcv_data(frame, "2m")
+        serialize_ohlcv_dataframe(resampled, offset=0)
+
+    deprecated = [
+        warning for warning in caught if issubclass(warning.category, Pandas4Warning)
+    ]
+    assert deprecated == []
+
+
+def test_serialize_ohlcv_dataframe_removes_duplicate_timestamps_first_wins() -> None:
+    """Rows sharing a timestamp must collapse to the first occurrence."""
+    timestamp = pd.to_datetime(1_700_000_000_000, unit="ms", utc=True)
+    frame = pd.DataFrame(
+        {
+            "timestamp": [timestamp, timestamp],
+            "open": [1.0, 9.0],
+            "high": [1.2, 9.2],
+            "low": [0.8, 9.4],
+            "close": [1.1, 9.1],
+            "volume": [10.0, 90.0],
+        }
+    )
+
+    records = json.loads(serialize_ohlcv_dataframe(frame, offset=0))
+
+    assert len(records) == 1
+    assert records[0]["time"] == pytest.approx(1_700_000_000.0)
+    assert records[0]["open"] == pytest.approx(1.0)
+    assert records[0]["high"] == pytest.approx(1.2)
+    assert records[0]["close"] == pytest.approx(1.1)
+
+
+def test_resample_ohlcv_data_drops_partial_candles_before_aggregation() -> None:
+    """Rows missing any field must not contaminate their resampled bucket."""
+    rows = [
+        {
+            "timestamp": 1_699_999_990_000,
+            "open": 1.0,
+            "high": 6.0,
+            "low": 0.8,
+            "close": 6.0,
+            "volume": 20.0,
+        },
+        {
+            "timestamp": 1_700_000_020_000,
+            "open": None,
+            "high": 9.0,
+            "low": 0.9,
+            "close": 9.0,
+            "volume": 50.0,
+        },
+    ]
+
+    frame = rows_to_dataframe(rows)
+    resampled = resample_ohlcv_data(frame, "1m")
+
+    assert resampled is not None
+    assert len(resampled.index) == 1
+    assert resampled["open"].iloc[0] == pytest.approx(1.0)
+    assert resampled["high"].iloc[0] == pytest.approx(6.0)
+    assert resampled["close"].iloc[0] == pytest.approx(6.0)
+    assert resampled["volume"].iloc[0] == pytest.approx(20.0)

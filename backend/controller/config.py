@@ -10,7 +10,7 @@ from controller.responses import json_response
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
 from litestar.handlers import get, post, put
-from litestar.params import FromPath, FromQuery
+from litestar.params import FromPath, FromQuery, JSONBody
 from model import AppConfig, OpenTrades
 from service.accumulation.config import accumulation_available, configuration_mode_guard
 from service.config import Config
@@ -662,7 +662,7 @@ def _expected_config_revision(request: Request[Any, Any, Any]) -> tuple[int, Any
 
 
 @post(path="/config/live/activate")
-async def activate_live_trading(data: ConfirmMutationRequest) -> Any:
+async def activate_live_trading(data: JSONBody[ConfirmMutationRequest]) -> Any:
     """Switch the instance from dry run to live mode after server-side checks."""
     confirm, error_response = _require_json_boolean(data.confirm, "confirm")
     if error_response is not None:
@@ -740,7 +740,7 @@ def _read_confirm_flag(data: ConfirmMutationRequest) -> tuple[bool | None, Any]:
 
 
 @post(path="/config/trading/pause")
-async def pause_trading(data: ConfirmMutationRequest) -> Any:
+async def pause_trading(data: JSONBody[ConfirmMutationRequest]) -> Any:
     """Pause Moonwalker for new exposure while existing exits continue."""
     _, error_response = _read_confirm_flag(data)
     if error_response is not None:
@@ -774,7 +774,7 @@ async def pause_trading(data: ConfirmMutationRequest) -> Any:
 
 
 @post(path="/config/trading/resume")
-async def resume_trading(data: ConfirmMutationRequest) -> Any:
+async def resume_trading(data: JSONBody[ConfirmMutationRequest]) -> Any:
     """Resume Moonwalker so new exposure is allowed again."""
     _, error_response = _read_confirm_flag(data)
     if error_response is not None:
@@ -814,7 +814,7 @@ class DenySymbolRequest(msgspec.Struct, forbid_unknown_fields=True):
 
 
 @post(path="/config/denylist/deny")
-async def deny_symbol(data: DenySymbolRequest) -> Any:
+async def deny_symbol(data: JSONBody[DenySymbolRequest]) -> Any:
     """Append a base token to the pair_denylist atomically.
 
     The existing open trades for the symbol continue to their natural end;
@@ -843,7 +843,7 @@ async def deny_symbol(data: DenySymbolRequest) -> Any:
 
 
 @post(path="/config/backup/restore")
-async def restore_backup(data: RestoreBackupRequest) -> Any:
+async def restore_backup(data: JSONBody[RestoreBackupRequest]) -> Any:
     """Restore config-only or full backup payloads."""
     backup_payload = data.backup
     _, error_response = _read_confirm_flag(ConfirmMutationRequest(confirm=data.confirm))

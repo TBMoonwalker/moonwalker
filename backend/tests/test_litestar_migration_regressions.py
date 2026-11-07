@@ -2,17 +2,21 @@
 
 import json
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 
 import pytest
+from controller import backtest as backtest_controller
 from controller import config as config_controller
 from controller import frontend as frontend_controller
 from controller import monitoring as monitoring_controller
 from controller import orders as orders_controller
 from controller import statistics as statistics_controller
+from controller import strategies as strategies_controller
 from controller import trades as trades_controller
 from litestar import Litestar
+from litestar.exceptions import LitestarDeprecationWarning
 from litestar.testing import TestClient
 from service.log_viewer import LogReadResult
 from service.order_mutation_result import (
@@ -1328,3 +1332,157 @@ def test_bulk_unsellable_resolution_requires_post(monkeypatch) -> None:
     assert response.status_code == 201
     assert response.json() == {"result": "deleted", "count": 3}
     assert captured_calls == ["delete_all"]
+
+
+def test_changed_controllers_emit_no_reserved_kwarg_deprecations() -> None:
+    """Marked body params must keep app creation free of reserved-kwarg warnings."""
+    handlers = (
+        backtest_controller.route_handlers
+        + config_controller.route_handlers
+        + strategies_controller.route_handlers
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        Litestar(route_handlers=handlers)
+
+    reserved = [
+        warning
+        for warning in caught
+        if issubclass(warning.category, LitestarDeprecationWarning)
+        and "Reserved kwarg" in str(warning.message)
+    ]
+    assert reserved == []
+
+
+def test_strategy_create_route_decodes_valid_body(monkeypatch) -> None:
+    """POST /strategies must decode a valid JSON object body."""
+    captured: list[dict[str, Any]] = []
+
+    async def _fake_create_blank_strategy(name: str) -> dict[str, Any]:
+        captured.append({"name": name})
+        return {"slug": f"custom-{name}", "version": 1}
+
+    monkeypatch.setattr(
+        strategies_controller, "create_blank_strategy", _fake_create_blank_strategy
+    )
+
+    app = Litestar(route_handlers=[strategies_controller.create_strategy_endpoint])
+    with TestClient(app=app) as client:
+        response = client.post("/strategies", json={"name": "demo"})
+
+    assert response.status_code == 201
+    assert response.json() == {"slug": "custom-demo", "version": 1}
+    assert captured == [{"name": "demo"}]
+
+
+def test_strategy_create_route_rejects_malformed_json() -> None:
+    """POST /strategies must reject malformed JSON with a validation 400."""
+    app = Litestar(route_handlers=[strategies_controller.create_strategy_endpoint])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/strategies",
+            content="{invalid",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert str(response.json()["detail"]).startswith("JSON is malformed")
+
+
+def test_strategy_create_route_rejects_non_object_body() -> None:
+    """POST /strategies must reject non-object JSON with a body validation 400."""
+    app = Litestar(route_handlers=[strategies_controller.create_strategy_endpoint])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/strategies",
+            content="[1, 2]",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Validation failed for POST /strategies"
+    assert response.json()["extra"] == [
+        {
+            "message": "Expected `object`, got `array`",
+            "key": "data",
+            "source": "body",
+        }
+    ]
+
+
+def test_strategy_validate_route_decodes_valid_body(monkeypatch) -> None:
+    """POST /strategies/validate must decode a valid IR body."""
+    captured: list[dict[str, Any]] = []
+
+    def _fake_validate_strategy_ir(ir: dict[str, Any]) -> dict[str, Any]:
+        captured.append(ir)
+        return {"valid": True}
+
+    monkeypatch.setattr(
+        strategies_controller, "validate_strategy_ir", _fake_validate_strategy_ir
+    )
+
+    app = Litestar(route_handlers=[strategies_controller.validate_strategy_endpoint])
+    with TestClient(app=app) as client:
+        response = client.post("/strategies/validate", json={"ir": {"nodes": []}})
+
+    assert response.status_code == 201
+    assert response.json() == {"valid": True}
+    assert captured == [{"nodes": []}]
+
+
+def test_strategy_validate_route_rejects_malformed_json() -> None:
+    """POST /strategies/validate must reject malformed JSON with a 400."""
+    app = Litestar(route_handlers=[strategies_controller.validate_strategy_endpoint])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/strategies/validate",
+            content="{invalid",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert str(response.json()["detail"]).startswith("JSON is malformed")
+
+
+def test_strategy_save_route_binds_path_and_body(monkeypatch) -> None:
+    """PUT /strategies/{slug} must bind the path slug together with the body."""
+    captured: list[tuple[str, dict[str, Any], int]] = []
+
+    async def _fake_promote_strategy_version(
+        slug: str, ir: dict[str, Any], base_lock_version: int
+    ) -> tuple[dict[str, Any], int]:
+        captured.append((slug, ir, base_lock_version))
+        return {"slug": slug, "version": 2}, 200
+
+    monkeypatch.setattr(
+        strategies_controller,
+        "promote_strategy_version",
+        _fake_promote_strategy_version,
+    )
+
+    app = Litestar(route_handlers=[strategies_controller.save_strategy])
+    with TestClient(app=app) as client:
+        response = client.put(
+            "/strategies/demo-strategy",
+            json={"ir": {"nodes": []}, "base_lock_version": 1},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"slug": "demo-strategy", "version": 2}
+    assert captured == [("demo-strategy", {"nodes": []}, 1)]
+
+
+def test_strategy_save_route_rejects_malformed_json() -> None:
+    """PUT /strategies/{slug} must reject malformed JSON with a 400."""
+    app = Litestar(route_handlers=[strategies_controller.save_strategy])
+    with TestClient(app=app) as client:
+        response = client.put(
+            "/strategies/demo-strategy",
+            content="{invalid",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert str(response.json()["detail"]).startswith("JSON is malformed")

@@ -4,7 +4,7 @@ from typing import Any
 
 from controller.responses import json_response
 from litestar.handlers import delete, get, post, put
-from litestar.params import FromPath
+from litestar.params import FromPath, JSONBody
 from service.strategy_builder import (
     create_blank_strategy,
     delete_custom_strategy,
@@ -37,7 +37,7 @@ async def get_strategy(slug: FromPath[str]) -> Any:
 
 
 @post(path="/strategies/duplicate")
-async def duplicate_strategy_endpoint(data: dict[str, Any]) -> Any:
+async def duplicate_strategy_endpoint(data: JSONBody[dict[str, Any]]) -> Any:
     """Duplicate an existing strategy into a custom editable copy."""
     source_slug = str(data.get("source_slug") or "").strip()
     if not source_slug:
@@ -49,7 +49,7 @@ async def duplicate_strategy_endpoint(data: dict[str, Any]) -> Any:
 
 
 @post(path="/strategies")
-async def create_strategy_endpoint(data: dict[str, Any]) -> Any:
+async def create_strategy_endpoint(data: JSONBody[dict[str, Any]]) -> Any:
     """Create a blank custom strategy."""
     name = str(data.get("name") or "").strip()
     if not name:
@@ -58,7 +58,7 @@ async def create_strategy_endpoint(data: dict[str, Any]) -> Any:
 
 
 @post(path="/strategies/validate")
-async def validate_strategy_endpoint(data: dict[str, Any]) -> Any:
+async def validate_strategy_endpoint(data: JSONBody[dict[str, Any]]) -> Any:
     """Validate a draft Moonwalker strategy IR."""
     ir = data.get("ir")
     if not isinstance(ir, dict):
@@ -67,7 +67,7 @@ async def validate_strategy_endpoint(data: dict[str, Any]) -> Any:
 
 
 @put(path="/strategies/{slug:str}")
-async def save_strategy(slug: FromPath[str], data: dict[str, Any]) -> Any:
+async def save_strategy(slug: FromPath[str], data: JSONBody[dict[str, Any]]) -> Any:
     """Promote a validated custom strategy draft to a new active version."""
     ir = data.get("ir")
     if not isinstance(ir, dict):
