@@ -471,3 +471,60 @@ If an active limit sell leaves a remainder below the exchange minimum order
 value, Moonwalker records that remainder as Unsellable instead of retrying the
 same TP exit. This also applies when the TP market-fallback price guard would
 otherwise keep the remainder open; no market order is sent below that guard.
+
+Non-TP engine exits (stop loss, trailing take profit, autopilot timeout) that
+time out or fail to place on the limit leg are additionally checked by the
+[Exit Price Guard](#exit-price-guard) right before the market fallback is sent.
+
+## Exit Price Guard
+
+Exit decisions are evaluated on the trigger price from the ticker stream,
+which can be stale when the stream has been silent. The exit price guard
+prevents a stale trigger from executing a losing market sell. It fetches one
+live exchange price (the best bid — the price an immediate market sell would
+realize) at two moments only, and compares it against the price bounds that
+keep the selected exit justified:
+
+- **Before an automatic market sell** (any sell reason, `sell_order_type` is
+  `market`). If the fresh bid still justifies the exit, the sell proceeds and
+  the fresh price replaces the trigger price in the sell payload and in the
+  displayed trade price. Otherwise the sell is aborted and the trade remains
+  open for the next ticker event.
+- **Before a market fallback after a limit sell timeout or placement failure**
+  (stop loss, trailing take profit, autopilot timeout). If the fresh bid no
+  longer justifies the exit, the fallback is skipped and the remaining
+  position stays open. TP exits keep the existing
+  [`tp_floor_live_price_fallback`](#limit-sell-timeout-and-fallback) behavior
+  unchanged, and manual operator sells are never gated.
+
+The per-reason bounds are computed by the engine at decision time:
+
+| Sell reason           | Fresh bid must satisfy                          |
+|-----------------------|-------------------------------------------------|
+| `take_profit`         | be at or above the TP price                      |
+| `trailing_take_profit`| be at or above the price where PnL equals `take_profit - trailing_tp` |
+| `autopilot_timeout`   | be at or above the price where PnL equals `-abs(stop_loss)` |
+| `stop_loss`           | be at or below the stop-loss price               |
+
+The guard is always on and has no configuration keys. When the price fetch
+fails or returns an unusable value, the guard fails closed: the market sell or
+fallback is skipped and the trade remains open.
+
+Known limitations:
+
+- On a silent stream with a real market move, the frozen stream view never
+  triggers a new exit (for example a stop loss that only the fresh price
+  would show). The guard prevents selling into the move but cannot discover
+  new breaches; stream reconnection by the watcher watchdog is the recovery
+  path.
+- Time-based exits (autopilot timeout) on a quiet or flat stream fire on the
+  next ticker event, not on a calendar schedule.
+- The guard verifies the bid at decision time; slippage after the order is
+  sent is not bounded by it.
+
+In `watcher_ohlcv` mode the same guard applies: an exit decision derived from
+a candle close is verified against the live bid before a market order is sent.
+
+Exchange API load stays event-correlated: zero calls in steady state, one
+`fetch_ticker` per automatic market sell and per non-TP limit-timeout market
+fallback (bounded by the standard ticker-fetch retry behavior).

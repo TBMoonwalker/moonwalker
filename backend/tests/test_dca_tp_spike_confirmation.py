@@ -93,11 +93,17 @@ async def test_tp_spike_confirmation_sells_after_duration_and_tick_filter(
     async def fake_update_statistic_data(_payload) -> None:
         return None
 
+    async def fake_get_bid_price_for_symbol(_symbol: str) -> str:
+        return "111.4"
+
     monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
     monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: clock["now"])
+    monkeypatch.setattr(
+        dca.exchange, "get_bid_price_for_symbol", fake_get_bid_price_for_symbol
+    )
 
     trades = _build_trades()
     await dca._Dca__calculate_tp(111.0, trades, _build_policy())
@@ -123,11 +129,17 @@ async def test_tp_spike_confirmation_restarts_after_fade_below_tp(monkeypatch) -
     async def fake_update_statistic_data(_payload) -> None:
         return None
 
+    async def fake_get_bid_price_for_symbol(_symbol: str) -> str:
+        return "111.3"
+
     monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
     monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: clock["now"])
+    monkeypatch.setattr(
+        dca.exchange, "get_bid_price_for_symbol", fake_get_bid_price_for_symbol
+    )
 
     trades = _build_trades()
     await dca._Dca__calculate_tp(111.0, trades, _build_policy())
@@ -154,11 +166,17 @@ async def test_tp_spike_confirmation_does_not_delay_stop_loss(monkeypatch) -> No
     async def fake_update_statistic_data(_payload) -> None:
         return None
 
+    async def fake_get_bid_price_for_symbol(_symbol: str) -> str:
+        return "94.0"
+
     monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
     monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: 100.0)
+    monkeypatch.setattr(
+        dca.exchange, "get_bid_price_for_symbol", fake_get_bid_price_for_symbol
+    )
 
     trades = _build_trades()
     trades["safetyorders_count"] = 0

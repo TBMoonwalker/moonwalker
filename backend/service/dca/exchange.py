@@ -9,8 +9,14 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 import ccxt.async_support as ccxt
+from service.dca.decision import (
+    EXIT_GUARD_MAX_PRICE_REASONS,
+    EXIT_GUARD_MIN_PRICE_REASONS,
+    evaluate_exit_price_guard,
+)
 from service.dca.limit_fills import DcaLimitSellManager
 from service.dca.limit_orders import DcaLimitOrderManager
+from service.dca.limit_sell import EXIT_TIMEOUT_FALLBACK_REASONS
 from service.dca.sell_execution import DcaSellManager
 from service.dca.sell_status import (
     build_partial_sell_status,
@@ -29,9 +35,11 @@ from service.exchange_contexts import (
     MarketSellExecutionContext,
     SellRoutingContext,
 )
+from service.exchange_helpers import safe_float
 from service.exchange_risk import build_buy_precheck_result, normalize_buy_buffer_pct
 from service.exchange_types import ExchangeOrderPayload, ParsedOrderStatus
 from tenacity import (
+    RetryError,
     TryAgain,
     retry,
     retry_if_exception_type,
@@ -423,6 +431,7 @@ class DcaExchange(Exchange):
                     create_market_fallback or self._create_spot_market_fallback
                 ),
                 can_fallback_to_market_sell=self._can_fallback_to_market_sell,
+                can_fallback_after_exit_timeout=self._can_fallback_after_exit_timeout,
             ),
         )
 
@@ -507,6 +516,73 @@ class DcaExchange(Exchange):
             )
             return False
 
+        return True
+
+    async def _can_fallback_after_exit_timeout(
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+        fallback_reason: str,
+    ) -> bool:
+        """Check whether a limit exit timeout still justifies market fallback.
+
+        Non-TP engine exits (stop loss, trailing take profit, autopilot
+        timeout) carry the engine's exit guard bounds on the order payload.
+        Verify the fresh bid against those bounds before a market fallback
+        can be sent. TP exits keep their existing floor behavior and any
+        other reason (for example manual sells) passes through unchanged.
+        """
+        if fallback_reason not in EXIT_TIMEOUT_FALLBACK_REASONS:
+            return True
+        sell_reason = str(order.get("sell_reason") or "")
+        guarded_reasons = EXIT_GUARD_MIN_PRICE_REASONS | EXIT_GUARD_MAX_PRICE_REASONS
+        if sell_reason == "take_profit" or sell_reason not in guarded_reasons:
+            return True
+        try:
+            raw_price = await self._get_price_for_symbol(
+                order["symbol"],
+                prefer_bid=True,
+            )
+        except (
+            ccxt.BaseError,
+            RetryError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            logging.warning(
+                "Skipping market fallback for %s: could not determine the "
+                "current price for the exit price guard (%s).",
+                order.get("symbol"),
+                exc,
+            )
+            return False
+        fresh_price = safe_float(raw_price)
+        if fresh_price is None or fresh_price <= 0:
+            logging.warning(
+                "Skipping market fallback for %s: the exit price guard "
+                "returned an unusable price %r.",
+                order.get("symbol"),
+                raw_price,
+            )
+            return False
+        justified, reason_code = evaluate_exit_price_guard(
+            sell_reason=sell_reason,
+            fresh_price=fresh_price,
+            min_price=safe_float(order.get("exit_guard_min_price")),
+            max_price=safe_float(order.get("exit_guard_max_price")),
+        )
+        if not justified:
+            logging.info(
+                "Skipping market fallback for %s: fresh bid %.10f no longer "
+                "justifies the %s exit (guard=%s fallback_reason=%s).",
+                order.get("symbol"),
+                fresh_price,
+                sell_reason,
+                reason_code,
+                fallback_reason,
+            )
+            return False
         return True
 
     async def _build_sell_order_status(

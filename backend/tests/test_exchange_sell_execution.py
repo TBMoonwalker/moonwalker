@@ -411,6 +411,296 @@ async def test_market_fallback_guard_uses_live_price_lookup(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_exit_timeout_guard_allows_fallback_when_fresh_price_holds(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+    price_calls: list[tuple[str, bool]] = []
+
+    async def fake_get_price_for_symbol(
+        symbol: str, *, prefer_bid: bool = False
+    ) -> str:
+        price_calls.append((symbol, prefer_bid))
+        return "94.0"
+
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price_for_symbol)
+
+    allowed = await exchange._can_fallback_after_exit_timeout(
+        {
+            "symbol": "YB/USDC",
+            "sell_reason": "stop_loss",
+            "exit_guard_max_price": 95.0,
+        },
+        {},
+        "limit_order_timeout",
+    )
+
+    assert allowed is True
+    assert price_calls == [("YB/USDC", True)]
+
+
+@pytest.mark.asyncio
+async def test_exit_timeout_guard_blocks_fallback_above_stop_loss_bound(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+
+    async def fake_get_price_for_symbol(
+        _symbol: str, *, prefer_bid: bool = False
+    ) -> str:
+        return "96.0"
+
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price_for_symbol)
+
+    allowed = await exchange._can_fallback_after_exit_timeout(
+        {
+            "symbol": "YB/USDC",
+            "sell_reason": "stop_loss",
+            "exit_guard_max_price": 95.0,
+        },
+        {},
+        "limit_order_partial_timeout",
+    )
+
+    assert allowed is False
+
+
+@pytest.mark.asyncio
+async def test_exit_timeout_guard_uses_min_bound_for_trailing_exits(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+    price = {"value": "109.5"}
+
+    async def fake_get_price_for_symbol(
+        _symbol: str, *, prefer_bid: bool = False
+    ) -> str:
+        return price["value"]
+
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price_for_symbol)
+
+    order = {
+        "symbol": "XPL/USDC",
+        "sell_reason": "trailing_take_profit",
+        "exit_guard_min_price": 109.0,
+    }
+
+    allowed = await exchange._can_fallback_after_exit_timeout(
+        order,
+        {},
+        "limit_order_placement_failed",
+    )
+    assert allowed is True
+
+    price["value"] = "108.0"
+    allowed = await exchange._can_fallback_after_exit_timeout(
+        order,
+        {},
+        "limit_order_timeout",
+    )
+    assert allowed is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sell_reason",
+    ["take_profit", "manual_sell", ""],
+)
+async def test_exit_timeout_guard_passes_through_non_guarded_reasons(
+    monkeypatch,
+    sell_reason: str,
+) -> None:
+    exchange = Exchange()
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        raise AssertionError("unguarded reasons must not fetch a price")
+
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price_for_symbol)
+
+    allowed = await exchange._can_fallback_after_exit_timeout(
+        {
+            "symbol": "YB/USDC",
+            "sell_reason": sell_reason,
+            "exit_guard_min_price": 110.0,
+        },
+        {},
+        "limit_order_timeout",
+    )
+
+    assert allowed is True
+
+
+@pytest.mark.asyncio
+async def test_exit_timeout_guard_passes_through_non_timeout_fallbacks(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        raise AssertionError("non-timeout fallbacks must not fetch a price")
+
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price_for_symbol)
+
+    allowed = await exchange._can_fallback_after_exit_timeout(
+        {
+            "symbol": "YB/USDC",
+            "sell_reason": "stop_loss",
+            "exit_guard_max_price": 95.0,
+        },
+        {},
+        "minimum_notional",
+    )
+
+    assert allowed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [True, False])
+async def test_exit_timeout_guard_fails_closed_on_unusable_price(
+    monkeypatch,
+    failure: bool,
+) -> None:
+    exchange = Exchange()
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        if failure:
+            raise RuntimeError("exchange ticker unavailable")
+        return ""
+
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price_for_symbol)
+
+    allowed = await exchange._can_fallback_after_exit_timeout(
+        {
+            "symbol": "YB/USDC",
+            "sell_reason": "stop_loss",
+            "exit_guard_max_price": 95.0,
+        },
+        {},
+        "limit_order_timeout",
+    )
+
+    assert allowed is False
+
+
+@pytest.mark.asyncio
+async def test_exit_timeout_guard_missing_bounds_fails_closed(monkeypatch) -> None:
+    exchange = Exchange()
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        return "94.0"
+
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price_for_symbol)
+
+    allowed = await exchange._can_fallback_after_exit_timeout(
+        {
+            "symbol": "YB/USDC",
+            "sell_reason": "stop_loss",
+        },
+        {},
+        "limit_order_timeout",
+    )
+
+    assert allowed is False
+
+
+@pytest.mark.asyncio
+async def test_create_spot_sell_skips_market_fallback_when_exit_guard_blocks(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+    calls = {"limit": 0, "market": 0}
+
+    async def fake_limit_sell(_order, _config) -> None:
+        calls["limit"] += 1
+        return {
+            "requires_market_fallback": True,
+            "limit_cancel_confirmed": True,
+            "fallback_reason": "limit_order_timeout",
+            "symbol": "YB/USDC",
+            "remaining_amount": 1.0,
+            "partial_filled_amount": 0.4,
+            "partial_avg_price": 0.095,
+        }
+
+    async def fake_market_sell(_order, _config) -> None:
+        calls["market"] += 1
+        return {"path": "market"}
+
+    async def fake_exit_timeout_guard(_order, _config, _fallback_reason) -> bool:
+        return False
+
+    monkeypatch.setattr(exchange, "create_spot_limit_sell", fake_limit_sell)
+    monkeypatch.setattr(exchange, "create_spot_market_sell", fake_market_sell)
+    monkeypatch.setattr(
+        exchange, "_can_fallback_after_exit_timeout", fake_exit_timeout_guard
+    )
+
+    result = await exchange.create_spot_sell(
+        {
+            "symbol": "YB/USDC",
+            "sell_reason": "stop_loss",
+            "exit_guard_max_price": 95.0,
+        },
+        {"sell_order_type": "limit", "limit_sell_fallback_to_market": True},
+    )
+
+    assert result is not None
+    assert result["type"] == "partial_sell"
+    assert result["partial_filled_amount"] == 0.4
+    assert result["remaining_amount"] == 1.0
+    assert calls["limit"] == 1
+    assert calls["market"] == 0
+
+
+@pytest.mark.asyncio
+async def test_create_spot_sell_runs_market_fallback_when_exit_guard_passes(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+    calls = {"limit": 0, "market": 0, "guard": 0}
+
+    async def fake_limit_sell(_order, _config) -> None:
+        calls["limit"] += 1
+        return {
+            "requires_market_fallback": True,
+            "limit_cancel_confirmed": True,
+            "fallback_reason": "limit_order_timeout",
+            "symbol": "YB/USDC",
+            "remaining_amount": 1.0,
+            "partial_filled_amount": 0.0,
+            "partial_avg_price": 0.0,
+        }
+
+    async def fake_market_sell(_order, _config) -> None:
+        calls["market"] += 1
+        return {"path": "market"}
+
+    async def fake_exit_timeout_guard(_order, _config, _fallback_reason) -> bool:
+        calls["guard"] += 1
+        return True
+
+    monkeypatch.setattr(exchange, "create_spot_limit_sell", fake_limit_sell)
+    monkeypatch.setattr(exchange, "create_spot_market_sell", fake_market_sell)
+    monkeypatch.setattr(
+        exchange, "_can_fallback_after_exit_timeout", fake_exit_timeout_guard
+    )
+
+    result = await exchange.create_spot_sell(
+        {
+            "symbol": "YB/USDC",
+            "sell_reason": "stop_loss",
+            "exit_guard_max_price": 95.0,
+        },
+        {"sell_order_type": "limit", "limit_sell_fallback_to_market": True},
+    )
+
+    assert result == {"path": "market"}
+    assert calls["limit"] == 1
+    assert calls["guard"] == 1
+    assert calls["market"] == 1
+
+
+@pytest.mark.asyncio
 async def test_build_spot_sell_order_status_returns_unsellable_partial_for_precision_dust(
     monkeypatch,
 ) -> None:

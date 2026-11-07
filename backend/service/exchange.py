@@ -583,11 +583,13 @@ class Exchange:
         pair: str,
         *,
         prefer_ask: bool = False,
+        prefer_bid: bool = False,
     ) -> str:
         """Return a current exchange price with exchange precision.
 
         Buy execution paths prefer the best ask because it is the immediately
-        executable price. Other callers retain the last-trade behavior.
+        executable buy price. Sell-side exit price guards prefer the best bid
+        for the same reason. Other callers retain the last-trade behavior.
         """
         result = None
 
@@ -601,7 +603,12 @@ class Exchange:
                 return ""
             # Fetch the ticker data for the trading pair
             ticker = await self.exchange.fetch_ticker(resolved_pair)
-            raw_price = ticker.get("ask") if prefer_ask else ticker.get("last")
+            if prefer_ask:
+                raw_price = ticker.get("ask")
+            elif prefer_bid:
+                raw_price = ticker.get("bid")
+            else:
+                raw_price = ticker.get("last")
             if not raw_price:
                 raw_price = ticker.get("last")
             if not raw_price:
@@ -625,6 +632,14 @@ class Exchange:
             self._raise_retryable_exchange_error("Fetching ticker data", exc)
 
         return result
+
+    async def get_bid_price_for_symbol(self, pair: str) -> str:
+        """Return the best executable bid price for a symbol.
+
+        Exit price guards compare a pending market sell against this price
+        because it is the price an immediate market sell would realize.
+        """
+        return await self._get_price_for_symbol(pair, prefer_bid=True)
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     async def _get_precision_for_symbol(self, pair: str) -> Any:

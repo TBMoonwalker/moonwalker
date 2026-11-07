@@ -37,6 +37,10 @@ class SellRoutingContext:
         [ExchangeOrderPayload, dict[str, Any]],
         Awaitable[bool],
     ]
+    can_fallback_after_exit_timeout: Callable[
+        [ExchangeOrderPayload, dict[str, Any], str],
+        Awaitable[bool],
+    ]
 
 
 @dataclass(frozen=True)

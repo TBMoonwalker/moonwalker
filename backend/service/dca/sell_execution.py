@@ -108,6 +108,16 @@ class DcaSellManager(ExchangeSellManager):
                     default_symbol=str(order.get("symbol")),
                 )
 
+            if not await context.can_fallback_after_exit_timeout(
+                order,
+                config,
+                fallback_reason,
+            ):
+                return build_partial_status_from_fallback(
+                    order_status,
+                    default_symbol=str(order.get("symbol")),
+                )
+
             self._log_market_fallback_reason(order, fallback_reason)
             remaining_order = dict(order)
             remaining_order["total_amount"] = float(

@@ -5,6 +5,15 @@ from typing import Any
 from service.dca.sell_status import build_partial_sell_status
 from service.exchange_types import MarketFallbackStatus, PartialSellStatus
 
+EXIT_TIMEOUT_FALLBACK_REASONS = frozenset(
+    {
+        "limit_order_timeout",
+        "limit_order_partial_timeout",
+        "limit_order_placement_failed",
+        "limit_order_missing_id",
+    }
+)
+
 
 def get_limit_sell_timeout_seconds(config: dict[str, Any]) -> int:
     """Return a validated limit sell timeout in seconds."""
