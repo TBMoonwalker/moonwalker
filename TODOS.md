@@ -2,20 +2,6 @@
 
 ## Next up
 
-### Periodic price re-evaluation for open trades
-
-**Status:** Identified 2026-11-03 during the YB/USDC stuck-trade investigation (incident: the trade sat above its TP for ~23h without an exit evaluation, and the later manual sell filled ~15% below the stale displayed price). Scope fixed by owner decision 2026-11-07: **implement the exit price guard only; the periodic re-evaluation loop is rejected** (stream recovery stays the watchdog's job; in a flat market a periodic refresh discovers nothing; the accepted silent-stream blind spots are documented as known limitations). **Implemented 2026-11-07 as the exit price guard** (G1: fresh-bid verification before engine-decided market sells; G2: fresh-bid verification before market fallback after a limit timeout or placement failure for non-TP exits); see "Exit Price Guard" in `docs/configuration.md`.
-
-**What (decided scope):** Before a market sell decided by the engine, and before a market fallback when a limit sell runs in a timeout (or fails to place), fetch the live bid and re-verify that the exit is still justified — TP/trailing/autopilot-timeout require the fresh price at or above their threshold, stop-loss requires it at or below the SL price. Abort the sell (fail-closed, position stays open) when the fresh price no longer justifies it or the fetch fails. Engine-computed guard bounds shared through one pure helper at both call sites; TP limit-timeout fallback behavior unchanged. Document the per-reason guard behavior, the zero-steady-state API-load budget, and the interaction with `watcher_ohlcv` mode.
-
-**Why no periodic refresh:** Classic DCA TP/SL checks run only when a `ticker_price` event arrives from the per-symbol trade stream; a dead or silent stream (watchdog per-symbol budget is `max(1800s, candle timeframe)`, 1006 disconnects, quiet pairs, or demo/testnet books) leaves open trades unmanaged while the UI keeps showing stale prices. A periodic REST refresh was the original mitigation, declined on 2026-11-07 for steady-state API load and the flat-market no-op argument; the guard closes the failure mode that actually cost money (executing a sell on a stale trigger price) without any periodic work.
-
-**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/open-trade-price-revaluation-plan-20261107.md`
-
-**Effort:** M
-
-**Priority:** P2
-
 ### Prepare request bodies and OHLCV helpers for future major upgrades
 
 **Status:** Litestar 2.25.0 and pandas 3.1.0 expose deprecation warnings during
@@ -244,3 +230,46 @@ the 2026-09-13 pre-landing review after deferred findings:
 **Deferred from:** pre-landing review on `feature/code-optimizations` (v4.7.0.0).
 The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
+
+## Completed
+
+### Periodic price re-evaluation for open trades
+
+**Status:** Completed 2026-11-07 as the exit price guard (G1: fresh-bid
+verification before engine-decided market sells; G2: fresh-bid verification
+before market fallback after a limit timeout or placement failure for non-TP
+exits). Identified 2026-11-03 during the YB/USDC stuck-trade investigation
+(incident: the trade sat above its TP for ~23h without an exit evaluation, and
+the later manual sell filled ~15% below the stale displayed price). Scope fixed
+by owner decision 2026-11-07: **implement the exit price guard only; the
+periodic re-evaluation loop is rejected** (stream recovery stays the watchdog's
+job; in a flat market a periodic refresh discovers nothing; the accepted
+silent-stream blind spots are documented as known limitations). See "Exit
+Price Guard" in `docs/configuration.md`.
+
+**What shipped (decided scope):** Before a market sell decided by the engine,
+and before a market fallback when a limit sell runs in a timeout (or fails to
+place), fetch the live bid and re-verify that the exit is still justified —
+TP/trailing/autopilot-timeout require the fresh price at or above their
+threshold, stop-loss requires it at or below the SL price. Abort the sell
+(fail-closed, position stays open) when the fresh price no longer justifies it
+or the fetch fails. Engine-computed guard bounds shared through one pure
+helper at both call sites; TP limit-timeout fallback behavior unchanged.
+Documented the per-reason guard behavior, the zero-steady-state API-load
+budget, and the interaction with `watcher_ohlcv` mode.
+
+**Why no periodic refresh:** Classic DCA TP/SL checks run only when a
+`ticker_price` event arrives from the per-symbol trade stream; a dead or
+silent stream (watchdog per-symbol budget is `max(1800s, candle timeframe)`,
+1006 disconnects, quiet pairs, or demo/testnet books) leaves open trades
+unmanaged while the UI keeps showing stale prices. A periodic REST refresh was
+the original mitigation, declined on 2026-11-07 for steady-state API load and
+the flat-market no-op argument; the guard closes the failure mode that actually
+cost money (executing a sell on a stale trigger price) without any periodic
+work.
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/open-trade-price-revaluation-plan-20261107.md`
+
+**Effort:** M
+
+**Priority:** P2
