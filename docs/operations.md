@@ -45,7 +45,8 @@ Moonwalker declares a minimum supported version (MSV). Legacy migration and
 compatibility code that predates it is kept only until an install is known to
 have reached the floor.
 
-- **Minimum supported version:** `4.9.0.0`, the sidestep-removal release.
+- **Minimum supported version:** `6.3.0.0`, the release that removed the
+  remaining Phase 4 data-compat shims.
 - **Posture:** report only. A `preflight_msv` step runs at startup, before any
   schema or config migration callback, and records the install's baseline. It
   **never blocks startup** and **never mutates a ledger**: an install that
@@ -54,7 +55,7 @@ have reached the floor.
 The preflight reports three outcomes:
 
 - `supported` — the install's configuration ledger already contains the
-  `2026-09-sidestep-removal-v1` migration row, so it has run at or after the
+  `2026-11-msv-floor-6-3-v1` migration row, so it has run at or after the
   floor.
 - `unsupported` — the install has schema history (it is not fresh) but its
   configuration ledger predates the floor. Startup logs a `WARNING` with the
@@ -65,25 +66,49 @@ The preflight reports three outcomes:
 
 ### Why the configuration ledger is the floor signal
 
-The floor release deliberately added no schema migration, so a `4.8.x` and a
-`4.9.x` database share an identical schema ledger and cannot be told apart
-structurally. The non-self-healing marker that an install reached the floor is
-the `2026-09-sidestep-removal-v1` row in the `config_migrations` ledger.
-Databases that ran the floor release carry the row from that release onward.
-Databases created after the trade-mode migration was removed receive the row
-on their first startup only if they carry no pre-floor legacy bridge keys; a
-database that still carries those keys is left unmarked and keeps reporting
-`unsupported`, so the row stays a true floor signal rather than a self-healing
-one.
+The floor release deliberately added no schema migration, so a database from
+the release before the floor and one from the floor release share an identical
+schema ledger and cannot be told apart structurally. The non-self-healing
+marker that an install reached the floor is the `2026-11-msv-floor-6-3-v1` row
+in the `config_migrations` ledger. It is written on the first run of at-floor
+software: a fresh install is marked before schema history exists (so an
+interrupted startup cannot leave a false pre-floor baseline), and an existing
+install is marked on its first at-floor startup, after the preflight has
+already fired the one-time pre-floor warning. A fresh database that carries
+pre-floor legacy bridge keys (a restored pre-floor backup) is left unmarked,
+so once schema history exists it keeps reporting `unsupported`, and the row
+stays a true floor signal rather than a self-healing one.
+
+### What the 6.3.0.0 floor gates
+
+Raising the floor to `6.3.0.0` is what let the last deferred Phase 4
+data-compat shims be removed:
+
+- The CSV fee-provenance fallback in `service/trade_math.py`, which inferred
+  fee-inclusive costs from `csv-signal-*` order IDs for rows created before
+  the `cost_includes_fees` column existed (migration 016, released in
+  `5.3.0.0`). Such rows no longer have fee-inclusive cost inferred; they are
+  valued through the legacy fee-estimation path like any other unmarked row.
+- The four-column accumulation CSV declaration format
+  (`date;symbol;price;amount`). Accumulation CSV entries now require the
+  fee-aware columns and four-column files are rejected with an explicit
+  error. The classic Dynamic DCA CSV import keeps its four-column format.
+- The `legacy_accumulation_graph` editor view for legacy-shape accumulation
+  preset documents. Legacy documents remain fully readable by the accumulation
+  runtime and strategy catalog, but the strategy detail endpoint no longer
+  renders them as an editable graph, and duplicating one is rejected.
 
 ### Upgrade path for a pre-floor install
 
-1. Upgrade the installation through `4.9.0.0`.
+1. Upgrade the installation to `6.3.0.0`.
 2. Save the configuration and export a fresh full backup through the backup tool,
-   so any removed legacy bridge is gone from the persisted data.
+   so the removed legacy shapes are gone from the persisted data.
 
-The trade-mode bridge removal shipped first under that gate; the remaining
-removal passes stay gated on every install reaching `4.9.0.0`.
+Installs below the floor still load and run (report-only), but their pre-floor
+data shapes — unmarked CSV trade rows, four-column accumulation declarations,
+and legacy-shape accumulation preset documents — are no longer supported. The
+pre-floor warning fires on the first at-floor startup, and later startups
+report `supported`.
 
 > **Changelog drift reconciled (B2 removal pass, 2026-11-01).** The
 > `4.0.0.0` changelog entry claimed the legacy trade-mode config keys

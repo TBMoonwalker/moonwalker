@@ -18,24 +18,25 @@ from dataclasses import dataclass
 from model import AppConfig, ConfigMigration, SchemaMigration
 from tortoise.transactions import in_transaction
 
-MINIMUM_SUPPORTED_VERSION = "4.9.0.0"
+MINIMUM_SUPPORTED_VERSION = "6.3.0.0"
 
-# The floor is the sidestep-removal release (b844b4c / 4.9.0.0).  That release
-# deliberately added no schema migration, so the schema ledger is identical
-# between a 4.8.x and a 4.9.x install and cannot tell them apart.  The durable,
-# non-self-healing marker that an install has reached the floor is therefore the
-# *configuration* migration row ``2026-09-sidestep-removal-v1`` in the
-# ``config_migrations`` ledger: it is written once when that release first runs
-# and is never removed, so its presence in the ledger outlives the install that
-# wrote it.  The literal is owned here: the floor meaning belongs to msv, not
-# to the (now removed) trade-mode migration module.
-FLOOR_CONFIG_MIGRATION_ROW = "2026-09-sidestep-removal-v1"
+# The floor is the release that removed the remaining Phase 4 data-compat
+# shims (the CSV fee-provenance fallback, the four-column accumulation CSV
+# import, and the legacy accumulation preset view).  No supported install may
+# still depend on those shapes, so the durable, non-self-healing marker that
+# an install has reached the floor is the *configuration* migration row
+# ``2026-11-msv-floor-6-3-v1`` in the ``config_migrations`` ledger: it is
+# written once when this release first runs and is never removed, so its
+# presence in the ledger outlives the install that wrote it.  The literal is
+# owned here: the floor meaning belongs to msv, not to any migration module.
+FLOOR_CONFIG_MIGRATION_ROW = "2026-11-msv-floor-6-3-v1"
 
-# The config keys that only pre-floor (pre-4.9) databases carry.  Their
-# presence marks pre-floor config residue: a database that still has them has
-# not run the floor release and keeps reporting ``unsupported``; a clean
-# database may be marked at the floor by ``config_migrations``.  Backup
-# restore drops these keys silently (see ``backup_restore``).
+# The config keys that only pre-4.9 databases carry.  On a *fresh* database
+# their presence marks pre-floor config residue (a restored pre-floor
+# backup): the install keeps reporting ``unsupported`` because nothing in the
+# current code canonicalizes those rows.  On an existing install the keys are
+# inert residue and do not prevent floor marking; the pre-floor warning has
+# already fired at preflight time on the first at-floor startup.
 LEGACY_TRADE_MODE_KEYS = frozenset(
     {
         "trade_lifecycle_mode",
@@ -45,9 +46,10 @@ LEGACY_TRADE_MODE_KEYS = frozenset(
 )
 
 UPGRADE_GUIDANCE = (
-    "Upgrade through 4.9.0.0 (the sidestep-removal release) on the current code, "
-    "then export a fresh backup before relying on any removed legacy bridge being "
-    'absent. See docs/operations.md, "Minimum supported version".'
+    "Upgrade through 6.3.0.0 (the release that removed the remaining legacy "
+    "data-compat shims) on the current code, then export a fresh backup "
+    "before relying on the removed legacy shapes being absent. See "
+    'docs/operations.md, "Minimum supported version".'
 )
 
 
@@ -159,21 +161,27 @@ def get_msv_baseline() -> MsvBaseline | None:
 
 
 async def record_msv_floor_marker(baseline: MsvBaseline | None) -> None:
-    """Record the floor marker for a fresh install, before schema history.
+    """Record the floor marker on the first run of at-floor software.
 
     Called during database init immediately after the preflight and before
     schema migrations commit their rows. A fresh install (no pre-migration
-    schema history) is marked at the floor here so an interrupted startup
-    cannot leave schema history without the marker and misreport
-    ``unsupported`` on the next boot. A pre-floor install (schema history
-    already present at preflight) is left unmarked and keeps reporting
-    ``unsupported`` until the operator upgrades through the floor release.
+    schema history) is marked here so an interrupted startup cannot leave
+    schema history without the marker and misreport ``unsupported`` on the
+    next boot. An existing install (schema history already present at
+    preflight) is marked on its first at-floor startup: the pre-floor warning
+    has already fired at preflight time, and running the floor release is
+    precisely what reaches the floor, so later boots report ``supported``.
+
+    A fresh install that still carries the pre-floor legacy bridge keys (a
+    restored pre-floor backup) is left unmarked and keeps reporting
+    ``unsupported`` once schema history exists: nothing in the current code
+    canonicalizes that residue.
 
     Args:
         baseline: The preflight baseline, or ``None`` when the preflight did
             not run. When unavailable the marker is withheld (fail closed).
     """
-    if baseline is None or baseline.status != MsvStatus.FRESH:
+    if baseline is None:
         return
 
     async with in_transaction() as connection:
@@ -182,7 +190,7 @@ async def record_msv_floor_marker(baseline: MsvBaseline | None) -> None:
             .using_db(connection)
             .exists()
         )
-        if legacy_present:
+        if baseline.status == MsvStatus.FRESH and legacy_present:
             return
         already_applied = (
             await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW)

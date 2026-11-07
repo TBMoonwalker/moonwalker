@@ -309,7 +309,12 @@ async def test_monitoring_msv_endpoint_reports_recorded_baseline() -> None:
     from controller import monitoring as monitoring_controller
     from litestar import Litestar
     from litestar.testing import TestClient
-    from service.msv import evaluate_msv_baseline, set_msv_baseline
+    from service.msv import (
+        FLOOR_CONFIG_MIGRATION_ROW,
+        MINIMUM_SUPPORTED_VERSION,
+        evaluate_msv_baseline,
+        set_msv_baseline,
+    )
 
     try:
         set_msv_baseline(None)
@@ -318,7 +323,7 @@ async def test_monitoring_msv_endpoint_reports_recorded_baseline() -> None:
             response = client.get("/monitoring/msv")
             assert response.status_code == 200
             assert response.json() == {
-                "minimum_supported_version": "4.9.0.0",
+                "minimum_supported_version": MINIMUM_SUPPORTED_VERSION,
                 "status": "unknown",
                 "summary": "baseline not yet established",
             }
@@ -328,8 +333,8 @@ async def test_monitoring_msv_endpoint_reports_recorded_baseline() -> None:
             response = client.get("/monitoring/msv")
             assert response.status_code == 200
             assert response.json() == {
-                "minimum_supported_version": "4.9.0.0",
-                "floor_config_migration": "2026-09-sidestep-removal-v1",
+                "minimum_supported_version": MINIMUM_SUPPORTED_VERSION,
+                "floor_config_migration": FLOOR_CONFIG_MIGRATION_ROW,
                 "status": "unsupported",
                 "supported": False,
                 "schema_history_present": True,

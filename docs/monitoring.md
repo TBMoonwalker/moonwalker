@@ -72,8 +72,8 @@ The dashboard reports the installation's minimum-supported-version (MSV)
 baseline:
 
 - Endpoint: `GET /monitoring/msv`
-- The response carries the minimum supported version (`4.9.0.0`), the floor
-  config migration marker, the baseline status, and an operator-facing summary.
+- The response carries the minimum supported version, the floor config
+  migration marker, the baseline status, and an operator-facing summary.
 - Baseline status is one of:
   - `supported` — the install has run at or after the floor release.
   - `unsupported` — schema history exists but the floor config migration row
