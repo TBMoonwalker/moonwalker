@@ -33,20 +33,6 @@ Do not suppress the warnings or bundle either major upgrade into a lock refresh.
 
 **Priority:** P2
 
-### Denylist from open trade: symmetric re-enable + DESIGN.md badge pass
-
-**Status:** Ready to design when picked up
-
-**What:** v4.9.0.0 ships a one-way "Deny from new entries" row action with
-config-only undo by editing `pair_denylist`. A symmetric "Re-enable" /
-"Remove from denylist" row action, plus a DESIGN.md pass on the "Denylisted" tag
-color/label, would close the loop. Keep it an entry-only change; do not touch
-open trades.
-
-**Effort:** M
-
-**Priority:** P3
-
 ### Add the recovery DCA status card to the vitest coverage guard
 
 **Status:** Follow-up from the v4.15.0.0 pre-landing review (P3, informational).
@@ -156,6 +142,45 @@ coverage-include regression is caught.
 
 **Priority:** P3
 
+### Upgrade frontend major dependencies: jsdom 31, TypeScript 7, @types/node 26
+
+**Status:** Recorded 2026-11-06 as the hold list of the 2026-11-06 frontend dependency hygiene pass (patch/minor wave applied in the same day: axios 1.21.0, vite 8.3.6, vitest 5.1.0, vue 3.5.45, vue-tsc 3.3.14, @playwright/test 1.65.0, knip 6.44.1).
+
+**What:** Bump the three held major-version frontend dev dependencies in dedicated, separately tested changesets:
+- `jsdom` 30.1.3 -> 31.0.0 (vitest test environment; review jsdom 31 breaking changes against the 48-file vitest suite and coverage ratchet).
+- `typescript` 6.0.3 -> 7.0.2 (compiler major; run `vue-tsc` type-check, build and the coverage ratchet, watch for removed/deprecated checker APIs used by tooling).
+- `@types/node` 24.19.2 -> 26.x (hold until the repo's Node floor moves: `.nvmrc` and `frontend/package.json` engines pin Node 24.x, so 26 typings describe a runtime the project does not run; revisit together with a Node 26 upgrade decision).
+
+**Why:** Recorded rather than bundled: major bumps need the compatibility review the dependency hygiene policy requires, and the axios 1.21.0 wave proved the test suite is the right gate for behavior changes (its header-default recognition change passed clean).
+
+**Priority:** P3
+
+### Upgrade Python major dependencies: multidict 7, python-dateutil 4
+
+**Status:** Recorded 2026-11-07 as the hold list of the 2026-11-07 Python dependency hygiene pass (patch/minor wave applied the same day: ccxt 4.5.92, cachetools 7.3.0, pandas 3.1.1, python-socketio 5.18.1, websockets 17.4, ta-lib 0.8.3, anyio 4.16.0, click 8.5.1, mypy 2.4.1, pip 26.3, pytest 9.2.0, pytest-asyncio 1.4.1.post1, ruff 0.17.4, filelock 4.2.9).
+
+**What:** Bump the two held major-version Python dependencies in dedicated, separately tested changesets:
+- `multidict` 6.9.1 -> 7.2.1 (transitive of aiohttp and hard-pinned by ccxt: ccxt 4.5.92 still pins `multidict==6.9.1` and aiohttp 3.14.5 requires `multidict<7`, so the resolver cannot move it until a future ccxt release relaxes the pin; revisit together with the next ccxt major).
+- `python-dateutil` 3.0.0 -> 4.0.0 (direct pin in `backend/requirements.in` carrying the "reviewed timezone engine for pandas, including post-2038 TZif support" comment; a major of pandas' reviewed timezone engine — verify pandas 3.x, tortoise-orm and litestar date parsing under dateutil 4, and re-check the post-2038 TZif rationale against the 4.x release notes).
+
+**Why:** Recorded rather than bundled: major bumps need the compatibility review the dependency hygiene policy requires, and multidict is additionally unresolvable today because of ccxt's hard pin. Note: idna stays at 3.18 for the same reason (ccxt 4.5.90-4.5.92 all hard-pin `idna==3.18`), so the idna 3.20 "outdated" row is expected to persist.
+
+**Priority:** P3
+
+### Split service/orders.py into the dca/ package and a mode-neutral facade
+
+**Status:** Identified 2026-11-06 during the accumulation Telegram notification investigation; follow-up cleanup, not part of that fix.
+
+**What:** `service/orders.py` (legacy `Orders` class, from the 2025-09-17 upstream merge) predates the `dca/` subpackage carved out in `7bc61fe` (2026-10-26, "organize trading modes around shared exchange execution"). That refactor moved the DCA-owned mechanics into `dca/` but left `orders.py` at the service root, where it now mixes: (a) classic DCA order lifecycle finalization (persist + stats + the two `MonitoringService.notify_trade` calls at `orders.py:504`/`:621`), (b) the mode-agnostic placement reconciliation entry point `reconcile_placement_intents` (`orders.py:319`), which routes accumulation intents to the injected `accumulation_recovery` callback (`orders.py:100`, wired in `app.py:213-215`), and (c) the legacy-mutation lifecycle guard for accumulation symbols (`orders.py:106-144`). The refactor commit message says "DCA finalization ... owned by its mode", yet the finalization still lives in the root facade. Move the DCA-only finalization into `dca/` (keeping `dca/` as the layer `orders.py` imports from, not the reverse), keep the mode-neutral reconciliation and lifecycle routing at the service root (adjacent to `placement_reconciliation.py`, which already owns the routing), and reduce `orders.py` to a thin compatibility facade or remove it once `signals/*`, `app.py`, `runtime_services.py`, `trading_controls.py` and `dca/engine.py` point at the new locations.
+
+**Why:** The ambiguity is not cosmetic: the missing accumulation Telegram notification was easier to miss precisely because "the order service" looks like a DCA module while still hosting accumulation seams. A clear mode boundary makes it obvious which mode owns trade finalization (and its notifications).
+
+**Context:** 2026-11-06 investigation of missing accumulation trade notifications (see also `docs/monitoring.md` scope drift). Keep this split out of the notification fix diff.
+
+**Effort:** M
+
+**Priority:** P3
+
 ## Dashboard history
 
 ### Evaluate server caching and incremental timeline loading
@@ -219,226 +244,3 @@ the 2026-09-13 pre-landing review after deferred findings:
 **Deferred from:** pre-landing review on `feature/code-optimizations` (v4.7.0.0).
 The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
-
-
-## Retired
-
-### Extend sidestep campaign analytics beyond grouped replay polish
-
-**Retired:** 2026-09-26 documentation cleanup. Sidestep has been removed; its
-proposed campaign analytics are no longer an active backlog item. The former
-discovery gate had no confirmed evidence issues. Historical completed Sidestep
-items below remain release history, not descriptions of current capabilities.
-
-## Completed
-
-### AI-trust and capital-budget config section coverage guards
-
-**Completed:** v5.1.0.0 (2026-10-07)
-
-**What shipped:** Closed both pre-landing P3 coverage gaps for the new
-AI-trust and capital-budget config sections. (1) Pinned the
-`capitalBudgetPreview` client mirror to the backend admission math with a
-cross-language contract test,
-`backend/tests/test_capital_budget_preview_parity.py`, that recomputes the same
-shared vectors `frontend/tests-vitest/capital-budget-preview.test.ts` asserts, so
-a math drift on either side fails its own test; aligned the preview's
-negative-buffer handling to `normalize_buffer_pct` (clamp <= 0 to no buffer,
-behavior-preserving since the input has `min=0`). (2) Added dedicated mount tests
-asserting each section's control surface:
-`config-ai-trust-section.test.ts` (field labels, the warn-block switch staying
-inert until the cockpit is enabled, and the exposed `validate()`) and
-`config-capital-section.test.ts` (the title fallback plus the gated
-showBaseFields / showExpertFields / dynamicDcaEnabled fields and `validate()`).
-These components are not in the vitest `coverage.include` ratcheted set, so the
-new mount tests harden regression coverage without moving the ratchet; see the
-separate P3 for ratcheting the Recovery DCA status card into the include guard.
-
-### Fix mobile Backtest chart marker label clipping (ISSUE-002)
-
-**Completed:** 2026-08-02
-
-**What shipped:** Added exact feature-local logical-range padding based on the
-actual first- and last-candle marker text, typed the Lightweight Charts payloads,
-and guarded pre-paint rendering with invocation ownership and fail-open padding.
-Added 100 percent viewport-helper coverage, component lifecycle regressions,
-and stable 375 x 812 left/right Playwright snapshots. The real localhost
-default Backtest now shows the complete `take_profit` label with no page overflow
-or console errors.
-
-### Fix mobile text truncation (ISSUE-003, ISSUE-004)
-
-**Completed:** v4.5.0.0 (2026-07-28)
-
-**What shipped:** Reworked the Control Center mission header and Statistics
-mobile layout so guidance, tabs, and activity labels remain readable at 375
-pixels, aligned responsive breakpoints at 767 pixels, and added desktop,
-tablet, and mobile Playwright coverage.
-
-### Fix Statistics pagination (ISSUE-001)
-
-**Completed:** v4.0.4.0 (2026-06-05)
-
-**What shipped:** Added `sortedAndPaginatedSymbols` computed property that correctly
-sorts and slices the symbol data based on pagination state. The data table now
-uses `remote` mode with explicit `@update:page` and `@update:sorter` handlers,
-so clicking pagination numbers actually changes the displayed data.
-
-### Fix Statistics sort column data reduction (ISSUE-002)
-
-**Completed:** v4.0.4.0 (2026-06-05)
-
-**What shipped:** Rewired the sort handler to work with the new computed pagination
-pipeline. Clicking a sort column header now correctly sorts the full dataset and
-shows a full page of results instead of reducing to 3 rows. Added `columnSortOrder`
-helper to keep sort indicator logic DRY across all sortable columns.
-
-### Polish Statistics heatmap density and Strategy Builder graph readability
-
-**Completed:** v4.0.0.0 (2026-05-31)
-
-**What shipped:** Tightened the Statistics Trade Activity panel with compact
-padding and an inline closed-trade activity summary, removed duplicate heatmap
-computed state, and made Strategy Builder graph labels easier to read by using
-a less aggressive Rete fit scale plus larger node and control typography.
-
-### Build the operator-facing Backtest UI after backend core stabilizes
-
-**Completed:** v3.3.0.0 (2026-05-28)
-
-**What shipped:** Added a Backtest route with strategy replay controls,
-Lightweight Charts candles and buy/sell markers, stats, run metadata,
-previous-run comparison, loading and safe error states, responsive layout, and
-frontend helper coverage for request shaping, marker normalization, and
-comparison math.
-
-### Centralize lifecycle normalization across backend and frontend config seams
-
-**Completed:** v4.2.0.0 (2026-07-26)
-
-**What shipped:** Added one canonical lifecycle normalization seam on each
-side, made `trade_mode` the operator-facing source of truth, routed backend
-capability checks and frontend config load, submit, readiness, and validation
-through the shared helpers, and added regression coverage for canonical-mode
-round trips.
-
-### Confirm waiting sidestep campaigns keep owning capacity while flat
-
-**Completed:** v4.2.0.0 (2026-07-26)
-
-**What shipped:** Kept the chosen campaign-ownership policy instead of adding a
-second scheduler, verified that flat waiting campaigns continue to preserve
-their reserved slot and capital semantics, covered watcher re-entry and manual
-activate paths with regression tests, and closed the old
-"prioritize waiting campaigns over new symbols" follow-up as an
-audit-and-validation item rather than new ranking behavior.
-
-### Polish waiting-campaign status and grouped sidestep mission history
-
-**Completed:** v4.2.0.0 (2026-07-26)
-
-**What shipped:** Added explicit waiting-campaign cooldown, last-exit, and
-re-entry status fields to the existing payloads and UI, kept the main closed
-trades table terminal-first, and added grouped mission summary context to
-sidestep replay so operators can read campaign progression without a new
-analytics service or DB table.
-
-### Untangle order-persistence ownership between Orders, Trades, and order_persistence
-
-**Completed:** v4.2.0.0 (2026-07-26)
-
-**What shipped:** Moved sell-side lifecycle writes behind
-`order_persistence`, replaced external calls to private trade-cache
-invalidation with a public seam, preserved the read/query role of `Trades`,
-and added regression coverage around partial sells, terminal closes, manual
-adds, stop handling, and related execution flows.
-
-### Deduplicate the EMA20 swing and reverse strategy pair
-
-**Completed:** v4.2.0.0 (2026-07-26)
-
-**What shipped:** Extracted the shared EMA20 swing runtime and persistence
-skeleton into one shared core, kept the public bullish and reverse strategy
-modules stable, preserved separate persisted state namespaces, and collapsed
-the mirrored strategy tests into a shared parameterized suite plus
-direction-specific assertions.
-
-### Reduce Control Center overview card nesting
-
-**Completed:** v1.4.0.0 (2026-04-28)
-
-**What shipped:** Reworked the Control Center overview lower section into one
-shared operator workspace for Configuration, Autopilot, and Monitoring;
-flattened the preview shells so the three surfaces read as related subsections
-instead of equal nested cards; softened the owner-confidence summary to match
-the overview shell; and added frontend regression checks so the preview
-components stay out of full-card wrappers.
-
-### Remove deprecated `autopilot_max_fund` compatibility alias
-
-**Completed:** v1.4.0.0 (2026-04-28)
-
-**What shipped:** Removed the one-release `autopilot_max_fund`
-compatibility alias from backend runtime config, frontend config loading and
-submit payloads, and mirrored API surfaces; switched the remaining capital and
-Green Phase logic to the canonical `capital_max_fund` key; rejected removed-key
-config writes and legacy backup restores; filtered removed keys from new backup
-exports; and documented the breaking upgrade requirement in the release notes
-and config or API docs.
-
-### Apply suggested base order as guarded per-symbol entry sizing
-
-**Completed:** v1.2.0.0 (2026-04-22)
-
-**What shipped:** Added an explicit `autopilot_symbol_entry_sizing_enabled`
-switch, extended the shared Autopilot policy seam to resolve entry-size
-decisions alongside adaptive TP, routed ASAP and SymSignals through one shared
-signal-runtime order-size resolver, persisted applied-vs-fallback sizing
-metadata through buy executions, retried once with baseline `bo` on sizing
-validation failures, and surfaced entry-sizing status in the Autopilot cockpit.
-
-### Add owner-confidence summary to Control Center overview
-
-**Completed:** v1.2.0.0 (2026-04-22)
-
-**What shipped:** Added a compact owner-confidence summary to the Control
-Center overview that rolls up operating mode, config trust, Autopilot memory,
-and a lightweight live-data signal without duplicating Monitoring diagnostics.
-
-### Add ranked scarce-bot admission for trusted symbols
-
-**Completed:** v1.2.0.0 (2026-04-22)
-
-**What shipped:** Added a shared ranked admission and reservation seam in
-`backend/service/signal_runtime.py`, reused Autopilot trust memory to rank
-favored, neutral, and cooling symbols, routed ASAP and SymSignals through the
-same decision path, and expanded regression coverage around ranking,
-explanations, and release-on-failure behavior.
-
-### Finish the deferred backend stabilization slice for data/replay/database seams
-
-**Completed:** 2026-04-08
-
-**What shipped:** Removed redundant history-window wrappers from
-`backend/service/data.py`, centralized numeric SQLite text-timestamp handling,
-hardened replay archive reads/writes against short millisecond fixtures and
-mixed timestamp inputs, reused the same timestamp normalization seam in
-housekeeping, and extracted additive-column/corruption-message helpers from
-`backend/service/database.py` with regression coverage.
-
-### Harden config trust and invalidation in Control Center
-
-**Completed:** v1.0.3.0 (2026-03-27)
-
-**What shipped:** Added explicit Control Center config-trust states, quiet
-auto-refresh for clean tabs, stale-draft conflict handling, browser-local
-invalidation fanout after save, restore, and live activation, the `/config/all`
-`config_updated_at` contract, and regression coverage for stale snapshot
-timestamp handling.
-
-### Create a repo-level DESIGN.md after the Control Center ships
-
-**Completed:** 2026-03-21
-
-**What shipped:** Added the repo-level `DESIGN.md` and then refined it with the
-surface-treatment rule that keeps gradients atmospheric and working panels flat.
