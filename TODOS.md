@@ -7,14 +7,24 @@
 **Status:** Recorded 2026-11-07 as the follow-up of the completed "Prepare
 request bodies and OHLCV helpers for future major upgrades" entry. Neither
 major is released yet (litestar 2.25.0 and pandas 3.1.1 are current as of
-2026-11-07); start each only once upstream releases it.
+2026-11-07); start each only once upstream releases it. Second prep step
+landed 2026-11-07: all three custom ASGI middlewares
+(`AccumulationRepairOnlyMiddleware` in `app.py`,
+`TrustedLanHttpMiddleware`/`WebSocketOriginMiddleware` in
+`service/origin_policy.py`) now subclass `litestar.middleware.ASGIMiddleware`
+(the protocol litestar 3.0 requires: `handle(scope, receive, send, next_app)`,
+no `app` in the constructor, registered as direct instances) and no
+`DefineMiddleware` usage remains; verified working on 2.25.0 with full CI
+green.
 
 **What:** Upgrade the two held major-version Python dependencies in dedicated,
 separately tested changesets:
 - `litestar` 2.25.0 -> 3.x (implicit reserved-kwarg body inference is removed
   in 3.0; the prep wave already marks all ten body parameters with
-  `JSONBody[...]`, so the bump is expected to be validation of the markers
-  plus full-suite re-verification under the new major).
+  `JSONBody[...]` and the middlewares already use the 3.0 `ASGIMiddleware`
+  protocol, so the bump is expected to be validation of both plus the
+  `litestar[testing]` extra for the TestClient and full-suite re-verification
+  under the new major).
 - `pandas` 3.1.1 -> 4.x (PDEP-8 `inplace` keyword removal; the prep wave
   already replaces all seven `inplace=True` calls in
   `backend/service/data_ohlcv.py` with explicit reassignments).

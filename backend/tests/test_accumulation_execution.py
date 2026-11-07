@@ -1807,7 +1807,6 @@ async def test_restored_quarantine_has_lookup_only_http_repair_access(env, monke
     from controller import accumulation as controller
     from httpx import ASGITransport, AsyncClient
     from litestar import Litestar, get, post, put
-    from litestar.middleware import DefineMiddleware
 
     adapter, client, *_ = env
     buy_id = await prepared(env)
@@ -1898,7 +1897,7 @@ async def test_restored_quarantine_has_lookup_only_http_repair_access(env, monke
             forbidden_config,
             forbidden_history,
         ],
-        middleware=[DefineMiddleware(app_module.AccumulationRepairOnlyMiddleware)],
+        middleware=[app_module.AccumulationRepairOnlyMiddleware()],
         openapi_config=None,
     )
     async with (
@@ -1947,7 +1946,7 @@ async def test_restored_quarantine_has_lookup_only_http_repair_access(env, monke
         assert blocked_calls == []
         downstream = AsyncMock()
         sent = AsyncMock()
-        await app_module.AccumulationRepairOnlyMiddleware(downstream)(
+        await app_module.AccumulationRepairOnlyMiddleware()(downstream)(
             {"type": "websocket", "path": "/trades/ws"}, AsyncMock(), sent
         )
         sent.assert_awaited_once_with({"type": "websocket.close", "code": 1013})

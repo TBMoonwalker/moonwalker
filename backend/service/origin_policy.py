@@ -7,6 +7,7 @@ import json
 from collections.abc import Iterable
 from urllib.parse import urlsplit
 
+from litestar.middleware import ASGIMiddleware
 from litestar.types import ASGIApp, Receive, Scope, Send
 
 WEBSOCKET_POLICY_VIOLATION = 1008
@@ -161,25 +162,25 @@ async def _send_http_forbidden(send: Send, message: str) -> None:
     await send({"type": "http.response.body", "body": body})
 
 
-class TrustedLanHttpMiddleware:
+class TrustedLanHttpMiddleware(ASGIMiddleware):
     """Protect HTTP requests while preserving trusted LAN clients."""
 
     def __init__(
         self,
-        app: ASGIApp,
         allowed_origins: Iterable[str] = (),
         allowed_hosts: Iterable[str] = (),
     ) -> None:
-        self.app = app
         self.allowed_origins = frozenset(allowed_origins)
         origin_hosts = {
             normalize_host(urlsplit(origin).netloc) for origin in self.allowed_origins
         }
         self.allowed_hosts = frozenset(allowed_hosts) | origin_hosts
 
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+    async def handle(
+        self, scope: Scope, receive: Receive, send: Send, next_app: ASGIApp
+    ) -> None:
         if scope["type"] != "http":
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
 
         host = _header_value(scope, b"host")
@@ -188,12 +189,12 @@ class TrustedLanHttpMiddleware:
             return
 
         if str(scope.get("method", "")).upper() not in UNSAFE_HTTP_METHODS:
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
 
         raw_origin = _header_value(scope, b"origin")
         if raw_origin is None:
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
 
         try:
@@ -215,28 +216,28 @@ class TrustedLanHttpMiddleware:
             )
             return
 
-        await self.app(scope, receive, send)
+        await next_app(scope, receive, send)
 
 
-class WebSocketOriginMiddleware:
+class WebSocketOriginMiddleware(ASGIMiddleware):
     """Reject cross-origin browser WebSockets unless explicitly allowed."""
 
     def __init__(
         self,
-        app: ASGIApp,
         allowed_origins: Iterable[str] = (),
         allowed_hosts: Iterable[str] = (),
     ) -> None:
-        self.app = app
         self.allowed_origins = frozenset(allowed_origins)
         origin_hosts = {
             normalize_host(urlsplit(origin).netloc) for origin in self.allowed_origins
         }
         self.allowed_hosts = frozenset(allowed_hosts) | origin_hosts
 
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+    async def handle(
+        self, scope: Scope, receive: Receive, send: Send, next_app: ASGIApp
+    ) -> None:
         if scope["type"] != "websocket":
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
 
         host = _header_value(scope, b"host")
@@ -252,7 +253,7 @@ class WebSocketOriginMiddleware:
 
         raw_origin = _header_value(scope, b"origin")
         if raw_origin is None:
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
 
         try:
@@ -261,7 +262,7 @@ class WebSocketOriginMiddleware:
             origin = ""
         same_origin = bool(origin and _origin_matches_host(origin, host))
         if same_origin or origin in self.allowed_origins:
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
 
         await send(

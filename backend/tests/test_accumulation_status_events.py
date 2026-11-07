@@ -8,7 +8,6 @@ import pytest
 from controller import accumulation as controller
 from litestar import Litestar
 from litestar.exceptions import WebSocketDisconnect
-from litestar.middleware import DefineMiddleware
 from litestar.testing import TestClient
 from service.accumulation.status_events import AccumulationStatusEvents
 from service.origin_policy import WebSocketOriginMiddleware
@@ -70,7 +69,7 @@ def test_real_websocket_pushes_to_two_clients_and_preserves_origin_gate(monkeypa
     monkeypatch.setattr(controller, "accumulation_stream_snapshot", producer)
     app = Litestar(
         route_handlers=[controller.stream_status],
-        middleware=[DefineMiddleware(WebSocketOriginMiddleware)],
+        middleware=[WebSocketOriginMiddleware()],
         openapi_config=None,
     )
     with TestClient(app, base_url="http://localhost") as client:

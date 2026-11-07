@@ -19,7 +19,7 @@ from controller.frontend import frontend_staging_warning
 from litestar import Litestar
 from litestar.config.compression import CompressionConfig
 from litestar.config.cors import CORSConfig
-from litestar.middleware import DefineMiddleware
+from litestar.middleware import ASGIMiddleware
 from litestar.types import ASGIApp, Receive, Scope, Send
 from service.accumulation.runtime import AccumulationRuntime, build_accumulation_runtime
 from service.ai_provider import ai_provider_client
@@ -91,21 +91,20 @@ def _repair_only() -> bool:
     )
 
 
-class AccumulationRepairOnlyMiddleware:
+class AccumulationRepairOnlyMiddleware(ASGIMiddleware):
     """Keep HTTP recovery access separate from every trading and config route."""
 
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+    async def handle(
+        self, scope: Scope, receive: Receive, send: Send, next_app: ASGIApp
+    ) -> None:
         if not _repair_only():
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 1013})
             return
         if scope["type"] != "http":
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
         path, method = scope["path"], scope.get("method", "")
         reads = {
@@ -123,7 +122,7 @@ class AccumulationRepairOnlyMiddleware:
             and path == "/accumulation/repair"
             or method == "OPTIONS"
         ):
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
         body = b'{"error":"Recovery only: reconcile quarantined accumulation orders, then restart. Trading and configuration changes are unavailable.","code":"recovery_only"}'
         await send(
@@ -587,14 +586,12 @@ app = Litestar(
         allow_headers=["*"],
     ),
     middleware=[
-        DefineMiddleware(AccumulationRepairOnlyMiddleware),
-        DefineMiddleware(
-            TrustedLanHttpMiddleware,
+        AccumulationRepairOnlyMiddleware(),
+        TrustedLanHttpMiddleware(
             allowed_origins=ALLOWED_ORIGINS,
             allowed_hosts=ALLOWED_HOSTS,
         ),
-        DefineMiddleware(
-            WebSocketOriginMiddleware,
+        WebSocketOriginMiddleware(
             allowed_origins=ALLOWED_ORIGINS,
             allowed_hosts=ALLOWED_HOSTS,
         ),

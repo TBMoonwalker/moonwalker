@@ -10,7 +10,6 @@ import pytest_asyncio
 from controller import accumulation as controller
 from httpx import ASGITransport, AsyncClient
 from litestar import Litestar
-from litestar.middleware import DefineMiddleware
 from service.accumulation.activity import ActivityChanged
 from service.accumulation.commands import AccumulationCommandResult
 from service.accumulation.imports import parse_accumulation_csv
@@ -24,7 +23,7 @@ from tortoise import Tortoise
 async def api_client():
     app = Litestar(
         route_handlers=controller.route_handlers,
-        middleware=[DefineMiddleware(TrustedLanHttpMiddleware)],
+        middleware=[TrustedLanHttpMiddleware()],
         openapi_config=None,
     )
     async with AsyncClient(
