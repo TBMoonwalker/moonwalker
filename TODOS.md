@@ -45,24 +45,6 @@ entry's plan of record carries the re-verification checklist.
 
 **Priority:** P2
 
-### Remove the three deferred Phase 4 data-compat shims at their concrete floors
-
-**Status:** Deferred by the 2026-11-01 legacy-migration-removal review (D8=A). Each removal is safe only once its recorded floor is passed.
-
-**What:** Remove the three Phase 4 data-compat shims that the shipped 4.9.0.0 MSV floor does not gate: the CSV fee-accounting fallback in `backend/service/trade_math.py` (fee flag, migration 016), the legacy CSV import path, and the `legacy_accumulation_graph` view. Each as a small PR with its fixture/test updated, the same shape as the two shims removed this wave (replay backfill >008, `has_legacy_partial` >007).
-
-**Why:** These three postdate the 4.9.0.0 floor or are not version-gateable at all, so removing them now would break fee accounting on supported 4.9–5.2 installs. Deferring keeps the wave removal-only and ships only what the floor proves safe.
-
-**Pros:** Each removal gates on a concrete, recorded floor: the fee flag at >=5.3.0.0 (016 provenance, commit 04b6990), the CSV import behind a file-format deprecation window, and `legacy_accumulation_graph` on a retention window since 4.0.0.0/c44fd0e (legacy-shape docs persist unmigrated). The shims are read-only fallbacks, so running one more cycle is harmless.
-
-**Cons:** Three fallback paths stay in the codebase past their natural window until the floors are re-checked.
-
-**Context:** Decided in the 2026-11-01 legacy-migration-removal eng review (D8, option A); the two gateable shims landed this wave on `chore/hygiene-logging-serialization-sync-2026-10`. Plan of record: `~/.gstack/projects/TBMoonwalker-moonwalker/legacy-migration-removal-plan-20261101.md`.
-
-**Depends on:** The MSV floor in `backend/service/msv.py` and its record in `docs/operations.md`; the CSV import also needs an operator-visible deprecation window before its removal.
-
-**Priority:** P3
-
 ### Decide the migration-ledger prune policy (Phase 5 ledger hygiene)
 
 **Status:** Deferred by the 2026-11-01 legacy-migration-removal review (D6=B); not a PR this wave.
@@ -233,6 +215,54 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Remove the three deferred Phase 4 data-compat shims at their concrete floors
+
+**Status:** Completed 2026-11-07 by owner decision: the MSV floor was raised
+from 4.9.0.0 to 6.3.0.0 (option B of D8, explicitly re-decided), which passes
+all three recorded floors at once.
+
+**What shipped:**
+- The floor is now `6.3.0.0` in `backend/service/msv.py` (marker row
+  `2026-11-msv-floor-6-3-v1` in the `config_migrations` ledger); the preflight,
+  `GET /monitoring/msv`, `docs/operations.md` and `docs/monitoring.md` follow
+  the constant. `record_msv_floor_marker` now marks an existing install on its
+  first at-floor startup — after the preflight fires the one-time pre-floor
+  warning — so a skip-install no longer reports `unsupported` forever with
+  unsatisfiable guidance. A fresh database carrying pre-floor legacy bridge
+  keys (a restored pre-floor backup) stays unmarked and keeps reporting
+  `unsupported`.
+- The CSV fee-provenance fallback in `has_fee_inclusive_cost`
+  (`backend/service/trade_math.py`) is gone: provenance is explicit-only and a
+  missing `cost_includes_fees` flag behaves like an explicit False (legacy fee
+  estimation). Recorded floor >=5.3.0.0 (016 provenance, 04b6990) passed.
+- The four-column accumulation CSV declaration format
+  (`backend/service/accumulation/imports.py`) is rejected with an explicit
+  error for fresh uploads and persisted legacy declarations; the fee-aware
+  format is required. `docs/accumulation.md`,
+  `docs/howto-operate-accumulation.md`, `docs/signals.md` and the dashboard
+  placeholders were updated. The classic Dynamic DCA CSV import keeps its
+  four-column format.
+- `legacy_accumulation_graph` (the `backend/service/shared_accumulation.py`
+  editor view) is removed: `get_strategy_detail` no longer wraps legacy-shape
+  accumulation documents, the `legacy_accumulation_view` metadata plumbing is
+  gone, and duplicating a legacy preset is rejected with a clear error. Legacy
+  documents remain fully parseable by the accumulation runtime and catalog
+  (`parse_accumulation_strategy_document` keeps both shapes), and
+  `regime_accumulation_graph` now builds its base shape directly.
+
+**Operator-visible consequences (documented in `docs/operations.md` and the
+6.3.0.0 changelog):** pre-floor trade rows without a provenance flag lose the
+inferred fee-inclusive cost; pre-floor four-column accumulation declarations
+can no longer be imported or revalidated; legacy-shape preset documents are
+no longer rendered or duplicable in the strategy builder.
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/legacy-migration-removal-plan-20261101.md`
+(D8=A deferral; superseded by the owner's explicit re-decision on 2026-11-07).
+
+**Effort:** M
+
+**Priority:** P3
 
 ### Add the recovery DCA status card to the vitest coverage guard
 

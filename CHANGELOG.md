@@ -2,6 +2,39 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [6.3.0.0] - 2026-11-07
+
+### Breaking Changes
+
+- Raise the minimum supported version (MSV) to `6.3.0.0`. Installs below the
+  floor still load and run (report-only), but their pre-floor data shapes are
+  no longer supported: the first at-floor startup logs a one-time warning, and
+  later startups report `supported`. Upgrade to `6.3.0.0` and export a fresh
+  backup to move persisted data cleanly.
+- Remove the CSV fee-provenance fallback. Trade rows created before the
+  `cost_includes_fees` column (`5.3.0.0`) no longer have fee-inclusive cost
+  inferred from the CSV plugin's generated order IDs; they are valued with the
+  legacy fee estimate like any other unmarked row. Rows imported on or after
+  `5.3.0.0` keep their explicit provenance.
+- Remove the four-column accumulation CSV declaration format. Accumulation CSV
+  entries now require the fee-aware columns
+  (`date;symbol;price;amount;fee;fee_currency;amount_type`, with optional
+  `fee_quote_value`). Four-column files and previously persisted four-column
+  declarations are rejected with an explicit error; blank fee fields still mean
+  unknown fees. The classic Dynamic DCA CSV import keeps its four-column
+  format.
+- Remove the `legacy_accumulation_graph` editor view for legacy-shape
+  accumulation preset documents. Legacy documents remain fully readable by the
+  accumulation runtime and the strategy catalog, but the strategy detail
+  endpoint no longer renders them as an editable graph, and duplicating one is
+  rejected.
+
+### Changed
+
+- The MSV floor marker is written on an existing install's first at-floor
+  startup, so installs that skipped a floor release no longer keep reporting
+  `unsupported` with guidance that can no longer be satisfied.
+
 ## [6.2.0.0] - 2026-11-05
 
 ### Fixed
