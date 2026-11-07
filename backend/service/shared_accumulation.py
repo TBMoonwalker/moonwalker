@@ -6,60 +6,24 @@ from typing import Any
 from service.accumulation.strategy import parse_accumulation_strategy_document
 
 
-def legacy_accumulation_graph(
-    document: dict[str, Any], slug: str, name: str, builtin: bool
-) -> dict[str, Any]:
-    """Present a legacy immutable preset in the common editor; leave its row intact."""
-    parameters = parse_accumulation_strategy_document(document)
-    return {
-        "schema_version": 1,
-        "slug": slug,
-        "name": name,
-        "description": "ATR dip execution with manual accumulation exits. Add shared buy conditions here.",
-        "kind": "builtin" if builtin else "custom",
-        "root": "eligible",
-        "accumulation": asdict(parameters),
-        "nodes": [
-            {
-                "id": "enabled",
-                "type": "constant_value",
-                "label": "Enabled",
-                "params": {"value": 1},
-            },
-            {
-                "id": "one",
-                "type": "constant_value",
-                "label": "One",
-                "params": {"value": 1},
-            },
-            {
-                "id": "eligible",
-                "type": "comparison",
-                "label": "Allow ATR dip execution",
-                "params": {"comparison": "equals"},
-            },
-        ],
-        "connections": [
-            {"source": "enabled", "target": "eligible", "target_input": "value1"},
-            {"source": "one", "target": "eligible", "target_input": "value2"},
-        ],
-    }
-
-
 def regime_accumulation_graph() -> dict[str, Any]:
     """An experimental shared downtrend/range filter, never an optimized claim."""
     from service.accumulation.strategy import build_accumulation_strategy_document
 
-    graph = legacy_accumulation_graph(
-        build_accumulation_strategy_document(),
-        "regime_accumulation",
-        "Downtrend / sideways accumulation",
-        True,
+    parameters = parse_accumulation_strategy_document(
+        build_accumulation_strategy_document()
     )
-    graph["description"] = (
-        "Experimental 4h EMA-slope/ADX regime gate with an exchange-timeframe ATR discount. Filters detected uptrends on subsequent buys; manual accumulation exits."
-    )
-    graph["nodes"], graph["connections"] = [], []
+    graph = {
+        "schema_version": 1,
+        "slug": "regime_accumulation",
+        "name": "Downtrend / sideways accumulation",
+        "description": "Experimental 4h EMA-slope/ADX regime gate with an exchange-timeframe ATR discount. Filters detected uptrends on subsequent buys; manual accumulation exits.",
+        "kind": "builtin",
+        "root": "eligible",
+        "accumulation": asdict(parameters),
+        "nodes": [],
+        "connections": [],
+    }
 
     def node(key: str, kind: str, label: str, **params: Any) -> str:
         index = len(graph["nodes"])

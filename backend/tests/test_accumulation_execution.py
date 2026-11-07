@@ -3011,8 +3011,6 @@ async def test_http_staged_commands_use_snapshot_revision_and_explicit_validatio
 
 @pytest.mark.asyncio
 async def test_runtime_strategy_switch_retains_purchase_guard_and_pause(env):
-    from service.shared_accumulation import legacy_accumulation_graph
-
     buy_id = await prepared(env)
     await AccumulationBuyExecutor(env[0]).execute(buy_id)
     activation = await model.AccumulationActivation.get()
@@ -3026,14 +3024,15 @@ async def test_runtime_strategy_switch_retains_purchase_guard_and_pause(env):
         activation.consumption_revision,
         activation.strategy_version_id,
     )
+    # The raw legacy-shape document is exactly what pre-floor databases
+    # pin; the runtime must keep loading it after the editor view removal.
     document = build_accumulation_strategy_document(
         AccumulationParameters(spacing_atr="2")
     )
-    graph = legacy_accumulation_graph(document, "custom_patient", "Patient dip", False)
     version = await model.StrategyVersion.create(
         strategy_slug="custom_patient",
         version=1,
-        ir_json=json.dumps(graph),
+        ir_json=json.dumps(document),
         validation_json=json.dumps({"status": "valid"}),
         explanation="shared fixture",
     )

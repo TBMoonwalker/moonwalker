@@ -938,12 +938,6 @@ async def get_strategy_detail(slug: str) -> dict[str, Any] | None:
         active_version.validation_json if active_version else None,
         validate_strategy_ir(ir) if isinstance(ir, dict) else {},
     )
-    if isinstance(ir, dict) and ir.get("capability") == "accumulation/v1":
-        from service.shared_accumulation import legacy_accumulation_graph
-
-        ir = legacy_accumulation_graph(ir, slug, definition.name, definition.is_builtin)
-        ir["metadata"] = {"legacy_accumulation_view": True}
-        validation = validate_strategy_ir(ir)
     return {
         **summary,
         "ir": ir,
@@ -962,7 +956,11 @@ async def duplicate_strategy(
         raise ValueError(f"Strategy '{source_slug}' was not found.")
 
     source_ir = copy.deepcopy(source["ir"])
-    source_ir.get("metadata", {}).pop("legacy_accumulation_view", None)
+    if isinstance(source_ir, dict) and source_ir.get("capability") == "accumulation/v1":
+        raise ValueError(
+            f"Strategy '{source_slug}' is a legacy accumulation preset and can no "
+            "longer be duplicated; build a shared accumulation strategy instead."
+        )
     display_name = str(name or f"{source['name']} copy").strip()
     base_slug = normalize_strategy_slug(display_name)
     slug = await _unique_strategy_slug(base_slug)
@@ -1108,7 +1106,6 @@ async def promote_strategy_version(
             return await get_strategy_detail(slug) or {}, 409
 
         next_ir = copy.deepcopy(ir)
-        next_ir.get("metadata", {}).pop("legacy_accumulation_view", None)
         next_ir["schema_version"] = STRATEGY_IR_SCHEMA_VERSION
         next_ir["slug"] = slug
         next_ir["kind"] = STRATEGY_KIND_CUSTOM

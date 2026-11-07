@@ -125,18 +125,49 @@ async def test_normal_backtest_endpoint_dispatches_accumulation(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_backtest_applies_shared_graph_to_subsequent_buys(history):
-    from dataclasses import replace
+    from dataclasses import asdict, replace
 
     from service.accumulation.strategy import (
-        build_accumulation_strategy_document,
+        AccumulationParameters,
         parse_accumulation_strategy_document,
     )
-    from service.shared_accumulation import legacy_accumulation_graph
 
     start, end, fetch, load = history
-    graph = legacy_accumulation_graph(
-        build_accumulation_strategy_document(), "shared", "Shared", False
-    )
+    # A current shared-conditions document (the legacy editor view was
+    # removed at MSV 6.3.0.0); the enable gate is the first node.
+    graph = {
+        "schema_version": 1,
+        "slug": "shared",
+        "name": "Shared",
+        "description": "",
+        "kind": "custom",
+        "root": "eligible",
+        "accumulation": asdict(AccumulationParameters()),
+        "nodes": [
+            {
+                "id": "enabled",
+                "type": "constant_value",
+                "label": "Enabled",
+                "params": {"value": 1},
+            },
+            {
+                "id": "one",
+                "type": "constant_value",
+                "label": "One",
+                "params": {"value": 1},
+            },
+            {
+                "id": "eligible",
+                "type": "comparison",
+                "label": "Allow ATR dip execution",
+                "params": {"comparison": "equals"},
+            },
+        ],
+        "connections": [
+            {"source": "enabled", "target": "eligible", "target_input": "value1"},
+            {"source": "one", "target": "eligible", "target_input": "value2"},
+        ],
+    }
     graph["nodes"][0]["params"]["value"] = 0
     load.return_value = replace(
         load.return_value, parameters=parse_accumulation_strategy_document(graph)

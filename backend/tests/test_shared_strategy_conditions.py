@@ -1,7 +1,6 @@
 """Cross-mode graph, causal higher-timeframe and immutable-version regressions."""
 
 import copy
-from dataclasses import asdict
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -16,10 +15,7 @@ from service.accumulation.strategy import (
     calculate_accumulation_market,
     parse_accumulation_strategy_document,
 )
-from service.shared_accumulation import (
-    legacy_accumulation_graph,
-    regime_accumulation_graph,
-)
+from service.shared_accumulation import regime_accumulation_graph
 from service.strategy_conditions import (
     aggregate_frame,
     candle_frame,
@@ -152,12 +148,16 @@ def test_accumulation_compatibility_rejects_unsafe_graphs(mutation):
         parse_accumulation_strategy_document(graph)
 
 
-def test_legacy_document_is_unchanged_and_graph_retains_native_parameters():
+def test_legacy_document_parses_to_plain_parameters_unchanged():
+    """Legacy-shape preset documents still parse for the accumulation runtime.
+
+    The editor view was removed at MSV 6.3.0.0; the runtime path is the
+    parse, which must keep accepting the immutable legacy shape.
+    """
     document = build_accumulation_strategy_document()
     original = copy.deepcopy(document)
-    graph = legacy_accumulation_graph(document, "test", "Legacy", False)
-    parameters = parse_accumulation_strategy_document(graph)
-    assert graph["accumulation"] == asdict(AccumulationParameters())
+    parameters = parse_accumulation_strategy_document(document)
+    assert parameters == AccumulationParameters()
     assert document == original
     assert parameters.history_length == AccumulationParameters().history_length
     assert calculate_accumulation_market(
