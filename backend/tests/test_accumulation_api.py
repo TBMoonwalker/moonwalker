@@ -311,7 +311,7 @@ async def test_entry_detail_redacts_raw_requests_and_bounds_history(
         symbol="BTC/USDC", account_scope="private-scope", revision=25
     )
     imported = parse_accumulation_csv(
-        "1970-01-02;BTC/USDC;60.000000000000000001;0.1", "USDC", now_ms=100000000
+        "1970-01-02;BTC/USDC;60.000000000000000001;0.1;;", "USDC", now_ms=100000000
     )[0]
     for index in range(25):
         await model.AccumulationLifecycleOperation.create(

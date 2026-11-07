@@ -1,4 +1,4 @@
-"""Fee-aware CSV declarations preserve exact inventory and legacy identities."""
+"""Fee-aware CSV declarations preserve exact inventory; legacy rows are rejected."""
 
 import copy
 import json
@@ -77,17 +77,29 @@ def test_omitted_fees_and_unvalued_external_fees_remain_unknown():
     assert external.basis_provenance == "unvalued_external_fees"
 
 
-def test_legacy_identity_and_precision_are_preserved():
-    imported = parse_accumulation_csv(
-        "date;symbol;price;amount\n2026-01-01;BTC/USDC;100.000000000000001;0.1234567890123456789",
-        "USDC",
-        now_ms=1800000000000,
-    )[0]
-    assert len(imported.entries[0]) == 3
-    assert imported.quantity == "0.1234567890123456789"
-    assert imported.cost == "12.3456789012345680134567890123456789"
-    assert imported.inventory().pending_fee_reports == 1
-    assert AccumulationImport.from_dict(imported.to_dict()) == imported
+def test_legacy_four_column_files_and_rows_are_rejected():
+    """The four-column format was removed at MSV 6.3.0.0 and fails closed.
+
+    Both fresh uploads and persisted legacy declarations (three-tuple rows
+    from pre-6.3 databases) must be rejected with the removal explanation.
+    """
+    with pytest.raises(AccumulationStateError, match="four-column"):
+        parse_accumulation_csv(
+            "date;symbol;price;amount\n2026-01-01;BTC/USDC;100;0.5",
+            "USDC",
+            now_ms=1800000000000,
+        )
+    with pytest.raises(AccumulationStateError, match="four-column"):
+        parse_accumulation_csv(
+            "2026-01-01;BTC/USDC;100;0.5",
+            "USDC",
+            now_ms=1800000000000,
+        )
+    persisted = AccumulationImport(
+        "BTC/USDC", ((1767225600000, "100", "0.5"),), "0.5", "50"
+    )
+    with pytest.raises(AccumulationStateError, match="four-column"):
+        AccumulationImport.from_dict(json.loads(json.dumps(persisted.to_dict())))
 
 
 def test_tampered_fee_totals_and_duplicate_purchases_are_rejected():

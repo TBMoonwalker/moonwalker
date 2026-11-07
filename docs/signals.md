@@ -63,7 +63,8 @@ date;symbol;price;amount;fee;fee_currency;amount_type;fee_quote_value
 24/08/2025 15:04:00;BTC/USDC;112170.19;0.03863000;0.5;USDC;gross;
 ```
 
-The first four columns remain required. Append `fee;fee_currency` for six columns;
+The first four columns remain required for Dynamic DCA imports; accumulation CSV
+entries require the fee-aware columns. Append `fee;fee_currency` for six columns;
 `amount_type` and `fee_quote_value` are optional seventh and eighth columns.
 `amount_type` defaults to `net`: already-owned coins after base-coin fees. For
 `gross`, base-coin fees are deducted once. Quote fees increase acquisition cost;
@@ -80,9 +81,12 @@ Dynamic DCA rules:
   TP/SL and recovery sizing. A 100 USDC purchase with a 1 USDC fee has a
   101 USDC basis. Later exchange buys retain their own legacy fee estimate;
   that estimate is not reapplied to imported acquisition costs.
-- Backups preserve whether a purchase cost already includes fees. Older CSV
-  rows from the standard plugin's generated identifiers retain the same basis
-  after an upgrade or restore; quantities and recorded costs are not rewritten.
+- Backups preserve whether a purchase cost already includes fees. Rows with an
+  explicit provenance flag retain that basis after an upgrade or restore; rows
+  created before the provenance column (`5.3.0.0`) no longer have their basis
+  inferred from the plugin's generated identifiers (removed in `6.3.0.0`) and
+  follow the legacy fee estimate. Quantities and recorded costs are never
+  rewritten.
 - Oldest row per symbol is imported as base order.
 - Following rows are imported as safety orders.
 - Import is blocked when open trades already exist.

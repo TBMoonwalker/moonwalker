@@ -55,12 +55,16 @@ ranking window. Account ownership, available budget, global pause, exchange
 minimums and order precision still apply. The durable order journal prevents
 repeat submissions after restarts or uncertain exchange responses. Once the first
 fill is recorded, the selected accumulation strategy initializes its observations
-and controls subsequent purchases. Unrelated wallet coins remain unmanaged. CSV declarations use
-`date;symbol;price;amount`, with each row representing already-owned inventory.
+and controls subsequent purchases. Unrelated wallet coins remain unmanaged. CSV
+declarations use the fee-aware format
+`date;symbol;price;amount;fee;fee_currency;amount_type` (with the optional
+`fee_quote_value` eighth column), with each row representing already-owned
+inventory. The legacy four-column format was removed in `6.3.0.0` and is
+rejected with an explicit error.
 The entire declaration is staged before adoption and must fit fresh free wallet
-balance. Optional fee columns support base, quote and explicitly quote-valued
+balance. Fee columns support base, quote and explicitly quote-valued
 third-currency fees. `amount` defaults to net owned coins; `amount_type=gross`
-deducts base-coin fees once. Four-column purchases retain unknown historical fees.
+deducts base-coin fees once. Blank fee fields retain unknown historical fees.
 See the [CSV format](signals.md#csv-signal-setup).
 The runtime continues pending, unadopted ASAP entries when it starts or receives
 updated inputs, using the same operation ID. A recovered entry then opens its BO;

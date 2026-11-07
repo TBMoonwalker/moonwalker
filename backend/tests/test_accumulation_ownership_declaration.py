@@ -41,7 +41,11 @@ async def ownership_db(tmp_path, monkeypatch):
 
 async def declaration_fixture(*, staged=False, state="enabled"):
     imported = parse_accumulation_csv(
-        "2020-01-01;BTC/USDC;10;1.000000000000000001", "USDC", now_ms=NOW
+        # Six columns with blank fees: the legacy four-column format was
+        # removed at MSV 6.3.0.0; blank fees keep the unknown-fee semantics.
+        "2020-01-01;BTC/USDC;10;1.000000000000000001;;",
+        "USDC",
+        now_ms=NOW,
     )[0]
     version = await model.StrategyVersion.create(
         strategy_slug="ownership-fixture",

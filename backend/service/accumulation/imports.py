@@ -38,7 +38,7 @@ def normalize_csv_symbol(value: str, quote: str) -> str:
 
 @dataclass(frozen=True)
 class AccumulationImport:
-    """Auditable purchase rows; legacy rows retain their original serialized shape."""
+    """Auditable purchase rows with explicit fee semantics on every row."""
 
     symbol: str
     entries: tuple[tuple[Any, ...], ...]
@@ -124,7 +124,14 @@ def _declaration(symbol: str, entries: Any) -> AccumulationImport:
     normalized = []
     identities = set()
     for entry in entries:
-        if not isinstance(entry, (list, tuple)) or len(entry) not in {3, 7}:
+        if not isinstance(entry, (list, tuple)):
+            raise AccumulationStateError("Invalid CSV inventory row.")
+        if len(entry) == 3:
+            raise AccumulationStateError(
+                "Legacy four-column CSV import was removed in 6.3.0.0; "
+                "declare the fee columns (fee;fee_currency[;amount_type[;fee_quote_value]])."
+            )
+        if len(entry) != 7:
             raise AccumulationStateError("Invalid CSV inventory row.")
         timestamp, price, amount, *extra = entry
         if type(timestamp) is not int or not 0 < timestamp < 2**63:
@@ -195,7 +202,7 @@ def _declaration(symbol: str, entries: Any) -> AccumulationImport:
 def parse_accumulation_csv(
     content: str, quote_currency: str, *, now_ms: int
 ) -> tuple[AccumulationImport, ...]:
-    """Read legacy four columns or fee, currency, optional amount_type and quote value."""
+    """Read fee, currency, optional amount_type and optional quote value columns."""
     if not isinstance(content, str) or not content.strip() or len(content) > 1_000_000:
         raise AccumulationStateError("CSV must be nonempty and at most 1 MB of text.")
     quote_currency = quote_currency.upper().strip()
@@ -207,14 +214,18 @@ def parse_accumulation_csv(
             continue
         if (
             line == 1
-            and len(row) in {4, 6, 7, 8}
+            and len(row) in {6, 7, 8}
             and [cell.strip().lower() for cell in row] == CSV_FEE_HEADER[: len(row)]
         ):
             continue
-        if len(row) not in {4, 6, 7, 8}:
+        if len(row) == 4:
             raise AccumulationStateError(
-                f"CSV line {line} requires 4, 6, 7 or 8 columns."
+                f"CSV line {line} uses the legacy four-column format removed in "
+                "6.3.0.0; add the fee columns "
+                "(fee;fee_currency[;amount_type[;fee_quote_value]])."
             )
+        if len(row) not in {6, 7, 8}:
+            raise AccumulationStateError(f"CSV line {line} requires 6, 7 or 8 columns.")
         timestamp = parse_date_to_ms(row[0].strip())
         if timestamp is None or not 0 < timestamp <= now_ms:
             raise AccumulationStateError(

@@ -187,8 +187,9 @@ async def test_activity_distinguishes_valid_csv_declarations(accounting_db):
     database.db_url = accounting_db
     await database._ensure_accumulation_history_revision()
     activation, _, _ = await _buy()
+    # Empty fee cells keep the unknown-fee declaration this case distinguishes.
     declaration = parse_accumulation_csv(
-        "date;symbol;price;amount\n2026-01-01;BTC/USDC;100;1",
+        "date;symbol;price;amount;fee;fee_currency;amount_type\n2026-01-01;BTC/USDC;100;1;;;net",
         "USDC",
         now_ms=1800000000000,
     )[0]

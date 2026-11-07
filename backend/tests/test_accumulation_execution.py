@@ -2258,7 +2258,12 @@ async def _entry_service(env, monkeypatch, *, signal="csv_signal"):
     return AccumulationEntryService(adapter, notified.append), notified
 
 
-ENTRY_CSV = "date;symbol;price;amount\n1970-01-02;BTC/USDC;60.000000000000000001;0.100000000000000001"
+# Fee-aware format since the four-column legacy format was removed (MSV
+# 6.3.0.0); the empty fee cells keep the unknown-fee declaration semantics.
+ENTRY_CSV = (
+    "date;symbol;price;amount;fee;fee_currency;amount_type\n"
+    "1970-01-02;BTC/USDC;60.000000000000000001;0.100000000000000001;;;net"
+)
 
 
 async def _staged_payload(
@@ -2492,7 +2497,7 @@ async def test_csv_restart_does_not_reimport_or_enable_staged_inventory(
 
 
 @pytest.mark.asyncio
-async def test_legacy_csv_cannot_adopt_a_stopped_accumulation_symbol(env):
+async def test_csv_import_cannot_adopt_a_stopped_accumulation_symbol(env):
     from service.csv_signal_import import CSVSignalImportService
 
     activation, _ = await setup_activation(env)
@@ -4953,8 +4958,10 @@ async def test_csv_purchase_history_keeps_declared_base_and_native_buy_separate(
 
     service, _ = await _entry_service(env, monkeypatch)
     env[1].balance["free"]["BTC"] = "5"
-    header = "date;symbol;price;amount" + (";fee;fee_currency" if fee_columns else "")
-    row = "1970-01-02;BTC/USDC;60;1" + (";0.1;USDC" if fee_columns else "")
+    # The four-column format is gone (MSV 6.3.0.0); unknown fees are now
+    # declared with blank fee cells in the fee-aware format.
+    header = "date;symbol;price;amount;fee;fee_currency"
+    row = "1970-01-02;BTC/USDC;60;1" + (";0.1;USDC" if fee_columns else ";;")
     await service.csv(header + "\n" + row)
     holding = await model.OpenTrades.get()
     history = await declared_purchase_history(holding.deal_id)
@@ -5003,14 +5010,19 @@ async def test_csv_history_accepts_large_valid_declaration_without_status_payloa
 
     service, _ = await _entry_service(env, monkeypatch)
     env[1].balance["free"]["BTC"] = "5"
-    await service.csv("date;symbol;price;amount\n1970-01-02;BTC/USDC;60;1")
+    await service.csv(
+        "date;symbol;price;amount;fee;fee_currency;amount_type\n1970-01-02;BTC/USDC;60;1;;;net"
+    )
     holding = await model.OpenTrades.get()
     origins = await csv_inventory_origins(None, deal_id=holding.deal_id)
     key, origin = next(iter(origins.items()))
     declaration = AccumulationImport.from_dict(
         {
             "symbol": "BTC/USDC",
-            "entries": [(86400000 + index, "1", "1") for index in range(10000)],
+            "entries": [
+                (86400000 + index, "1", "1", None, None, "net", None)
+                for index in range(10000)
+            ],
             "quantity": "10000",
             "cost": "10000",
         }
@@ -5035,7 +5047,9 @@ async def test_csv_origin_query_requires_exact_adopted_deal_not_substring_receip
 
     service, _ = await _entry_service(env, monkeypatch)
     env[1].balance["free"]["BTC"] = "5"
-    await service.csv("date;symbol;price;amount\n1970-01-02;BTC/USDC;60;1")
+    await service.csv(
+        "date;symbol;price;amount;fee;fee_currency;amount_type\n1970-01-02;BTC/USDC;60;1;;;net"
+    )
     receipt = await model.AccumulationLifecycleOperation.get(action="activate")
     request = json.loads(receipt.request_json)
     other_deal = str(uuid4())
