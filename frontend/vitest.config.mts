@@ -28,6 +28,7 @@ export default defineConfig({
       reportsDirectory: './coverage/frontend',
       include: [
         'src/components/Heatmap.vue',
+        'src/components/RecoveryDcaStatus.vue',
         'src/control-center/blockers.ts',
         'src/control-center/readiness.ts',
         'src/control-center/routerGuard.ts',
@@ -44,6 +45,12 @@ export default defineConfig({
         branches: 72,
         functions: 89,
         lines: 84,
+        'src/components/RecoveryDcaStatus.vue': {
+          statements: 90,
+          branches: 80,
+          functions: 95,
+          lines: 90,
+        },
         'src/control-center/readiness.ts': {
           statements: 70,
           branches: 60,

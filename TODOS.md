@@ -45,31 +45,6 @@ entry's plan of record carries the re-verification checklist.
 
 **Priority:** P2
 
-### Add the recovery DCA status card to the vitest coverage guard
-
-**Status:** Follow-up from the v4.15.0.0 pre-landing review (P3, informational).
-
-**What:** The new `RecoveryDcaStatus.vue` component is not in the vitest
-`coverage.include` list, so its rendering branch is excluded from the reported
-coverage even though `recovery-dca-status.test.ts` exercises it. Ratchet the
-component into `frontend/vitest.config.ts` `coverage.include`, verify the
-component-level tests assert the card surface, and reinstate the surface
-assertions the old `recoveryDcaSurface.test.cjs` guard checked before they moved
-to the card.
-
-**Context:** v4.15.0.0 moved the recovery DCA diagnostics out of
-`OpenTradeExpandedRow.vue` into the reusable `RecoveryDcaStatus.vue` card. The
-CJS guard was intentionally reduced to a single delegation assertion
-(`OpenTradeExpandedRow` renders
-`<RecoveryDcaStatus :trade="rowData" />`), and the new component coverage lives in
-`frontend/tests-vitest/recovery-dca-status.test.ts`. The card is correct today;
-this only tightens the guard so a future edit to the card surface or a
-coverage-include regression is caught.
-
-**Effort:** S
-
-**Priority:** P3
-
 ### Remove the three deferred Phase 4 data-compat shims at their concrete floors
 
 **Status:** Deferred by the 2026-11-01 legacy-migration-removal review (D8=A). Each removal is safe only once its recorded floor is passed.
@@ -258,6 +233,28 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Add the recovery DCA status card to the vitest coverage guard
+
+**Status:** Completed 2026-11-07. The card is now ratcheted into the vitest
+coverage guard and its pre-card surface labels are asserted on the card
+itself.
+
+**What shipped:**
+- `src/components/RecoveryDcaStatus.vue` added to `coverage.include` in
+  `frontend/vitest.config.mts` (this entry named the config
+  `vitest.config.ts`; the file has since been renamed to `.mts`) with a
+  per-file threshold ratcheted at 90/80/95/90 (stmts/branches/funcs/lines)
+  against the measured 92.47/84.74/96.15/91.78. The uncovered remainder is
+  the `insufficient_tp_improvement` and `invalid_trade_state` /
+  `target_not_solvable` warning branches.
+- New surface test in
+  `frontend/tests-vitest/recovery-dca-status.test.ts` re-asserting the five
+  labels the old `recoveryDcaSurface.test.cjs` guard checked on
+  `OpenTradeExpandedRow.vue` before the v4.15.0.0 card split, in their
+  post-split form: the `Recovery DCA status` aria-label, `Trigger ≤ USDC`,
+  `reference ATR`, `SO 1 / 5`, and the `Projected TP 0.25` sizing line.
+  The CJS guard keeps its single delegation assertion.
 
 ### Prepare request bodies and OHLCV helpers for future major upgrades
 

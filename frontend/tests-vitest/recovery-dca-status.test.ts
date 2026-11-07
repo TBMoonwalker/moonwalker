@@ -39,6 +39,16 @@ describe('recovery DCA status', () => {
          await wrapper.setProps({ trade: { ...trade(), current_price: 0.24 } })
          expect(wrapper.text()).toContain('Another 5.14% drop')
       })
+    // Surface labels the pre-card CJS guard (recoveryDcaSurface) asserted on
+    // OpenTradeExpandedRow; they now live on the card itself.
+    it('keeps the card surface the pre-card guard checked', () => {
+         const wrapper = render()
+         expect(wrapper.find('section').attributes('aria-label')).toBe('Recovery DCA status')
+         expect(wrapper.text()).toContain('Recovery DCA')
+         expect(wrapper.text()).toContain('Trigger ≤ USDC')
+         expect(wrapper.text()).toContain('reference ATR')
+         expect(wrapper.text()).toContain('SO 1 / 5')
+      })
     it('does not reuse a spacing wait after the live price crosses the trigger', () => {
          const wrapper = render({ ...trade(), current_price: 0.22 })
          expect(wrapper.text()).toContain('Updating status')
@@ -118,6 +128,7 @@ describe('recovery DCA status', () => {
          const data = { ...trade('target_recovery', { current_price: 0.22, final_quote: 12, projected_tp_price: 0.25 }), current_price: 0.22 }
          const wrapper = render(data)
          expect(wrapper.text()).toContain('Estimated buy 12.00 USDC')
+         expect(wrapper.text()).toContain('Projected TP 0.25')
          await wrapper.setProps({ trade: { ...data, current_price: 0.219 } })
          expect(wrapper.text()).not.toContain('Estimated buy')
          expect(wrapper.text()).toContain('Updating status')
