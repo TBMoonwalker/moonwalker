@@ -143,7 +143,7 @@ remains an on-demand check rather than a CI gate.
 Follow [AGENTS.md](../AGENTS.md), [dependency policy](dependencies.md), and the
 [pre-update supply-chain review workflow](howto-update-dependencies.md).
 After code changes, run `./ci.sh` from `scripts/`; on macOS, put Homebrew
-`node@24` on PATH as documented in AGENTS.md. Documentation-only changes should
+`node` (26.x) on PATH as documented in AGENTS.md. Documentation-only changes should
 verify relative links, source-backed claims, and `git diff --check`.
 
 

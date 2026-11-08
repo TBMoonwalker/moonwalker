@@ -47,18 +47,18 @@ def test_startup_script_disables_frontend_dependency_lifecycle_scripts() -> None
 
 
 def test_startup_script_rejects_unsupported_node_before_creating_lock() -> None:
-    """Startup must explain how to select Node 24 before changing service state."""
+    """Startup must explain how to select Node 26 before changing service state."""
     script = RUN_SCRIPT.read_text()
 
     runtime_check = "check_frontend_runtime"
     lock_step = 'touch "$LOCK_FILE"'
 
     runtime = (ROOT_DIR / "scripts/node_runtime.sh").read_text()
-    assert "Required: Node.js >=24.11.0 <25 and npm >=11 <12." in runtime
+    assert "Required: Node.js >=26.0.0 <27 and npm >=11 <12." in runtime
     assert "nvm install" in runtime
     assert "nvm use" in runtime
-    assert "brew install node@24" in runtime
-    assert 'export PATH="$(brew --prefix node@24)/bin:$PATH"' in runtime
+    assert "brew install node" in runtime
+    assert 'export PATH="$(brew --prefix node)/bin:$PATH"' in runtime
     assert script.index(runtime_check, script.index("start_services()")) < script.index(
         lock_step, script.index("start_services()")
     )
@@ -234,22 +234,22 @@ def test_node_detection_selects_homebrew_pair(tmp_path: Path, path_node: str) ->
     runtime = tmp_path / "Homebrew Node" / "bin"
     runtime.mkdir(parents=True)
     node = runtime / "node"
-    node.write_text("#!/bin/bash\nprintf '24.18.0\\n'\n")
+    node.write_text("#!/bin/bash\nprintf '26.13.0\\n'\n")
     node.chmod(0o755)
     npm = runtime / "npm"
     npm.write_text(
-        '#!/bin/bash\n[ "$(node -p process.versions.node)" = 24.18.0 ] || exit 1\n'
+        '#!/bin/bash\n[ "$(node -p process.versions.node)" = 26.13.0 ] || exit 1\n'
         "printf '11.16.0\\n'\n"
     )
     npm.chmod(0o755)
     if path_node == "unsupported":
         wrong = commands / "node"
-        wrong.write_text("#!/bin/bash\nprintf '26.11.1\\n'\n")
+        wrong.write_text("#!/bin/bash\nprintf '24.22.2\\n'\n")
         wrong.chmod(0o755)
         (commands / "npm").symlink_to(npm)
     brew = commands / "brew"
     brew.write_text(
-        '#!/bin/bash\n[ "$1" = --prefix ] && [ "$2" = node@24 ] || exit 1\n'
+        '#!/bin/bash\n[ "$1" = --prefix ] && [ "$2" = node ] || exit 1\n'
         + f"printf '%s\\n' '{runtime.parent}'\n"
     )
     brew.chmod(0o755)
@@ -264,13 +264,13 @@ def test_node_detection_selects_homebrew_pair(tmp_path: Path, path_node: str) ->
 @pytest.mark.parametrize(
     ("node_version", "npm_version", "supported"),
     [
-        ("24.11.0", "11.0.0", True),
-        ("24.18.0", "11.16.0", True),
-        ("24.10.0", "11.16.0", False),
-        ("26.11.1", "11.16.0", False),
-        ("24.18.0", "12.0.0", False),
+        ("26.0.0", "11.0.0", True),
+        ("26.13.0", "11.16.0", True),
+        ("25.9.0", "11.16.0", False),
+        ("24.22.2", "11.16.0", False),
+        ("26.13.0", "12.0.0", False),
         ("unknown", "11.16.0", False),
-        ("24.18.0", "unknown", False),
+        ("26.13.0", "unknown", False),
     ],
 )
 def test_node_runtime_validation_preserves_supported_path_and_rejects_others(

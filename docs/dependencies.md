@@ -14,7 +14,7 @@ This manual pre-install review complements the automated gates below.
 ## Runtime baseline
 
 - Python `3.14.x`; `.python-version` records the verified patch release.
-- Node.js `24.x` LTS; `.nvmrc` records the verified patch release and npm
+- Node.js `26.x` LTS; `.nvmrc` records the verified patch release and npm
   enforces the supported range from `frontend/package.json`.
 - npm `11.x`.
 - TA-Lib's Python wheel is pinned in the backend lock. The system TA-Lib
@@ -31,11 +31,11 @@ nvm use
 ./run.sh start
 ```
 
-On macOS, Homebrew can provide the same isolated Node.js 24 runtime:
+On macOS, Homebrew can provide the same isolated Node.js 26 runtime:
 
 ```bash
-brew install node@24
-export PATH="$(brew --prefix node@24)/bin:$PATH"
+brew install node
+export PATH="$(brew --prefix node)/bin:$PATH"
 ./run.sh start
 ```
 

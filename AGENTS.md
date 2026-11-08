@@ -19,7 +19,7 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 
 ### Mandatory CI Check
 - After every code change, run CI from the scripts directory directly: `cd scripts && ./ci.sh`
-- Frontend CI on OSX needs Homebrew `node@24`/`npm`, which is not on the default PATH. Prefix the run with `PATH="/opt/homebrew/opt/node@24/bin:$PATH"` (binary at `/opt/homebrew/Cellar/node@24/*/bin`).
+- Frontend CI on OSX runs against Homebrew `node` (26.x)/`npm`; if it is not on the default PATH, prefix the run with `PATH="/opt/homebrew/opt/node/bin:$PATH"` (binary at `/opt/homebrew/Cellar/node/*/bin`).
 - The **Python dependency audit** step in `ci.sh` is a periodic hygiene gate that fails whenever `pip list --outdated` is non-empty. This is expected on many branches and is unrelated to code changes; classify each outdated package as patch/minor (safe), major (needs review), or unsafe (do not bump) per the Dependency Hygiene section below.
 
 ### Dependency Hygiene (Mandatory)
@@ -206,7 +206,7 @@ In QA mode, flag any code that doesn't match DESIGN.md.
 
 ### Prerequisites
 - Python 3.14.x (verified patch in `.python-version`)
-- Node.js 24.x and npm 11.x (verified Node patch in `.nvmrc`)
+- Node.js 26.x and npm 11.x (verified Node patch in `.nvmrc`)
 - TA-Lib (install separately - see https://ta-lib.org/install/)
 
 ### Installation
