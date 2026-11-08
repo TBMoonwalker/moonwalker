@@ -89,7 +89,9 @@ Moonwalker intentionally remains on TypeScript 6 while Vue's embedded
 type-checking tools depend on the TypeScript programmatic API. TypeScript 7.0
 does not expose that stable API yet, and the TypeScript team recommends that
 Vue projects keep using TypeScript 6 during this transition. The Node type
-package also stays on the Node 24 line to match Moonwalker's supported runtime.
+package tracks the supported runtime: it moved to the Node 26 line
+(`@types/node` 26.6.6, `@tsconfig/node26`) with the 2026-11-08 Node floor
+migration.
 
 The reviewed `@vue/test-utils` 2.5 line replaces the older dependency tree
 that introduced vulnerable `js-beautify` and `glob` dependencies. Recheck the

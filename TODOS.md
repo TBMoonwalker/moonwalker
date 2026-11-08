@@ -71,18 +71,19 @@ entry's plan of record carries the re-verification checklist.
 
 **Priority:** P3
 
-### Upgrade frontend major dependencies: TypeScript 7, @types/node 26
+### Upgrade frontend major dependency: TypeScript 7
 
-**Status:** jsdom 31.0.0 shipped 2026-11-08 (see "Upgrade the vitest jsdom
-environment to 31" in Completed). TypeScript 7 is now blocked on tooling
-(2026-11-08 compatibility review, owner decision 2026-11-08: hold);
-@types/node 26.x remains held on the Node floor (original 2026-11-06 hold
-list of the 2026-11-06 frontend dependency hygiene pass, patch/minor wave
-applied the same day: axios 1.21.0, vite 8.3.6, vitest 5.1.0, vue 3.5.45,
-vue-tsc 3.3.14, @playwright/test 1.65.0, knip 6.44.1).
+**Status:** jsdom 31.0.0 and @types/node 26.6.6 shipped 2026-11-08 (see
+"Upgrade the vitest jsdom environment to 31" and "Move the frontend Node
+types to the Node 26 line" in Completed). TypeScript 7 remains blocked on
+tooling (2026-11-08 compatibility review, owner decision 2026-11-08:
+hold). Original 2026-11-06 hold list of the 2026-11-06 frontend dependency
+hygiene pass (patch/minor wave applied the same day: axios 1.21.0, vite
+8.3.6, vitest 5.1.0, vue 3.5.45, vue-tsc 3.3.14, @playwright/test 1.65.0,
+knip 6.44.1).
 
-**What:** Bump the two held major-version frontend dev dependencies in
-dedicated, separately tested changesets:
+**What:** Bump the remaining held major-version frontend dev dependency in
+a dedicated, separately tested changeset:
 - `typescript` 6.0.3 -> 7.0.2 (blocked until Volar supports 7: TypeScript
   7.0 ships no programmatic compiler API — the `typescript` package's main
   entry exports only `version`/`versionMajorMinor` — and `vue-tsc` 3.3.14
@@ -91,10 +92,6 @@ dedicated, separately tested changesets:
   newer vue-tsc release exists; the 2026-11-06 TypeScript 7.1 beta
   restores the compiler API and makes Vue first-class, so revisit together
   with a TS 7.1 stable release plus a vue-tsc that accepts it).
-- `@types/node` 24.19.2 -> 26.x (hold until the repo's Node floor moves:
-  `.nvmrc` and `frontend/package.json` engines pin Node 24.x, so 26 typings
-  describe a runtime the project does not run; revisit together with a
-  Node 26 upgrade decision).
 
 **Why:** Recorded rather than bundled: major bumps need the compatibility
 review the dependency hygiene policy requires, and the axios 1.21.0 wave
@@ -196,6 +193,30 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Move the frontend Node types to the Node 26 line
+
+**Status:** Completed 2026-11-08 as the second changeset of the Node 24 ->
+26 migration, after the runtime floor itself moved in the companion
+"chore(runtime): move the Node floor from 24 to 26 LTS" changeset.
+
+**What shipped:**
+- `@types/node` 24.19.2 -> 26.6.6 (exact devDep pin) and
+  `@tsconfig/node24` 24.0.5 -> `@tsconfig/node26` 26.0.1;
+  `frontend/tsconfig.node.json` now extends the Node 26 base (target/lib
+  es2024 -> es2025, `ESNext.Temporal` added). The Node type package now
+  describes the runtime the project actually runs.
+- Security review: @types/node 26.6.6 is the genuine DefinitelyTyped
+  scoped package (the 2024 typosquat campaign targeted the lookalike
+  `types-node` name, not this one), has no known vulnerabilities or
+  tampering findings, and passes the npm audit and registry-signature
+  gates; @tsconfig/node26 is a config-only package whose full content was
+  read from the registry tarball.
+- Verification: full frontend CI green under Node 26.13.0 — vue-tsc
+  type-check (the gate exercising the new typings), 364 vitest + 384
+  legacy tests, coverage ratchet, build, vulnerability audit, signatures.
+
+**Priority:** P3
 
 ### Upgrade the vitest jsdom environment to 31
 
