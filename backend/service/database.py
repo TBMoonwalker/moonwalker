@@ -15,6 +15,7 @@ from uuid import uuid4
 import helper
 import model
 from service.msv import (
+    FLOOR_CONFIG_MIGRATION_ROW,
     MINIMUM_SUPPORTED_VERSION,
     MsvBaseline,
     preflight_msv,
@@ -23,6 +24,7 @@ from service.msv import (
 from service.replay_candles import archive_replay_candles_for_deal
 from service.schema_migrations import (
     CONTRACT_DROP_COMPATIBILITY,
+    LEDGER_PRUNE_VERSION,
     MIGRATION_STATUS_APPLIED,
     MigrationDefinition,
     bootstrap_sqlite_migration_ledger,
@@ -73,6 +75,13 @@ _LEGACY_CAMPAIGN_REBUILDS: tuple[tuple[str, tuple[str, ...]], ...] = (
 # trade, because the activation that an accumulation trade requires could not
 # have existed yet.
 FIRST_ACCUMULATION_MIGRATION_VERSION = "2026-10-17-009-accumulation-foundation"
+
+# The configuration migration whose code was removed in 6.0.0.0: installs
+# that ran 4.9-5.x keep its ledger row, which nothing in the current code
+# reads.  Its backup carried only legacy trade-mode values that were all
+# equivalent to the default trade_mode, so the ledger-hygiene prune drops
+# the row losslessly.
+INERT_CONFIG_MIGRATION_ROW = "2026-09-sidestep-removal-v1"
 
 
 def _is_sqlite_lock_error(exc: Exception) -> bool:
@@ -1133,12 +1142,6 @@ class Database:
                     apply=self._ensure_accumulation_initial_entry_schema,
                 ),
                 MigrationDefinition(
-                    version="2026-10-23-015-accumulation-dust-archive",
-                    phase="schema",
-                    description="Add exact inventory evidence to unsellable accumulation dust.",
-                    apply=self._ensure_trade_ledger_columns,
-                ),
-                MigrationDefinition(
                     version="2026-10-26-016-trade-cost-provenance",
                     phase="schema",
                     description="Distinguish fee-inclusive acquisition costs from legacy fee estimates.",
@@ -1703,6 +1706,48 @@ class Database:
             ON tradeexecutions (strategy_slug, strategy_version);
             """)
 
+    async def _prune_legacy_ledger_rows(self) -> None:
+        """Prune applied ledger rows older than the MSV floor (ledger hygiene).
+
+        One-time, gated, idempotent data step: on an install that already
+        carries the MSV floor marker, delete the ``schema_migrations`` rows
+        whose versions sort below the prune version and the inert pre-4.9
+        ``config_migrations`` residue row.  The pruned definitions stay in
+        the code so unsupported installs crossing the floor from below still
+        migrate; on a pruned database the runner's retire rule keeps their
+        rows from reappearing.  The floor marker and the still-live
+        signal-settings row are never pruned, and a pre-floor install (no
+        marker) keeps its full history.  Only the retired rows'
+        ``applied_at`` timestamps are discarded; their metadata stays
+        reconstructible from the migration definitions. See
+        docs/operations.md, "Minimum supported version".
+        """
+        if not self.db_url.startswith("sqlite://"):
+            return
+        async with in_transaction() as connection:
+            floor_marker = (
+                await model.ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW)
+                .using_db(connection)
+                .exists()
+            )
+            if not floor_marker:
+                return
+            deleted_schema, _ = await connection.execute_query(
+                "DELETE FROM schema_migrations WHERE version < ?",
+                [LEDGER_PRUNE_VERSION],
+            )
+            deleted_config, _ = await connection.execute_query(
+                "DELETE FROM config_migrations WHERE version IN (?)",
+                [INERT_CONFIG_MIGRATION_ROW],
+            )
+        if deleted_schema or deleted_config:
+            logging.info(
+                "Ledger hygiene: pruned %s schema-migration row(s) and %s "
+                "inert config-migration row(s) older than the MSV floor.",
+                deleted_schema,
+                deleted_config,
+            )
+
     async def _run_backfill_init_steps(self) -> None:
         """Run ordered data migrations required before the runtime starts."""
         await run_schema_migrations(
@@ -1718,6 +1763,12 @@ class Database:
                     phase="data",
                     description="Attribute legacy closed trades whose lifecycle mode is provably classic DCA.",
                     apply=self._attribute_legacy_closed_trade_modes,
+                ),
+                MigrationDefinition(
+                    version=LEDGER_PRUNE_VERSION,
+                    phase="data",
+                    description="Prune applied ledger rows older than the MSV floor.",
+                    apply=self._prune_legacy_ledger_rows,
                 ),
             )
         )

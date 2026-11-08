@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import helper
 from model import SchemaMigration
 from tortoise import Tortoise
 
@@ -19,7 +20,14 @@ EXPAND_ONLY_COMPATIBILITY = "expand-only:9a56ed9"
 # drops columns, so a failed run must never be silently re-planned as an
 # additive step.
 CONTRACT_DROP_COMPATIBILITY = "contract-drop:2026-11-01-021"
+# One-time ledger-hygiene prune (Phase 5): applied ledger rows older than
+# this version are deleted on an install that is at the MSV floor, and the
+# runner stops re-applying the kept definitions for those rows on that
+# database.  The prune row's own checksum gate protects this boundary.
+LEDGER_PRUNE_VERSION = "2026-11-09-024-ledger-hygiene-prune"
 MAX_MIGRATION_ERROR_LENGTH = 2000
+
+logging = helper.LoggerFactory.get_logger("logs/database.log", "database")
 
 
 @dataclass(frozen=True)
@@ -81,6 +89,27 @@ def _validate_migration_order(
         raise RuntimeError("Schema migrations must be ordered by version.")
 
 
+async def _retired_ledger_boundary() -> str | None:
+    """Return the prune boundary when the ledger-hygiene prune has applied.
+
+    A pruned database must not re-apply the pre-floor migrations whose rows
+    the prune deleted: their definitions stay in the code so unsupported
+    installs crossing the floor from below still migrate, but on a pruned
+    database the applied prune row is the durable record that those rows are
+    retired.  Only *missing* rows are affected: any row that exists,
+    including a failed one, is still processed normally, so the checksum
+    gate and retry semantics are unchanged.
+
+    Returns:
+        The prune version when its ledger row is ``applied``, else ``None``.
+    """
+    pruned = await SchemaMigration.filter(
+        version=LEDGER_PRUNE_VERSION,
+        status=MIGRATION_STATUS_APPLIED,
+    ).exists()
+    return LEDGER_PRUNE_VERSION if pruned else None
+
+
 async def _mark_failed(
     ledger_row: SchemaMigration,
     exc: BaseException,
@@ -99,12 +128,16 @@ async def run_schema_migrations(
 ) -> None:
     """Apply ordered idempotent migrations and record their durable outcome.
 
-    A migration records ``running`` before its side effects. If the process stops,
-    the same idempotent callback runs again on restart. A checksum mismatch stops
-    startup because changing an already-known migration would make recovery
-    ambiguous.
+    A migration records ``running`` before its side effects. If the process
+    stops, the same idempotent callback runs again on restart. A checksum
+    mismatch stops startup because changing an already-known migration would
+    make recovery ambiguous. A migration whose row is missing but was
+    retired by the applied ledger-hygiene prune is skipped: re-applying it on
+    a pruned database would recreate the row the prune just deleted.
     """
     _validate_migration_order(migrations)
+    retired_boundary = await _retired_ledger_boundary()
+    retired_skipped = 0
 
     for migration in migrations:
         ledger_row = await SchemaMigration.get_or_none(version=migration.version)
@@ -114,6 +147,13 @@ async def run_schema_migrations(
                 f"{migration.version}; restore the original migration definition."
             )
         if ledger_row is not None and ledger_row.status == MIGRATION_STATUS_APPLIED:
+            continue
+        if (
+            ledger_row is None
+            and retired_boundary is not None
+            and migration.version < retired_boundary
+        ):
+            retired_skipped += 1
             continue
 
         started_at = datetime.now(timezone.utc)
@@ -154,4 +194,10 @@ async def run_schema_migrations(
         ledger_row.applied_at = datetime.now(timezone.utc)
         await ledger_row.save(
             update_fields=("status", "error", "applied_at"),
+        )
+
+    if retired_skipped:
+        logging.info(
+            "Ledger hygiene active: skipped %d retired pre-floor migration(s).",
+            retired_skipped,
         )

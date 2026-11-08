@@ -12,10 +12,13 @@ from typing import Any
 import model
 import pytest
 import pytest_asyncio
-from model import SchemaMigration, UnsellableTrades
-from service.database import Database, _is_provably_pre_era
+from model import ConfigMigration, SchemaMigration, UnsellableTrades
+from service.config_migrations import SIGNAL_SETTINGS_MIGRATION_VERSION
+from service.database import INERT_CONFIG_MIGRATION_ROW, Database, _is_provably_pre_era
+from service.msv import FLOOR_CONFIG_MIGRATION_ROW
 from service.schema_migrations import (
     EXPAND_ONLY_COMPATIBILITY,
+    LEDGER_PRUNE_VERSION,
     MIGRATION_STATUS_APPLIED,
     MIGRATION_STATUS_FAILED,
     MigrationDefinition,
@@ -683,21 +686,17 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
                 "WHERE type = 'trigger' AND tbl_name = 'placement_intents'"
             ).fetchall()
         }
+        config_rows = connection.execute(
+            "SELECT version FROM config_migrations ORDER BY version"
+        ).fetchall()
 
-    assert len(ledger_rows) == 21
-    assert ("2026-11-01-021-campaign-column-drop", "applied") in ledger_rows
-    assert ("2026-10-28-020-manual-stop-valuation", "applied") in ledger_rows
-    assert "2026-11-04-022-legacy-closed-trade-attribution" in {
-        version for version, _ in ledger_rows
-    }
-    assert "2026-10-27-019-accumulation-contributions" in {
-        version for version, _ in ledger_rows
-    }
-    assert "2026-10-27-017-closed-trade-mode" in {version for version, _ in ledger_rows}
-    assert "2026-10-21-013-accumulation-return-totals" in {
-        version for version, _ in ledger_rows
-    }
-    assert {status for _, status in ledger_rows} == {MIGRATION_STATUS_APPLIED}
+    # The direct jump fully migrated on startup 2 (schema + data steps), and
+    # the ledger-hygiene prune that ran in the same startup left only its own
+    # row: every older row is retired, and the retire rule keeps the
+    # definitions from re-creating them on startup 3.
+    assert ledger_rows == [(LEDGER_PRUNE_VERSION, MIGRATION_STATUS_APPLIED)]
+    # The floor marker survives the prune: it is the floor signal itself.
+    assert config_rows == [(FLOOR_CONFIG_MIGRATION_ROW,)]
     assert accumulation_defaults == ("classic_dca", None, None, None)
     assert len(accumulation_tables) == 9
     assert open_trade is not None
@@ -825,10 +824,9 @@ async def test_contract_drop_migration_resumes_after_interruption(
 
     assert attempts == 2
     with closing(sqlite3.connect(db_path)) as connection:
-        applied_row = connection.execute(
-            "SELECT status FROM schema_migrations "
-            "WHERE version = '2026-11-01-021-campaign-column-drop'"
-        ).fetchone()
+        ledger_rows = connection.execute(
+            "SELECT version, status FROM schema_migrations ORDER BY version"
+        ).fetchall()
         open_trade_columns = {
             row[1]
             for row in connection.execute("PRAGMA table_info('opentrades')").fetchall()
@@ -841,7 +839,9 @@ async def test_contract_drop_migration_resumes_after_interruption(
             "SELECT symbol, deal_id, close_reason FROM closedtrades "
             "WHERE symbol = 'ETH/USDC'"
         ).fetchone()
-    assert applied_row == ("applied",)
+    # The interrupted drop completed on resume (columns gone, rows kept), and
+    # the ledger-hygiene prune that followed left only its own ledger row.
+    assert ledger_rows == [(LEDGER_PRUNE_VERSION, MIGRATION_STATUS_APPLIED)]
     assert "campaign_id" not in open_trade_columns
     assert open_trade == (
         "BTC/USDC",
@@ -953,9 +953,9 @@ async def test_startup_migrates_archive_column_when_old_migrations_already_appli
     database.db_url = f"sqlite://{_migration_database}"
     await database._run_schema_init_steps()
     # Reproduce an installation that completed every pre-archive migration.
-    await SchemaMigration.filter(
-        version="2026-10-23-015-accumulation-dust-archive"
-    ).delete()
+    # The archive column ships with the trade-ledger callback (003): the
+    # 015 dust-archive step that once repeated it is retired.
+    await SchemaMigration.filter(version="2026-07-28-003-trade-ledger-expand").delete()
     connection = Tortoise.get_connection("default")
     await UnsellableTrades.create(symbol="BTC/USDC", amount=0.01, cost=1)
     await connection.execute_script(
@@ -966,9 +966,7 @@ async def test_startup_migrates_archive_column_when_old_migrations_already_appli
     row = await UnsellableTrades.get(symbol="BTC/USDC")
     assert row.amount == 0.01 and row.cost == 1
     assert row.accumulation_inventory_json is None
-    ledger = await SchemaMigration.get(
-        version="2026-10-23-015-accumulation-dust-archive"
-    )
+    ledger = await SchemaMigration.get(version="2026-07-28-003-trade-ledger-expand")
     assert ledger.status == "applied"
 
 
@@ -1377,3 +1375,197 @@ async def test_contract_drop_refuses_orphaned_rebuild_side_table(tmp_path) -> No
         ).fetchall()
     # The refusal left the stranded rows in place for manual recovery.
     assert [row[0] for row in rows] == ["A/USDT", "B/USDT"]
+
+
+@pytest.mark.asyncio
+async def test_retire_rule_skips_only_missing_retired_rows() -> None:
+    """After an applied prune, missing old rows stay retired.
+
+    Rows that exist (even failed ones) are still retried, and newer
+    versions migrate normally: the retire rule never masks a truly
+    un-migrated step.
+    """
+    calls: list[str] = []
+
+    async def no_op() -> None:
+        return None
+
+    async def retried() -> None:
+        calls.append("retried")
+
+    async def current() -> None:
+        calls.append("current")
+
+    failed_def = MigrationDefinition("002", "schema", "failed older migration", retried)
+    # The database is pruned: the prune row is applied and one older
+    # migration still sits as a failed row.
+    await SchemaMigration.create(
+        version=LEDGER_PRUNE_VERSION,
+        phase="data",
+        description="Prune applied ledger rows older than the MSV floor.",
+        checksum="f" * 64,
+        compatibility=EXPAND_ONLY_COMPATIBILITY,
+        status=MIGRATION_STATUS_APPLIED,
+    )
+    await SchemaMigration.create(
+        version="002",
+        phase="schema",
+        description="failed older migration",
+        checksum=failed_def.checksum,
+        compatibility=EXPAND_ONLY_COMPATIBILITY,
+        status=MIGRATION_STATUS_FAILED,
+    )
+
+    await run_schema_migrations(
+        (
+            MigrationDefinition("001", "schema", "retired expansion", no_op),
+            failed_def,
+            MigrationDefinition("999", "schema", "current expansion", current),
+        )
+    )
+
+    assert calls == ["retried", "current"]
+    assert await SchemaMigration.filter(version="001").exists() is False
+    assert (await SchemaMigration.get(version="002")).status == MIGRATION_STATUS_APPLIED
+    assert await SchemaMigration.filter(version="999").exists()
+
+
+@pytest.mark.asyncio
+async def test_prune_keeps_full_history_without_floor_marker(
+    _migration_database,
+) -> None:
+    """A pre-floor install (no floor marker) keeps its entire ledger."""
+    await SchemaMigration.create(
+        version="2026-07-28-001-open-trades-expand",
+        phase="schema",
+        description="Add backward-compatible open-trade runtime columns.",
+        checksum="f" * 64,
+        compatibility=EXPAND_ONLY_COMPATIBILITY,
+        status=MIGRATION_STATUS_APPLIED,
+    )
+    await ConfigMigration.create(version=INERT_CONFIG_MIGRATION_ROW, backup_json="[]")
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._run_backfill_init_steps()
+
+    versions = {row.version for row in await SchemaMigration.all()}
+    assert "2026-07-28-001-open-trades-expand" in versions
+    assert "2026-11-04-022-legacy-closed-trade-attribution" in versions
+    # The prune row itself is recorded: the step ran and gated off.
+    assert (
+        await SchemaMigration.get(version=LEDGER_PRUNE_VERSION)
+    ).status == MIGRATION_STATUS_APPLIED
+    assert await ConfigMigration.filter(version=INERT_CONFIG_MIGRATION_ROW).exists()
+
+
+@pytest.mark.asyncio
+async def test_prune_deletes_pre_floor_rows_once_and_stays_put(
+    _migration_database,
+) -> None:
+    """At the floor, the prune deletes older rows once and keeps live rows."""
+    await ConfigMigration.create(version=FLOOR_CONFIG_MIGRATION_ROW, backup_json="[]")
+    await ConfigMigration.create(
+        version=SIGNAL_SETTINGS_MIGRATION_VERSION, backup_json="[]"
+    )
+    await ConfigMigration.create(version=INERT_CONFIG_MIGRATION_ROW, backup_json="[]")
+    await SchemaMigration.create(
+        version="2026-07-28-001-open-trades-expand",
+        phase="schema",
+        description="Add backward-compatible open-trade runtime columns.",
+        checksum="f" * 64,
+        compatibility=EXPAND_ONLY_COMPATIBILITY,
+        status=MIGRATION_STATUS_APPLIED,
+    )
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._run_backfill_init_steps()
+
+    rows = await SchemaMigration.all()
+    assert [row.version for row in rows] == [LEDGER_PRUNE_VERSION]
+    assert rows[0].status == MIGRATION_STATUS_APPLIED
+    # The live config rows survive; the inert pre-4.9 residue is gone.
+    config_versions = {row.version for row in await ConfigMigration.all()}
+    assert FLOOR_CONFIG_MIGRATION_ROW in config_versions
+    assert SIGNAL_SETTINGS_MIGRATION_VERSION in config_versions
+    assert INERT_CONFIG_MIGRATION_ROW not in config_versions
+
+    # A second startup is byte-stable: the retire rule keeps the retired
+    # 007/022 definitions from re-creating their rows.
+    await database._run_backfill_init_steps()
+    rows = await SchemaMigration.all()
+    assert [row.version for row in rows] == [LEDGER_PRUNE_VERSION]
+    assert {row.version for row in await ConfigMigration.all()} == config_versions
+
+
+@pytest.mark.asyncio
+async def test_prune_resumes_after_interruption(
+    _migration_database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prune that dies before its applied save converges to the pruned state."""
+    await ConfigMigration.create(version=FLOOR_CONFIG_MIGRATION_ROW, backup_json="[]")
+    await SchemaMigration.create(
+        version="2026-07-28-001-open-trades-expand",
+        phase="schema",
+        description="Add backward-compatible open-trade runtime columns.",
+        checksum="f" * 64,
+        compatibility=EXPAND_ONLY_COMPATIBILITY,
+        status=MIGRATION_STATUS_APPLIED,
+    )
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+
+    original_prune = Database._prune_legacy_ledger_rows
+    attempts = 0
+
+    async def interrupted_prune(self: Database) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("simulated ledger prune interruption")
+        await original_prune(self)
+
+    monkeypatch.setattr(Database, "_prune_legacy_ledger_rows", interrupted_prune)
+
+    with pytest.raises(RuntimeError, match="restart.*resume safely"):
+        await database._run_backfill_init_steps()
+    # The failed prune is recorded and nothing was deleted.
+    assert attempts == 1
+    assert await SchemaMigration.filter(
+        version=LEDGER_PRUNE_VERSION, status=MIGRATION_STATUS_FAILED
+    ).exists()
+    assert await SchemaMigration.filter(
+        version="2026-07-28-001-open-trades-expand"
+    ).exists()
+
+    await database._run_backfill_init_steps()
+    assert attempts == 2
+    rows = await SchemaMigration.all()
+    assert [row.version for row in rows] == [LEDGER_PRUNE_VERSION]
+    assert rows[0].status == MIGRATION_STATUS_APPLIED
+
+
+@pytest.mark.asyncio
+async def test_fresh_install_ledger_is_pruned_on_first_startup(
+    _migration_database,
+) -> None:
+    """A fresh install marks the floor, migrates, and prunes in one boot."""
+    # record_msv_floor_marker runs before the schema steps on a fresh DB.
+    await ConfigMigration.create(version=FLOOR_CONFIG_MIGRATION_ROW, backup_json="[]")
+
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._run_schema_init_steps()
+    await database._run_backfill_init_steps()
+
+    rows = await SchemaMigration.all()
+    assert [row.version for row in rows] == [LEDGER_PRUNE_VERSION]
+    assert rows[0].status == MIGRATION_STATUS_APPLIED
+
+    # The second startup keeps the pruned state: the retire rule holds the
+    # retired schema and data definitions off the ledger.
+    await database._run_schema_init_steps()
+    await database._run_backfill_init_steps()
+    rows = await SchemaMigration.all()
+    assert [row.version for row in rows] == [LEDGER_PRUNE_VERSION]

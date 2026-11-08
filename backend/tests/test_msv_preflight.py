@@ -112,6 +112,26 @@ async def test_preflight_msv_floor_migration_present_is_supported() -> None:
 
 
 @pytest.mark.asyncio
+async def test_preflight_msv_pruned_ledger_stays_supported() -> None:
+    """A pruned database (floor row, empty schema history) is still supported.
+
+    The ledger-hygiene prune deletes every older schema-migration row; the
+    preflight must keep classifying the install as supported on the floor
+    row alone, never as fresh.
+    """
+    await ConfigMigration.create(
+        version=FLOOR_CONFIG_MIGRATION_ROW,
+        backup_json="[]",
+    )
+    baseline = await preflight_msv()
+    assert baseline.status == MsvStatus.SUPPORTED
+    assert baseline.floor_applied is True
+    assert baseline.schema_history_present is False
+    assert baseline.supported is True
+    assert baseline.upgrade_guidance == ""
+
+
+@pytest.mark.asyncio
 async def test_get_msv_baseline_is_none_before_preflight() -> None:
     assert get_msv_baseline() is None
 

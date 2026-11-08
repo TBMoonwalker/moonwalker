@@ -59,24 +59,6 @@ entry's plan of record carries the re-verification checklist.
 
 **Priority:** P2
 
-### Decide the migration-ledger prune policy (Phase 5 ledger hygiene)
-
-**Status:** Deferred by the 2026-11-01 legacy-migration-removal review (D6=B); not a PR this wave.
-
-**What:** Decide the retention policy for `schema_migrations` and `config_migrations` rows, which currently grow unbounded across releases. Candidate: a one-time "prune applied ledger rows older than MSV" migration plus a collapse of the `015` (`2026-10-23-015-accumulation-dust-archive`) and `003` (`2026-07-28-003-trade-ledger-expand`) near-duplicate, both gated by MSV and checksum-safe.
-
-**Why:** The ledgers are the only record that a database has applied each migration, but nothing trims them, so every install accumulates one row per applied step forever.
-
-**Pros:** Bounds ledger growth and removes the near-duplicate entry; a gated, checksum-safe step keeps the recovery contract intact.
-
-**Cons:** Pruning touches the recovery contract (the checksums are the resume proof), so the policy must be designed before any row is deleted; a wrong prune makes a healthy database look un-migrated.
-
-**Context:** Phase 5 of the legacy-migration-removal plan; its "What NOT to do" section forbids deleting ledger rows outright, so pruning must go through a gated, checksum-safe step. Deferred via D6 (option B) on 2026-11-01.
-
-**Depends on:** The MSV floor in `backend/service/msv.py`; the checksum contract in `backend/service/schema_migrations.py`.
-
-**Priority:** P3
-
 ### Classify backups before restore confirmation
 
 **Status:** Deferred owner decision from the May 2026 trade-modes-reset CEO plan; the original deferral to TODOS.md was never written. Recorded 2026-11-01 (D12=A).
@@ -229,6 +211,51 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Decide the migration-ledger prune policy (Phase 5 ledger hygiene)
+
+**Status:** Completed 2026-11-08. Policy decided as D1=B (collapse + full
+prune, "Shape B" of the plan): a gated, checksum-safe ledger-hygiene prune
+plus the `015`↔`003` collapse, with the pruned definitions kept in the code
+and a runner retire rule that keeps a prune from being undone.
+
+**What shipped:**
+- `2026-11-09-024-ledger-hygiene-prune` (data step,
+  `backend/service/database.py`): on an install that carries the MSV floor
+  marker, deletes every `schema_migrations` row whose version sorts older
+  than the prune version plus the inert
+  `2026-09-sidestep-removal-v1` `config_migrations` row. The floor marker
+  and the live signal-settings row are never pruned; a pre-floor install
+  (no marker) keeps its full history. One transaction, idempotent, resumable
+  through an interrupted run.
+- The runner in `backend/service/schema_migrations.py` gained the retire
+  rule: on a pruned database it skips a definition only when its row is
+  *missing*, its version is older than the prune, and the prune row is
+  durably `applied` — so the pruned definitions (kept so unsupported
+  installs crossing the floor from below still migrate) never re-create
+  their rows, and rows that exist (including a failed one) still retry under
+  the unchanged checksum gate.
+- The `015` (`2026-10-23-015-accumulation-dust-archive`) definition — a
+  no-op repeat of 003's `_ensure_trade_ledger_columns` — is removed; its
+  ledger row dies in the prune.
+- Tests: retire-rule semantics (missing retired rows skip, existing failed
+  rows retry, newer versions migrate), prune gate (pre-floor install keeps
+  full history), prune-at-floor (deletes once, stays put, keeps live config
+  rows), interrupted-prune resume, fresh-install end-state (pruned on first
+  boot, stable on the second), preflight invariance on a pruned ledger, and
+  the updated 4.9-fixture resume expectation (pruned terminal ledger, floor
+  marker kept).
+- Durable policy recorded in `docs/operations.md` ("Migration ledger
+  retention") and `docs/development.md`; CHANGELOG entry for the next
+  release.
+
+**Plan of record:**
+`~/.gstack/projects/TBMoonwalker-moonwalker/migration-ledger-prune-policy-plan-20261108.md`
+(D1=B, 2026-11-08).
+
+**Effort:** M
+
+**Priority:** P3
 
 ### Remove the three deferred Phase 4 data-compat shims at their concrete floors
 

@@ -2,6 +2,19 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [6.4.0.0] - Unreleased
+
+### Changed
+
+- Pruned the startup migration ledgers on the first startup after an
+  installation reached the minimum supported version: applied ledger rows
+  older than the floor are removed once (the floor marker and live
+  migration records are kept, and installations below the floor keep their
+  full history), and the near-duplicate dust-archive ledger entry (015, a
+  no-op repeat of 003) is no longer tracked. Operator-invisible ledger
+  hygiene; migration behavior for supported and pre-floor installations is
+  unchanged.
+
 ## [6.3.0.0] - 2026-11-07
 
 ### Breaking Changes

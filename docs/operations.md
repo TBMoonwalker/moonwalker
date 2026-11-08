@@ -119,6 +119,39 @@ report `supported`.
 > its guards are now gone, the historical entry is corrected, and the
 > unreleased changelog entry documents the current restore behavior.
 
+### Migration ledger retention
+
+The startup migration ledgers (`schema_migrations`, `config_migrations`)
+record which migrations a database has applied; the checksums on those rows
+are the recovery contract, so they are never trimmed outside a gated,
+ledger-tracked step. Once an install is at the floor, the one-time hygiene
+step `2026-11-09-024-ledger-hygiene-prune` bounds their growth:
+
+- **Watermark:** every ledger row whose version sorts older than the prune
+  step is deleted. At the `6.3.0.0` floor that is the entire pre-floor
+  history (migrations 001-022); rows added after the floor accumulate only
+  until the next floor raise retires them in turn.
+- **Always kept:** the floor marker row (`2026-11-msv-floor-6-3-v1`), the
+  still-live signal-settings migration row (`2026-07-signal-settings-v1`,
+  whose `backup_json` is the only pre-canonicalization snapshot), and every
+  row on a pre-floor install — the step is gated on the floor marker and
+  never touches a database below the floor.
+- **Retire rule:** the pruned migrations' definitions stay in the code so
+  unsupported installs crossing the floor from below still migrate. On a
+  pruned database the migration runner skips a definition only when its row
+  is *missing*, its version is older than the prune step, and the prune row
+  is durably `applied`. Rows that exist (including a failed one) are still
+  retried, and the checksum gate is unchanged.
+- **Idempotent and resumable:** the deletes run in one transaction and the
+  step's own ledger row records its outcome; a killed startup re-runs the
+  (no-op) deletes and converges on the pruned state.
+- **What a prune discards:** only the `applied_at` timestamps of retired
+  rows — their version, description and checksum stay reconstructible from
+  the migration definitions and git history. The inert pre-4.9
+  `2026-09-sidestep-removal-v1` config row is dropped as well; its backup
+  carried only legacy trade-mode values that were all equivalent to the
+  default `trade_mode`, so the drop is lossless.
+
 ## Shared local Redis
 
 Separate Moonwalker installations can reuse the Redis server on
