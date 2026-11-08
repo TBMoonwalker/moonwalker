@@ -304,6 +304,62 @@ async def test_scope_change_blocks_lookup_and_saved_result_replay(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action, order_type, side",
+    [
+        ("limit_sell", "limit", "sell"),
+        ("buy", "market", "buy"),
+    ],
+)
+async def test_legacy_unscoped_persisted_intent_completes_without_lookup(
+    tmp_path,
+    action: str,
+    order_type: str,
+    side: str,
+) -> None:
+    """Intents persisted before the account-scope field existed must not lock startup.
+
+    A persisted intent already committed its local business state, so
+    completing it performs no exchange I/O and needs no verified account
+    binding. Quarantining it instead keeps the fail-closed startup gate
+    permanently red after an in-place upgrade.
+    """
+    await _init_database(tmp_path)
+    try:
+        row = await model.PlacementIntent.create(
+            operation_id=f"{action}-legacy-persisted",
+            client_order_id="mw-legacy-client",
+            symbol="BTC/USDC",
+            exchange_name="binance",
+            action=action,
+            side=side,
+            order_type=order_type,
+            state="persisted",
+            request_json='{"symbol":"BTC/USDC","total_amount":1.0}',
+        )
+        exchange = _FakeExchange(
+            ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.NOT_FOUND,
+                error_message="lookup must not run for a persisted intent",
+            )
+        )
+
+        summary = await PlacementReconciler(exchange, _reject_resume).reconcile(
+            {"exchange": "binance", "market": "spot", "dry_run": False}
+        )
+
+        await row.refresh_from_db()
+        assert row.state == PlacementIntentState.COMPLETED.value
+        assert row.reason_code is None
+        assert exchange.calls == []
+        assert summary.completed == 1
+        assert summary.quarantined == 0
+        assert summary.ready is True
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_legacy_unscoped_result_stays_unresolved_without_invented_binding(
     tmp_path,
 ):

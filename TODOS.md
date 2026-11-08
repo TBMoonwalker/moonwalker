@@ -2,6 +2,20 @@
 
 ## Next up
 
+### Add an operator repair path for quarantined classic-DCA placement intents
+
+**Status:** Recorded 2026-11-07 during investigation of a reported startup lockout after upgrading to the latest main. The same-day fix (below) removed the most common trigger; this entry is the remaining operator-exit gap.
+
+**What:** A quarantined placement intent (`quarantined`/`restored_quarantined`) keeps the fail-closed startup gate in `app.py` (`reconcile().ready is False` via `list_action_required()`) red forever: `QUARANTINED` is terminal with no valid transition (`_VALID_TRANSITIONS` in `service/placement_intents.py`), and no endpoint releases a classic-DCA intent — the only escape is manual SQLite surgery. Only accumulation orders have a repair path (`POST /accumulation/repair`, `service/accumulation/repair.py`, served in the accumulation `_repair_only()` mode). Add a mode-neutral recovery affordance for classic-DCA quarantined intents, e.g. extend repair-only mode to them and expose a lookup-only endpoint that (a) reconciles the quarantined order under the currently configured credentials and applies terminal evidence through the existing `PlacementRecoveryHandler.resume` path, or (b) records an explicit operator dismissal into a non-blocking terminal disposition after review.
+
+**Why:** The startup error "Exchange placement reconciliation requires operator action before trading can start: \<operation_id\>" names an operator action that does not exist for classic-DCA intents. Any quarantine cause (legacy unscoped `accepted`/`filled` intent surviving a pre-`075fe4f` upgrade, `local_recovery_failed`, `exchange_lookup_unavailable`, account-scope change, `limit_order_missing_id`) can end in a permanent lockout; the 2026-11-07 startup fix only completes legacy unscoped `persisted` intents (no exchange I/O), so the remaining states still have no exit.
+
+**Context:** 2026-11-07 investigation of the reported startup lockout (a `limit_sell` intent quarantined at startup after upgrading to the latest main). The scope gate added in `075fe4f` (2026-10-24) quarantines every nonterminal intent whose `request_json` lacks `_execution_scope`; legacy `persisted` intents now complete before the gate (regression test `test_legacy_unscoped_persisted_intent_completes_without_lookup`), while I/O-requiring legacy states stay quarantined as codified by `test_legacy_unscoped_result_stays_unresolved_without_invented_binding` and the runtime dedup guard `test_workflow_does_not_complete_unscoped_saved_result`.
+
+**Depends on:** The startup gate and `AccumulationRepairOnlyMiddleware` in `app.py`; the accumulation repair flow is the reference pattern.
+
+**Priority:** P2
+
 ### Upgrade to Litestar 3.x and pandas 4.x after release
 
 **Status:** Recorded 2026-11-07 as the follow-up of the completed "Prepare

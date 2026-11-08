@@ -19,6 +19,7 @@ from service.placement_intents import (
     PlacementAction,
     PlacementIntentService,
     PlacementIntentState,
+    has_execution_scope,
     is_exchange_placement_enabled,
     placement_scope_matches,
 )
@@ -144,6 +145,17 @@ class PlacementReconciler:
                 reason_code="startup_confirmed_never_submitted",
             )
             return PlacementIntentState.REJECTED.value
+        if state == PlacementIntentState.PERSISTED.value and not has_execution_scope(
+            intent
+        ):
+            # Intents persisted before account scopes existed already
+            # committed their local business state. Completing them performs
+            # no exchange I/O, so no verified binding is required.
+            await self.intents.transition(
+                operation_id,
+                PlacementIntentState.COMPLETED,
+            )
+            return PlacementIntentState.COMPLETED.value
         if not placement_scope_matches(intent, config):
             await self._quarantine(
                 operation_id,

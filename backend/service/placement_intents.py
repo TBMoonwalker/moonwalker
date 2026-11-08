@@ -213,6 +213,14 @@ def placement_scope_matches(intent: Any, config: dict[str, Any]) -> bool:
     return isinstance(scope, str) and scope == exchange_execution_scope(config)
 
 
+def has_execution_scope(intent: Any) -> bool:
+    """Return whether a persisted intent carries a verified account scope."""
+    return isinstance(
+        deserialize_placement_payload(intent.request_json).get("_execution_scope"),
+        str,
+    )
+
+
 def ensure_operation_id(
     order: dict[str, Any],
     action: PlacementAction | str,
