@@ -4,7 +4,9 @@ cachetools==7.3.0
 ccxt==4.5.92
 pandas==3.1.1
 # Reviewed timezone engine for pandas, including post-2038 TZif support.
-python-dateutil==3.0.0
+# 4.0.0 (2026-11-01) drops the `six` dependency and tightens isoparse; the
+# tzfile rewrite from 3.0.0 is retained, so the post-2038 rationale holds.
+python-dateutil==4.0.0
 litestar==2.25.0
 msgspec==0.22.0
 python-socketio==5.18.1
