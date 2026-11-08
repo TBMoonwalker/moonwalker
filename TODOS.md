@@ -59,18 +59,6 @@ entry's plan of record carries the re-verification checklist.
 
 **Priority:** P2
 
-### Extend the campaign residue gate to the full 021 drop set
-
-**Status:** Hardening candidate from the 2026-11-02 pre-landing review (F5, red-team 6/10); the current gate scope is an approved, documented design decision.
-
-**What:** The campaign-residue gate (startup `_assert_no_open_trade_campaign_residue` in `backend/service/database.py` and restore `_assert_no_open_trade_campaign_residue` in `backend/service/backup_restore.py` — the two implementations must stay in sync) aborts startup / refuses a restore only when an `opentrades` row carries `campaign_id IS NOT NULL`. The seven sidestep-era waiting-state columns that migration 021 drops (`waiting_reference_price`, `reserved_reentry_quote`, `waiting_reference_amount`, `waiting_reference_quote`, `virtual_waiting_profit`, `virtual_waiting_profit_percent`, `last_transition_at`) are zeroed silently on rows that still carry them. Extend the assertion to the full drop set (campaign reference OR non-zero waiting state) with a fixture test.
-
-**Why:** In 4.8.x the waiting-state writers were campaign-context paths that propagated `campaign_id`, so the flagged scenario needs an already-inconsistent row on an unsupported 4.8.x direct upgrade. The risk is low and the current scope was approved; recorded rather than extended in this wave.
-
-**Context:** Pre-landing review of `chore/hygiene-logging-serialization-sync-2026-10` (2026-11-02), finding F5; operator decision 2026-11-02 (PR note + TODO, no code change this wave).
-
-**Priority:** P3
-
 ### Upgrade frontend major dependency: TypeScript 7
 
 **Status:** jsdom 31.0.0 and @types/node 26.6.6 shipped 2026-11-08 (see
@@ -193,6 +181,40 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Extend the campaign residue gate to the full 021 drop set
+
+**Status:** Dropped 2026-11-08 by owner decision: the 4.8.x compatibility
+scenario that motivated this hardening is no longer needed, so the gate's
+current scope (campaign references only) is final. No code change; the
+startup and restore gates keep their current assertions and their
+documented "keep in sync" behavior.
+
+**What it covered:** The campaign-residue gate (startup
+`_assert_no_open_trade_campaign_residue` in `backend/service/database.py`
+and restore `_assert_no_open_trade_campaign_residue` in
+`backend/service/backup_restore.py`) aborts startup / refuses a restore
+only when an `opentrades` row carries `campaign_id IS NOT NULL`. The seven
+sidestep-era waiting-state columns that migration 021 drops
+(`waiting_reference_price`, `reserved_reentry_quote`,
+`waiting_reference_amount`, `waiting_reference_quote`,
+`virtual_waiting_profit`, `virtual_waiting_profit_percent`,
+`last_transition_at`) are zeroed silently on rows that still carry them;
+the entry proposed extending the assertion to the full drop set (campaign
+reference OR non-zero waiting state) with a fixture test.
+
+**Why dropped:** In 4.8.x the waiting-state writers were campaign-context
+paths that propagated `campaign_id`, so the flagged scenario needed an
+already-inconsistent row on an unsupported 4.8.x direct upgrade. With the
+4.8.x compatibility no longer needed, the residual risk does not justify
+extending the gate.
+
+**Origin:** Pre-landing review of
+`chore/hygiene-logging-serialization-sync-2026-10` (2026-11-02), finding
+F5; recorded rather than extended that wave (operator decision
+2026-11-02).
+
+**Priority:** P3
 
 ### Move the frontend Node types to the Node 26 line
 
