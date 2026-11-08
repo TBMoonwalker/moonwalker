@@ -11,6 +11,13 @@
                 Loading chart...
             </div>
             <div v-show="chartReady" class="expand-chart-stack">
+                <div
+                    v-if="indicatorUnavailable"
+                    class="indicator-unavailable"
+                    role="status"
+                >
+                    Indicator overlays unavailable for this trade.
+                </div>
                 <div v-if="priceIndicators.length > 0" class="chart-legend">
                     <span
                         v-for="series in priceIndicators"
@@ -145,6 +152,7 @@ const isEmpty = ref(false)
 const loadError = ref('')
 const chartReady = ref(false)
 const replayIndicators = ref<BacktestIndicatorSeries[]>([])
+const indicatorUnavailable = ref(false)
 const ohlcvStore = useOhlcvStore()
 const indicatorChartRefs = new Map<string, HTMLElement>()
 let chart: ReturnType<typeof createChart> | null = null
@@ -251,6 +259,7 @@ async function loadReplayIndicators(
     replayIndicators.value = []
     const dealId = props.dealId ?? props.archiveDealId
     if (!dealId) {
+        indicatorUnavailable.value = true
         return
     }
     const indicatorEnd = historyEnd ?? Date.now()
@@ -261,11 +270,15 @@ async function loadReplayIndicators(
         const payload = await fetchJson<ReplayIndicatorResponse>(
             indicatorUrl,
         )
-        replayIndicators.value = Array.isArray(payload.result?.indicators)
+        const series = Array.isArray(payload.result?.indicators)
             ? payload.result.indicators
             : []
-    } catch (_error) {
+        replayIndicators.value = series
+        indicatorUnavailable.value = series.length === 0
+    } catch (error) {
         replayIndicators.value = []
+        indicatorUnavailable.value = true
+        console.warn('Failed loading replay indicators:', error)
     }
 }
 
@@ -330,6 +343,7 @@ async function initChart(): Promise<void> {
     loadError.value = ''
     chartReady.value = false
     replayIndicators.value = []
+    indicatorUnavailable.value = false
 
     const beginTimestamp = toTimestampMs(props.startTimestamp)
     if (beginTimestamp === null) {
@@ -686,6 +700,12 @@ onUnmounted(() => {
     border-top: 1px solid rgba(138, 148, 141, 0.16);
     font-size: 12px;
     justify-content: flex-start;
+}
+
+.indicator-unavailable {
+    color: rgba(236, 239, 234, 0.62);
+    font-size: 12px;
+    padding: 10px 14px 0;
 }
 
 .legend-item {

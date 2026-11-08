@@ -59,24 +59,6 @@ entry's plan of record carries the re-verification checklist.
 
 **Priority:** P2
 
-### Show an unavailable notice on replay charts without indicator series
-
-**Status:** Declined option of D19 (2026-11-01 design review), tracked per D22/R10.
-
-**What:** A muted "Indicator overlays unavailable for this trade" caption on the replay chart when the indicator fetch yields no series (also fixes the existing swallowed-404 case).
-
-**Why:** D19 deferred it to keep the wave removal-only; legacy rows without a deal id now render candles without indicator overlays and no explanation, and without a repo-side record the deliberate silence is undiscoverable in ~6 months.
-
-**Pros:** Honest state per DESIGN.md ("missing feeds are shown as unavailable rather than invented"); fixes a pre-existing silent case (swallowed 404 in `loadReplayIndicators`).
-
-**Cons:** New chart state + copy (~3h human / ~20min CC).
-
-**Context:** `frontend/src/components/TradeReplayChart.vue` `loadReplayIndicators` (silent early return + swallowed 404); the D19 record in the legacy-migration-removal plan.
-
-**Depends on:** Nothing — standalone chart-state addition, buildable in any future wave.
-
-**Priority:** P3
-
 ### Extend the campaign residue gate to the full 021 drop set
 
 **Status:** Hardening candidate from the 2026-11-02 pre-landing review (F5, red-team 6/10); the current gate scope is an approved, documented design decision.
@@ -193,6 +175,31 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Show an unavailable notice on replay charts without indicator series
+
+**Status:** Completed 2026-11-08 per
+`~/.gstack/projects/TBMoonwalker-moonwalker/replay-indicator-notice-plan-20261108.md`.
+Origin: declined option of D19 (2026-11-01 legacy-migration-removal design
+review), tracked per D22/R10.
+
+**What shipped:**
+- `frontend/src/components/TradeReplayChart.vue` now tracks an
+  `indicatorUnavailable` state and shows a muted
+  "Indicator overlays unavailable for this trade." caption (12px,
+  `role="status"`) inside the chart stack whenever the indicator fetch yields
+  no series — legacy rows without a deal id, empty indicator results, or
+  failed indicator requests. The state is settled before the chart first
+  paints (no flash), and the empty-candle message remains the only state when
+  no candles exist.
+- The previously swallowed indicator-fetch failure now also reports
+  `console.warn` with the fetch error (UI stays muted); no backend or
+  endpoint changes.
+- New vitest spec `frontend/tests-vitest/trade-replay-indicator-notice.test.ts`
+  covering all five states (empty result, fetch failure, missing deal id,
+  series present, no candles).
+
+**Priority:** P3
 
 ### Classify backups before restore confirmation
 

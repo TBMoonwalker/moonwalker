@@ -28,6 +28,14 @@ All notable changes to Moonwalker are documented in this file.
   hygiene; migration behavior for supported and pre-floor installations is
   unchanged.
 
+### Fixed
+
+- Replay charts now show a muted "Indicator overlays unavailable for this
+  trade." notice when no indicator series can be loaded — legacy rows without
+  a deal id, empty indicator results, or failed indicator requests — instead
+  of rendering candles with no explanation. Failed indicator requests are now
+  reported to the browser console.
+
 ## [6.3.0.0] - 2026-11-07
 
 ### Breaking Changes
