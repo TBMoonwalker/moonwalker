@@ -12,7 +12,7 @@
 
 **Context:** 2026-11-07 investigation of the reported startup lockout (a `limit_sell` intent quarantined at startup after upgrading to the latest main). The scope gate added in `075fe4f` (2026-10-24) quarantines every nonterminal intent whose `request_json` lacks `_execution_scope`; legacy `persisted` intents now complete before the gate (regression test `test_legacy_unscoped_persisted_intent_completes_without_lookup`), while I/O-requiring legacy states stay quarantined as codified by `test_legacy_unscoped_result_stays_unresolved_without_invented_binding` and the runtime dedup guard `test_workflow_does_not_complete_unscoped_saved_result`.
 
-**Depends on:** The startup gate and `AccumulationRepairOnlyMiddleware` in `app.py`; the accumulation repair flow is the reference pattern.
+**Depends on:** The startup gate and `AccumulationRepairOnlyMiddleware` in `app.py`; the accumulation repair flow is the reference pattern. The completed backup-classification entry (2026-11-08) left a follow-up here: point its `quarantined_intents` finding's `next_action` copy at this repair endpoint once it ships.
 
 **Priority:** P2
 
@@ -58,24 +58,6 @@ match within the same changeset.
 entry's plan of record carries the re-verification checklist.
 
 **Priority:** P2
-
-### Classify backups before restore confirmation
-
-**Status:** Deferred owner decision from the May 2026 trade-modes-reset CEO plan; the original deferral to TODOS.md was never written. Recorded 2026-11-01 (D12=A).
-
-**What:** Quoted verbatim from the trade-modes-reset CEO plan "Deferred to TODOS.md" section: "Add a restore/import review state that classifies backups as Dynamic DCA, Sidestep, or deprecated static before restore confirmation".
-
-**Why:** The restore flow silently drops legacy bridge keys from pre-4.9 backups (this wave's D11), so an operator restoring an old backup gets no indication of what representation the backup carried; a classification screen before confirmation would make that legible.
-
-**Pros:** Restores an explicitly made owner decision to the backlog where it was supposed to live; implementation stays a future wave, with zero scope change to the removal wave.
-
-**Cons:** New restore-flow UI work (a classification screen) unrelated to the removal wave; the underlying silent key-drop behavior stays unexplained until this ships.
-
-**Context:** The trade-modes-reset CEO plan (2026-05-12, branch `feature/code-stabilization`) deferred this item to TODOS.md; the 2026-11-01 legacy-migration-removal eng review (D12, option A) recorded the missing entry.
-
-**Depends on:** Nothing — standalone restore-flow addition, buildable in any future wave.
-
-**Priority:** P3
 
 ### Show an unavailable notice on replay charts without indicator series
 
@@ -211,6 +193,65 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Classify backups before restore confirmation
+
+**Status:** Completed 2026-11-08, implemented per the 2026-11-08 re-plan: a
+read-only classification preview over the restore's own validation primitives,
+a pre-confirmation review surface in the dashboard, and no force-restore path.
+Origin: deferred owner decision from the May 2026 trade-modes-reset CEO plan
+(recorded 2026-11-01 as D12=A; the original deferral to TODOS.md had never
+been written).
+
+**What shipped:**
+- `POST /config/backup/classify` (`backend/controller/config.py`, strict
+  `msgspec.Struct` body, no DB access, no lock, no confirm flag): runs the
+  restore's validation primitives as a collect-all pass and returns a
+  `classification` summary (`schema_version`, `trade_mode_era` =
+  `accumulation` / `dynamic_dca` / `legacy_unspecified`,
+  `pre_4_9_bridge_keys`, `includes_accumulation`) plus `findings` ordered
+  blocking-first, each with `code`, `severity` (`info` / `warning` /
+  `blocking`), `message`, safe-field `detail`, and optional `next_action`.
+  `warning` findings name the silent outcomes (pre-4.9 bridge keys dropped per
+  D11, row values whose columns no longer exist — including the sidestep-era
+  waiting-state set — quarantined intent count, config-only pin removal);
+  `blocking` findings mirror the existing restore refusals verbatim.
+- `backend/service/backup_vintage.py` owns the shared residue vocabulary
+  (`SIDESTEP_WAITING_STATE_COLUMNS`, `campaign_residue_rows`,
+  `campaign_residue_symbols`); the restore's campaign-residue assertion now
+  uses the shared predicate and the startup gate in `database.py`
+  cross-references it, giving the "keep in sync" note of the residue-gate
+  TODO one canonical definition.
+- Dashboard: on restore-button click the composable fetches the
+  classification for that mode (per-mode cache, in-flight dedupe) and
+  `ConfigBackupRestoreControls.vue` renders the findings in an ARIA live
+  region before the confirmation dialog. A blocking finding disables the
+  matching restore button and the composable returns `blocked` before any
+  confirm — no force-restore path. If the preview is unavailable the flow
+  degrades to a warning and the restore endpoint's own checks remain the
+  authoritative gate. The control-center wrapper announces blocked outcomes
+  through the same live region.
+- Zero restore behavior change: the D11 bridge-key drop, the residue gate,
+  dry-run forcing, and the existing refusal messages are unchanged, and the
+  existing restore suite passes unmodified. New backend fixture tests
+  (`backend/tests/test_backup_classify.py`) pin every finding code, era
+  variant, and the non-mutation guarantee; the frontend adds
+  `tests-vitest/backup-classification.test.ts` and ratchets
+  `useConfigBackupRestore.ts` into the vitest coverage guard.
+- Docs: the endpoint contract in `docs/api.md`, the review semantics and the
+  no-force-restore statement in `docs/operations.md` "Backup And Restore",
+  and the 6.4.0.0 changelog entry.
+
+**Follow-up:** Once "Add an operator repair path for quarantined classic-DCA
+placement intents" ships, point the `quarantined_intents` finding's
+`next_action` copy at that repair endpoint (copy update ships in that
+changeset).
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/backup-classification-replan-20261108.md`
+
+**Effort:** M
+
+**Priority:** P3
 
 ### Decide the migration-ledger prune policy (Phase 5 ledger hygiene)
 

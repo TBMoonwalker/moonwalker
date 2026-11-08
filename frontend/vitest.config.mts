@@ -37,6 +37,7 @@ export default defineConfig({
         'src/helpers/heatmap.ts',
         'src/helpers/strategyBuilderGraph.ts',
         'src/helpers/tradeLifecycle.ts',
+        'src/composables/useConfigBackupRestore.ts',
         'src/composables/useStrategyBuilderWorkspace.ts',
         'src/composables/useViewport.ts',
       ],
@@ -80,6 +81,12 @@ export default defineConfig({
           branches: 65,
           functions: 80,
           lines: 80,
+        },
+        'src/composables/useConfigBackupRestore.ts': {
+          statements: 85,
+          branches: 60,
+          functions: 80,
+          lines: 85,
         },
         'src/composables/useStrategyBuilderWorkspace.ts': {
           statements: 95,

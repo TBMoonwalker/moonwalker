@@ -31,6 +31,7 @@ runtime and multiple concurrent dashboard clients.
 | `POST` | `/config/denylist/deny` | Append an open trade's base token to `pair_denylist` atomically, blocking future signal entries while existing open trades continue. |
 | `GET` | `/config/backup/export?include_trade_data=false` | Export config-only backup payload. |
 | `GET` | `/config/backup/export?include_trade_data=true` | Export full backup payload including trade data. |
+| `POST` | `/config/backup/classify` | Read-only preview that classifies a backup payload and lists what a restore would do to it, without touching any state. |
 | `POST` | `/config/backup/restore` | Restore config-only or full backup payloads. |
 
 Configuration editors must read `config_revision` from `GET /config/all` and
@@ -90,6 +91,18 @@ Notes:
   its exact strategy dependency before any holding exists. Config-only restore
   does not replace trade or accumulation records and clears the initial pin so
   the operator must select a compatible local version.
+- `POST /config/backup/classify` expects the same `backup` and optional
+  `restore_trade_data` fields as restore (no `confirm`) and performs no reads
+  from or writes to the database. It returns a `classification` summary
+  (`schema_version`, `trade_mode_era`, `pre_4_9_bridge_keys`,
+  `includes_accumulation`) plus a `findings` list ordered blocking-first. Each
+  finding carries `code`, `severity` (`info` | `warning` | `blocking`),
+  `message`, safe-field `detail`, and an optional `next_action`. `blocking`
+  findings mirror the refusal the restore endpoint would raise; `warning`
+  findings name the silent drops the restore performs (pre-4.9 bridge keys,
+  row values whose columns no longer exist, quarantined placement intents,
+  config-only pin removal). The restore endpoint remains the authoritative
+  gate; the preview only makes its outcome legible before confirmation.
 - Switching the signal plugin to `csv_signal` is rejected while open trades
   still exist.
 

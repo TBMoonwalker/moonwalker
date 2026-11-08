@@ -1214,7 +1214,13 @@ class Database:
 
     @staticmethod
     async def _assert_no_open_trade_campaign_residue(conn: Any) -> None:
-        """Fail closed on live open trades that still reference a campaign."""
+        """Fail closed on live open trades that still reference a campaign.
+
+        The canonical residue definition is
+        ``service.backup_vintage.campaign_residue_rows`` (``campaign_id`` is
+        not null); this SQL form filters at the table level so it stays
+        cheap on large open-trade tables. Keep the two in sync.
+        """
         _, columns = await conn.execute_query("PRAGMA table_info(opentrades)")
         if not any(row["name"] == "campaign_id" for row in columns):
             return

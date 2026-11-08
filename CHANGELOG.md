@@ -4,6 +4,19 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [6.4.0.0] - Unreleased
 
+### Added
+
+- Pre-confirmation backup review: before restoring, the dashboard classifies
+  the selected backup (read-only, no database access) and shows what the
+  restore would do to it — the backup's era, the pre-4.9 bridge keys or
+  dropped legacy columns it silently discards, the placement intents that
+  will restore into quarantine, and the config-only removal of the local
+  accumulation pin. Backups the restore would refuse (campaign residue,
+  removed config keys, incomplete accumulation sections, invalid recovery
+  manifest) are flagged as blocking and their restore button is disabled;
+  there is no force-restore path. Restore behavior itself is unchanged.
+  See `POST /config/backup/classify` in the API reference.
+
 ### Changed
 
 - Pruned the startup migration ledgers on the first startup after an

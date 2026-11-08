@@ -18,6 +18,11 @@ from service.accumulation.backup import (
     safe_accumulation_row,
     validate_accumulation_backup,
 )
+from service.backup_vintage import (
+    SIDESTEP_WAITING_STATE_COLUMNS,
+    campaign_residue_rows,
+    campaign_residue_symbols,
+)
 from service.config import (
     Config,
     build_removed_config_key_message,
@@ -74,6 +79,33 @@ def _serialize_value(value: Any) -> Any:
     if isinstance(value, UUID):
         return str(value)
     return value
+
+
+def _finding(
+    code: str,
+    severity: str,
+    message: str,
+    detail: Any = None,
+    next_action: str | None = None,
+) -> dict[str, Any]:
+    """Build one JSON-safe classification finding."""
+    return {
+        "code": code,
+        "severity": severity,
+        "message": message,
+        "detail": detail,
+        "next_action": next_action,
+    }
+
+
+def _forced_dry_run_pause_finding() -> dict[str, Any]:
+    """The guaranteed post-restore state, stated before the operator commits."""
+    return _finding(
+        "forced_dry_run_pause",
+        "info",
+        "A restore always finishes with the instance paused in dry-run mode; "
+        "review the restored state before activating and resuming trading.",
+    )
 
 
 class BackupService:
@@ -262,6 +294,496 @@ class BackupService:
             restore_summary["history_failed_symbols"] = failed
 
         return restore_summary
+
+    def classify_backup(
+        self,
+        backup_payload: dict[str, Any],
+        *,
+        restore_trade_data: bool,
+    ) -> dict[str, Any]:
+        """Classify a backup payload against the current restore semantics.
+
+        Runs the restore's own validation primitives as a collect-all pass and
+        reports every finding without touching any state. Findings with
+        severity ``blocking`` mirror the refusal the restore would raise;
+        ``warning`` findings name the silent drops the restore performs;
+        ``info`` findings state the guaranteed post-restore outcome. The
+        restore endpoint remains the authoritative gate: this preview never
+        mutates and never bypasses it.
+
+        Args:
+            backup_payload: The parsed backup document to classify.
+            restore_trade_data: Whether the classification is for a full
+                restore (trade data included) or a config-only restore.
+
+        Returns:
+            A JSON-safe document with a ``classification`` summary and the
+            ordered ``findings`` list (blocking first, then warning, then
+            info).
+        """
+        findings: list[dict[str, Any]] = []
+        schema_version = backup_payload.get("schema_version", 1)
+        if schema_version not in {1, 2, 3}:
+            findings.append(
+                _finding(
+                    "unsupported_schema_version",
+                    "blocking",
+                    "Unsupported backup schema version.",
+                    detail={"schema_version": schema_version},
+                )
+            )
+            findings.append(_forced_dry_run_pause_finding())
+            return self._build_classification(
+                backup_payload,
+                schema_version,
+                trade_mode_era=None,
+                bridge_keys=frozenset(),
+                includes_accumulation=False,
+                findings=findings,
+            )
+
+        bridge_keys, kept_rows, config_findings = self._classify_config_rows(
+            backup_payload.get("config")
+        )
+        findings.extend(config_findings)
+        if bridge_keys:
+            findings.append(
+                _finding(
+                    "legacy_bridge_keys_dropped",
+                    "warning",
+                    f"{len(bridge_keys)} legacy trade-mode key(s) will be "
+                    "dropped on restore; every pre-4.9 representation was "
+                    "equivalent to the default dynamic_dca mode.",
+                    detail={"keys": sorted(bridge_keys)},
+                )
+            )
+
+        trade_data = backup_payload.get("trade_data")
+        validated_trade_data: dict[str, list[dict[str, Any]]] | None = None
+        quarantined_intents: list[dict[str, Any]] = []
+        if restore_trade_data:
+            if not isinstance(trade_data, dict):
+                findings.append(
+                    _finding(
+                        "invalid_trade_data",
+                        "blocking",
+                        "Full restore requires a backup that includes trade data.",
+                        detail={"restore_trade_data": restore_trade_data},
+                    )
+                )
+            else:
+                (
+                    validated_trade_data,
+                    trade_findings,
+                    dropped_columns,
+                ) = self._classify_trade_data(trade_data)
+                findings.extend(trade_findings)
+                if dropped_columns:
+                    findings.append(self._dropped_columns_finding(dropped_columns))
+                residue_rows = campaign_residue_rows(
+                    validated_trade_data.get("open_trades", [])
+                )
+                if residue_rows:
+                    findings.append(
+                        _finding(
+                            "campaign_residue",
+                            "blocking",
+                            f"Restore aborted: the backup has "
+                            f"{len(residue_rows)} open trade row(s) with "
+                            "legacy campaign residue (symbols: "
+                            f"{', '.join(campaign_residue_symbols(residue_rows))}). "
+                            "The campaign columns were dropped in 4.9, so "
+                            "restoring would silently lose the campaign "
+                            "linkage. Review the open position(s) on the "
+                            "exchange, clear the campaign_id value(s) in the "
+                            "backup's open-trade rows, then retry; see "
+                            'docs/operations.md, "Campaign residue recovery".',
+                            detail={
+                                "count": len(residue_rows),
+                                "symbols": campaign_residue_symbols(residue_rows),
+                            },
+                        )
+                    )
+                if any(
+                    validated_trade_data[name] for name in ACCUMULATION_TABLE_MODELS
+                ):
+                    if not ACCUMULATION_TABLE_MODELS.keys() <= trade_data.keys():
+                        findings.append(
+                            _finding(
+                                "accumulation_incomplete",
+                                "blocking",
+                                "Accumulation backup is missing ownership tables.",
+                            )
+                        )
+                quarantined_intents, manifest_findings = (
+                    self._classify_recovery_manifest(
+                        backup_payload.get("sealed_recovery_manifest")
+                    )
+                )
+                findings.extend(manifest_findings)
+                if quarantined_intents:
+                    findings.append(
+                        _finding(
+                            "quarantined_intents",
+                            "warning",
+                            f"{len(quarantined_intents)} placement intent(s) "
+                            "will be restored in quarantine and require "
+                            "explicit repair before trading can use them.",
+                            detail={"count": len(quarantined_intents)},
+                            next_action=(
+                                'See docs/operations.md, "Startup Recovery", '
+                                "for the repair flow."
+                            ),
+                        )
+                    )
+                # The restore only reaches the accumulation validation with a
+                # structurally valid manifest; a broken manifest is already
+                # reported as blocking above.
+                if not manifest_findings:
+                    try:
+                        validate_accumulation_backup(
+                            validated_trade_data,
+                            quarantined_intents,
+                            backup_payload.get("accumulation_strategies"),
+                            kept_rows,
+                        )
+                    except (ValueError, KeyError, TypeError) as exc:
+                        findings.append(
+                            _finding(
+                                "accumulation_incomplete",
+                                "blocking",
+                                str(exc) or "Accumulation backup validation failed.",
+                            )
+                        )
+        else:
+            if any(
+                row["key"] == "accumulation_strategy_version_id" for row in kept_rows
+            ):
+                findings.append(
+                    _finding(
+                        "accumulation_version_id_dropped",
+                        "warning",
+                        "The local strategy pin (accumulation_strategy_"
+                        "version_id) will be removed because a numeric pin "
+                        "is not portable without its immutable document; "
+                        "reselect the strategy after restoring.",
+                        detail={"key": "accumulation_strategy_version_id"},
+                    )
+                )
+
+        trade_mode_value: str | None = None
+        for row in kept_rows:
+            if row["key"] == "trade_mode":
+                trade_mode_value = str(row.get("value") or "").strip() or None
+        includes_accumulation = bool(validated_trade_data) and (
+            any(validated_trade_data.get(name) for name in ACCUMULATION_TABLE_MODELS)
+            or any(
+                row.get("lifecycle_mode") == "accumulation"
+                for row in validated_trade_data.get("open_trades", [])
+            )
+            or bool(backup_payload.get("accumulation_strategies"))
+        )
+        if trade_mode_value == "accumulation" or includes_accumulation:
+            trade_mode_era = "accumulation"
+        elif trade_mode_value == "dynamic_dca":
+            trade_mode_era = "dynamic_dca"
+        else:
+            trade_mode_era = "legacy_unspecified"
+
+        findings.append(_forced_dry_run_pause_finding())
+        return self._build_classification(
+            backup_payload,
+            schema_version,
+            trade_mode_era=trade_mode_era,
+            bridge_keys=bridge_keys,
+            includes_accumulation=includes_accumulation,
+            findings=findings,
+        )
+
+    @staticmethod
+    def _build_classification(
+        backup_payload: dict[str, Any],
+        schema_version: Any,
+        trade_mode_era: str | None,
+        bridge_keys: frozenset[str],
+        includes_accumulation: bool,
+        findings: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Assemble the classification document with findings ordered by severity."""
+        severity_rank = {"blocking": 0, "warning": 1, "info": 2}
+        findings.sort(key=lambda finding: severity_rank.get(finding["severity"], 3))
+        return {
+            "classification": {
+                "schema_version": (
+                    schema_version if isinstance(schema_version, int) else None
+                ),
+                "trade_mode_era": trade_mode_era,
+                "pre_4_9_bridge_keys": sorted(bridge_keys),
+                "includes_accumulation": includes_accumulation,
+            },
+            "findings": findings,
+        }
+
+    @staticmethod
+    def _classify_config_rows(
+        raw_rows: Any,
+    ) -> tuple[frozenset[str], list[dict[str, Any]], list[dict[str, Any]]]:
+        """Mirror the restore's config validation as a collect-all pass."""
+        findings: list[dict[str, Any]] = []
+        if not isinstance(raw_rows, list):
+            findings.append(
+                _finding(
+                    "invalid_config",
+                    "blocking",
+                    "Backup does not contain valid config rows.",
+                    detail={"config_type": type(raw_rows).__name__},
+                )
+            )
+            return frozenset(), [], findings
+
+        bridge_keys: set[str] = set()
+        kept_rows: list[dict[str, Any]] = []
+        for raw_row in raw_rows:
+            if not isinstance(raw_row, dict):
+                findings.append(
+                    _finding(
+                        "invalid_config",
+                        "blocking",
+                        "Backup config rows must be objects.",
+                        detail={"row_type": type(raw_row).__name__},
+                    )
+                )
+                continue
+            key = str(raw_row.get("key") or "").strip()
+            value_type = str(raw_row.get("value_type") or "").strip()
+            if not key or not value_type:
+                findings.append(
+                    _finding(
+                        "invalid_config",
+                        "blocking",
+                        "Backup config rows must include key and value_type.",
+                        detail={"key": key or None, "value_type": value_type or None},
+                    )
+                )
+                continue
+            if key in LEGACY_TRADE_MODE_KEYS:
+                bridge_keys.add(key)
+                continue
+            if is_removed_config_key(key):
+                findings.append(
+                    _finding(
+                        "removed_config_key",
+                        "blocking",
+                        build_removed_config_key_message(key),
+                        detail={"key": key},
+                    )
+                )
+                continue
+            kept_rows.append(
+                {
+                    "key": key,
+                    "value": raw_row.get("value"),
+                    "value_type": value_type,
+                }
+            )
+        return frozenset(bridge_keys), kept_rows, findings
+
+    @staticmethod
+    def _classify_trade_data(
+        raw_trade_data: dict[str, Any],
+    ) -> tuple[
+        dict[str, list[dict[str, Any]]],
+        list[dict[str, Any]],
+        dict[str, dict[str, int]],
+    ]:
+        """Mirror the restore's trade-data validation as a collect-all pass.
+
+        Returns the normalized rows, the blocking findings, and the per-table
+        counts of row values whose columns no longer exist in the current
+        model (the values restore will silently drop).
+        """
+        findings: list[dict[str, Any]] = []
+        validated: dict[str, list[dict[str, Any]]] = {}
+        dropped_columns: dict[str, dict[str, int]] = {}
+        for table_name, model_class in TRADE_TABLE_MODELS.items():
+            raw_rows = raw_trade_data.get(table_name, [])
+            if not isinstance(raw_rows, list):
+                findings.append(
+                    _finding(
+                        "invalid_trade_data",
+                        "blocking",
+                        f"Backup trade data for '{table_name}' must be a list.",
+                        detail={
+                            "table_name": table_name,
+                            "value_type": type(raw_rows).__name__,
+                        },
+                    )
+                )
+                continue
+            normalized_rows: list[dict[str, Any]] = []
+            table_dropped: dict[str, int] = {}
+            for raw_row in raw_rows:
+                if not isinstance(raw_row, dict):
+                    findings.append(
+                        _finding(
+                            "invalid_trade_data",
+                            "blocking",
+                            f"Backup trade data for '{table_name}' must "
+                            "contain objects.",
+                            detail={
+                                "table_name": table_name,
+                                "row_type": type(raw_row).__name__,
+                            },
+                        )
+                    )
+                    continue
+                if table_name == "placement_intents" and not (
+                    is_terminal_placement_state(raw_row.get("state"))
+                ):
+                    findings.append(
+                        _finding(
+                            "invalid_placement_intents",
+                            "blocking",
+                            "Portable placement audit rows must be terminal; "
+                            "nonterminal rows belong in the sealed recovery "
+                            "manifest.",
+                            detail={
+                                "table_name": table_name,
+                                "state": raw_row.get("state"),
+                            },
+                        )
+                    )
+                fields_map = model_class._meta.fields_map
+                for key in raw_row:
+                    if key not in fields_map:
+                        table_dropped[key] = table_dropped.get(key, 0) + 1
+                normalized_rows.append(dict(raw_row))
+            validated[table_name] = normalized_rows
+            if table_dropped:
+                dropped_columns[table_name] = table_dropped
+        return validated, findings, dropped_columns
+
+    @staticmethod
+    def _dropped_columns_finding(
+        dropped_columns: dict[str, dict[str, int]],
+    ) -> dict[str, Any]:
+        """Name the row values restore will silently drop, with era context."""
+        total = sum(sum(counts.values()) for counts in dropped_columns.values())
+        columns_text = ", ".join(
+            f"{table}.{column} ({count})"
+            for table, counts in sorted(dropped_columns.items())
+            for column, count in sorted(counts.items())
+        )
+        message = (
+            f"{total} trade data value(s) will be dropped because their "
+            f"columns no longer exist in the current schema: {columns_text}."
+        )
+        legacy_names = {
+            column
+            for counts in dropped_columns.values()
+            for column in counts
+            if column in SIDESTEP_WAITING_STATE_COLUMNS
+        }
+        if legacy_names:
+            message += (
+                " The waiting-state values are legacy sidestep-era state that "
+                "no live code reads."
+            )
+        return _finding(
+            "dropped_trade_columns",
+            "warning",
+            message,
+            detail=dropped_columns,
+        )
+
+    @classmethod
+    def _classify_recovery_manifest(
+        cls, raw_manifest: Any
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Mirror the restore's manifest validation as a collect-all pass."""
+        if raw_manifest is None:
+            return [], []
+        findings: list[dict[str, Any]] = []
+        if not isinstance(raw_manifest, dict):
+            findings.append(
+                _finding(
+                    "manifest_invalid",
+                    "blocking",
+                    "The recovery manifest must be an object.",
+                    detail={"manifest_type": type(raw_manifest).__name__},
+                )
+            )
+            return [], findings
+        raw_intents = raw_manifest.get("intents")
+        if not isinstance(raw_intents, list):
+            findings.append(
+                _finding(
+                    "manifest_invalid",
+                    "blocking",
+                    "The recovery manifest intents must be a list.",
+                    detail={"intents_type": type(raw_intents).__name__},
+                )
+            )
+            return [], findings
+        body = {
+            "schema_version": raw_manifest.get("schema_version"),
+            "disposition": raw_manifest.get("disposition"),
+            "intents": raw_intents,
+        }
+        if body["schema_version"] != RECOVERY_MANIFEST_SCHEMA_VERSION:
+            findings.append(
+                _finding(
+                    "manifest_invalid",
+                    "blocking",
+                    "Unsupported recovery manifest schema version.",
+                    detail={"schema_version": body["schema_version"]},
+                )
+            )
+        if body["disposition"] != RECOVERY_MANIFEST_DISPOSITION:
+            findings.append(
+                _finding(
+                    "manifest_invalid",
+                    "blocking",
+                    "Recovery manifests may only restore into quarantine.",
+                    detail={"disposition": body["disposition"]},
+                )
+            )
+        if raw_manifest.get("sha256") != cls._recovery_manifest_digest(body):
+            findings.append(
+                _finding(
+                    "manifest_invalid",
+                    "blocking",
+                    "The recovery manifest checksum validation failed.",
+                    detail={"manifest_intents": len(raw_intents)},
+                )
+            )
+        validated: list[dict[str, Any]] = []
+        for raw_intent in raw_intents:
+            if not isinstance(raw_intent, dict):
+                findings.append(
+                    _finding(
+                        "manifest_invalid",
+                        "blocking",
+                        "Recovery manifest intents must be objects.",
+                        detail={"intent_type": type(raw_intent).__name__},
+                    )
+                )
+                continue
+            state = str(raw_intent.get("state") or "")
+            if state not in NONTERMINAL_PLACEMENT_STATES:
+                findings.append(
+                    _finding(
+                        "manifest_invalid",
+                        "blocking",
+                        "Recovery manifest intents must be nonterminal.",
+                        detail={"state": state},
+                    )
+                )
+                continue
+            validated.append(dict(raw_intent))
+        if findings:
+            return [], findings
+        return validated, findings
 
     @staticmethod
     def _force_safe_restore_config(
@@ -454,16 +976,12 @@ class BackupService:
         lose the campaign linkage without the operator review the startup gate
         requires. The documented recovery procedure must run first.
         """
-        residue_rows = [
-            row
-            for row in validated_trade_data.get("open_trades", [])
-            if row.get("campaign_id") is not None
-        ]
+        residue_rows = campaign_residue_rows(
+            validated_trade_data.get("open_trades", [])
+        )
         if not residue_rows:
             return
-        symbols = ", ".join(
-            sorted(str(row.get("symbol") or "<unknown>") for row in residue_rows)
-        )
+        symbols = ", ".join(campaign_residue_symbols(residue_rows))
         raise ValueError(
             "Restore aborted: the backup has "
             f"{len(residue_rows)} open trade row(s) with legacy campaign "

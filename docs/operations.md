@@ -330,6 +330,25 @@ because every legacy representation was equivalent to the default `trade_mode`
 value (`dynamic_dca`). All other removed config keys are still rejected on
 restore with a message that names the replacement key.
 
+Before the restore confirmation, the dashboard runs a read-only backup review
+(`POST /config/backup/classify`) over the selected file and shows the outcome:
+
+- The review names the backup's era (`accumulation`, `dynamic_dca`, or
+  `legacy_unspecified`) and every silent outcome the restore would perform:
+  pre-4.9 bridge keys dropped, row values whose columns no longer exist in the
+  current schema (including the sidestep-era waiting-state values), the count
+  of placement intents that will restore into quarantine, and the config-only
+  removal of the local accumulation pin.
+- A backup that the restore would refuse (campaign residue on open trades,
+  removed config keys, incomplete accumulation sections, or an invalid sealed
+  recovery manifest) is flagged as blocking, and the matching restore button
+  is disabled. There is no force-restore path: the review and the restore
+  endpoint enforce the same rules, and the restore endpoint remains the
+  authoritative gate.
+- The review performs no database reads or writes and never mutates the
+  selected file. If the review is unavailable, the restore proceeds to its
+  own checks and refuses with the usual error.
+
 Restore requires explicit confirmation. Before replacing state, Moonwalker
 blocks new exchange-order work and waits for already admitted order work to
 finish. The restored instance remains paused in dry-run mode so the operator can

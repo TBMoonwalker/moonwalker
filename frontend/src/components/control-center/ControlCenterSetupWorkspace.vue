@@ -5,15 +5,17 @@ import type {
     ControlCenterTarget,
     ControlCenterTaskPresentation,
 } from '../../control-center/types'
-import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
+import type {
+    BackupClassification,
+    BackupRestoreMode,
+    RestoreReviewState,
+} from '../../composables/useConfigBackupRestore'
 import ControlCenterSetupEntryGate from './ControlCenterSetupEntryGate.vue'
 import ControlCenterSetupRestoreFlow from './ControlCenterSetupRestoreFlow.vue'
 import ControlCenterSetupStyleSelector from './ControlCenterSetupStyleSelector.vue'
 import ControlCenterSetupTaskSection from './ControlCenterSetupTaskSection.vue'
 import ControlCenterSectionNavigation from './ControlCenterSectionNavigation.vue'
 import type { SetupStyle } from '../../composables/useControlCenterSetupFlow'
-
-type BackupRestoreMode = 'config' | 'full'
 
 interface SetupTaskStatus {
     label: string
@@ -22,10 +24,13 @@ interface SetupTaskStatus {
 
 const props = defineProps<{
     activeTarget: ControlCenterTarget
+    backupClassification?: BackupClassification | null
+    backupClassifications?: Partial<Record<BackupRestoreMode, BackupClassification>>
     bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
     bindTargetElement: (
         target: ControlCenterTarget,
     ) => (element: Element | import('vue').ComponentPublicInstance | null) => void
+    classificationLoading?: boolean
     getSetupTaskStatus: (target: ControlCenterTarget) => SetupTaskStatus
     getSetupTaskSummary: (target: ControlCenterTarget) => string
     hasSelectedBackupPayload: boolean
@@ -76,7 +81,10 @@ const emit = defineEmits<{
 
     <template v-else-if="showRestoreSetupFlow">
         <ControlCenterSetupRestoreFlow
+            :backup-classification="backupClassification"
+            :backup-classifications="backupClassifications"
             :bind-backup-file-input="bindBackupFileInput"
+            :classification-loading="classificationLoading"
             :has-selected-backup-payload="hasSelectedBackupPayload"
             :restore-loading="restoreLoading"
             :restore-review="restoreReview"

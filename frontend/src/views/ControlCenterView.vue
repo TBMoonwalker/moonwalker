@@ -63,6 +63,8 @@ const {
     aiTrust,
     aiTrustFormRef,
     autopilotFormRef,
+    backupClassification,
+    backupClassifications,
     backupDownloadLoading,
     backupIncludeTradeData,
     bindBackupFileInput,
@@ -70,6 +72,7 @@ const {
     capital,
     capitalFormRef,
     changedSectionLabels,
+    classificationLoading,
     clearSelectedBackup,
     confirmDiscardUnsavedChanges,
     currency,
@@ -435,6 +438,9 @@ useControlCenterLifecycle({
                     :handle-monitoring-test-action="handleMonitoringTestAction"
                     :handle-signal-settings-select="handleSignalSettingsSelect"
                     :has-selected-backup-payload="!!selectedBackupPayload"
+                    :backup-classification="backupClassification"
+                    :backup-classifications="backupClassifications"
+                    :classification-loading="classificationLoading"
                     :is-asap-exchange-ready="isAsapExchangeReady()"
                     :is-setup-task-expanded="isSetupTaskExpanded"
                     :live-activation-available="readiness.complete && readiness.dryRun"
@@ -509,6 +515,8 @@ useControlCenterLifecycle({
 
             <template v-else>
                 <ControlCenterUtilitiesWorkspace
+                    :backup-classification="backupClassification"
+                    :backup-classifications="backupClassifications"
                     :backup-download-loading="backupDownloadLoading"
                     :backup-include-trade-data="backupIncludeTradeData"
                     :backup-restore-summary="getTaskPresentation('backup-restore').summary"
@@ -516,6 +524,7 @@ useControlCenterLifecycle({
                     :bind-backup-file-input="bindBackupFileInput"
                     :bind-backup-restore-target-ref="bindTargetElement('backup-restore')"
                     :can-test-monitoring-telegram="canTestMonitoringTelegram()"
+                    :classification-loading="classificationLoading"
                     :has-selected-backup-payload="!!selectedBackupPayload"
                     :monitoring-test-loading="monitoringTestLoading"
                     :restore-loading="restoreLoading"

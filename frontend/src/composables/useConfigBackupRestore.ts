@@ -4,12 +4,80 @@ import { computed, ref, shallowRef } from 'vue'
 import type { OperationResult } from '../control-center/operationResults'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 
-type BackupRestoreMode = 'config' | 'full'
+export type BackupRestoreMode = 'config' | 'full'
 
 type BackupPayload = {
     config?: unknown
     trade_data?: unknown
     includes_trade_data?: boolean
+}
+
+export type ClassificationSeverity = 'info' | 'warning' | 'blocking'
+
+export interface ClassificationFinding {
+    code: string
+    severity: ClassificationSeverity
+    message: string
+    nextAction: string | null
+}
+
+export interface BackupClassification {
+    mode: BackupRestoreMode
+    schemaVersion: number | null
+    tradeModeEra: 'accumulation' | 'dynamic_dca' | 'legacy_unspecified' | null
+    includesAccumulation: boolean
+    findings: ClassificationFinding[]
+    blocking: boolean
+}
+
+type ClassifyResponse = {
+    classification?: {
+        schema_version?: number | null
+        trade_mode_era?: string | null
+        includes_accumulation?: boolean
+    }
+    findings?: Array<{
+        code?: string
+        severity?: string
+        message?: string
+        next_action?: string | null
+    }>
+}
+
+function isKnownSeverity(value: unknown): value is ClassificationSeverity {
+    return value === 'info' || value === 'warning' || value === 'blocking'
+}
+
+function toFinding(raw: NonNullable<ClassifyResponse['findings']>[number]): ClassificationFinding {
+    return {
+        code: String(raw.code || 'unknown'),
+        severity: isKnownSeverity(raw.severity) ? raw.severity : 'warning',
+        message: String(raw.message || 'Backup review finding.'),
+        nextAction: raw.next_action != null ? String(raw.next_action) : null,
+    }
+}
+
+function toClassification(
+    mode: BackupRestoreMode,
+    payload: ClassifyResponse,
+): BackupClassification {
+    const findings = (payload.findings ?? []).map(toFinding)
+    return {
+        mode,
+        schemaVersion:
+            typeof payload.classification?.schema_version === 'number'
+                ? payload.classification.schema_version
+                : null,
+        tradeModeEra:
+            payload.classification?.trade_mode_era === 'accumulation' ||
+            payload.classification?.trade_mode_era === 'dynamic_dca' ||
+            payload.classification?.trade_mode_era === 'legacy_unspecified'
+                ? payload.classification.trade_mode_era
+                : null,
+        includesAccumulation: Boolean(payload.classification?.includes_accumulation),
+        findings,
+        blocking: findings.some(finding => finding.severity === 'blocking'),
+    }
 }
 
 type RestoreSummary = {
@@ -111,6 +179,16 @@ export function useConfigBackupRestore(
     const selectedBackupFileName = ref<string | null>(null)
     const selectedBackupPayload = ref<BackupPayload | null>(null)
     const restoreReview = ref<RestoreReviewState | null>(null)
+    const backupClassifications = ref<Partial<Record<BackupRestoreMode, BackupClassification>>>({})
+    const classificationLoading = ref(false)
+    const lastClassifiedMode = ref<BackupRestoreMode | null>(null)
+
+    const backupClassification = computed<BackupClassification | null>(() => {
+        if (!lastClassifiedMode.value) {
+            return null
+        }
+        return backupClassifications.value[lastClassifiedMode.value] ?? null
+    })
 
     const selectedBackupHasTradeData = computed(() =>
         Boolean(
@@ -139,8 +217,70 @@ export function useConfigBackupRestore(
         selectedBackupFileName.value = null
         selectedBackupPayload.value = null
         restoreReview.value = null
+        backupClassifications.value = {}
+        lastClassifiedMode.value = null
         if (backupFileInputRef.value) {
             backupFileInputRef.value.value = ''
+        }
+    }
+
+    const classificationInFlight = new Map<BackupRestoreMode, Promise<boolean>>()
+
+    async function ensureClassification(mode: BackupRestoreMode): Promise<boolean> {
+        const cached = backupClassifications.value[mode]
+        if (cached) {
+            lastClassifiedMode.value = mode
+            return !cached.blocking
+        }
+        const inFlight = classificationInFlight.get(mode)
+        if (inFlight) {
+            return inFlight
+        }
+        if (!selectedBackupPayload.value) {
+            return false
+        }
+        const request = (async (): Promise<boolean> => {
+            classificationLoading.value = true
+            try {
+                const response = await axios.post<ClassifyResponse>(
+                    options.apiUrl('/config/backup/classify'),
+                    {
+                        backup: selectedBackupPayload.value,
+                        restore_trade_data: mode === 'full',
+                    },
+                )
+                const classification = toClassification(
+                    mode,
+                    response.data ?? {},
+                )
+                backupClassifications.value = {
+                    ...backupClassifications.value,
+                    [mode]: classification,
+                }
+                lastClassifiedMode.value = mode
+                return !classification.blocking
+            } catch (error) {
+                // The preview is advisory; the restore endpoint re-checks
+                // everything, so an unavailable review must not wedge
+                // restores.
+                if (options.surfaceMessages !== false) {
+                    options.message.warning(
+                        extractApiErrorMessage(
+                            error,
+                            'Backup review is unavailable; the restore will re-check before applying.',
+                        ),
+                    )
+                }
+                return true
+            } finally {
+                classificationLoading.value = false
+            }
+        })()
+        classificationInFlight.set(mode, request)
+        try {
+            return await request
+        } finally {
+            classificationInFlight.delete(mode)
         }
     }
 
@@ -206,6 +346,8 @@ export function useConfigBackupRestore(
             selectedBackupFileName.value = selectedFile.name
             selectedBackupPayload.value = parsed
             restoreReview.value = null
+            backupClassifications.value = {}
+            lastClassifiedMode.value = null
             options.message.success(`Loaded backup ${selectedFile.name}`)
         } catch (error) {
             clearSelectedBackup()
@@ -244,6 +386,14 @@ export function useConfigBackupRestore(
             return {
                 status: 'error',
                 message,
+            }
+        }
+
+        const classificationAllowed = await ensureClassification(mode)
+        if (!classificationAllowed) {
+            return {
+                status: 'blocked',
+                message: 'Backup review blocked this restore.',
             }
         }
 
@@ -326,10 +476,13 @@ export function useConfigBackupRestore(
     }
 
     return {
+        backupClassification,
+        backupClassifications,
         backupDownloadLoading,
         backupFileInputRef,
         backupIncludeTradeData,
         bindBackupFileInput,
+        classificationLoading,
         clearSelectedBackup,
         handleBackupDownload,
         handleBackupFileSelected,

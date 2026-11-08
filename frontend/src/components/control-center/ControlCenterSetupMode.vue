@@ -14,7 +14,11 @@ import type {
     StringSelectOption,
 } from '../../config-editor/types'
 import type { TradeModeSwitchGuardState } from '../../helpers/configLoad'
-import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
+import type {
+    BackupClassification,
+    BackupRestoreMode,
+    RestoreReviewState,
+} from '../../composables/useConfigBackupRestore'
 import type {
     ControlCenterTarget,
     ControlCenterTaskPresentation,
@@ -27,7 +31,6 @@ import ConfigExchangeSection from '../config/ConfigExchangeSection.vue'
 import ConfigMonitoringSection from '../config/ConfigMonitoringSection.vue'
 import ConfigSignalSection from '../config/ConfigSignalSection.vue'
 
-type BackupRestoreMode = 'config' | 'full'
 interface SetupTaskStatus {
     label: string
     type: 'default' | 'info' | 'warning' | 'success'
@@ -37,7 +40,10 @@ defineProps<{
     activeTarget: ControlCenterTarget
     activationDisabled: boolean
     activationLoading: boolean
+    backupClassification?: BackupClassification | null
+    backupClassifications?: Partial<Record<BackupRestoreMode, BackupClassification>>
     bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
+    classificationLoading?: boolean
     bindTargetElement: (
         target: ControlCenterTarget,
     ) => (element: Element | import('vue').ComponentPublicInstance | null) => void
@@ -108,8 +114,11 @@ const emit = defineEmits<{
 <template>
     <ControlCenterSetupWorkspace
         :active-target="activeTarget"
+        :backup-classification="backupClassification"
+        :backup-classifications="backupClassifications"
         :bind-backup-file-input="bindBackupFileInput"
         :bind-target-element="bindTargetElement"
+        :classification-loading="classificationLoading"
         :get-setup-task-status="getSetupTaskStatus"
         :get-setup-task-summary="getSetupTaskSummary"
         :has-selected-backup-payload="hasSelectedBackupPayload"

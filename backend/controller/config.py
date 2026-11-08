@@ -56,6 +56,13 @@ class RestoreBackupRequest(msgspec.Struct, forbid_unknown_fields=True):
     confirm: object = False
 
 
+class ClassifyBackupRequest(msgspec.Struct, forbid_unknown_fields=True):
+    """Strict body for the read-only backup classification preview."""
+
+    backup: dict[str, Any]
+    restore_trade_data: object = False
+
+
 def _require_json_boolean(value: object, field: str) -> tuple[bool | None, Any]:
     """Return an exact JSON boolean or an operator-readable error response."""
     if type(value) is not bool:
@@ -842,6 +849,31 @@ async def deny_symbol(data: JSONBody[DenySymbolRequest]) -> Any:
     }
 
 
+@post(path="/config/backup/classify")
+async def classify_backup(data: JSONBody[ClassifyBackupRequest]) -> Any:
+    """Classify a backup payload without touching configuration or trades.
+
+    Runs the restore's own validation primitives as a collect-all pass so
+    the dashboard can show what a restore would do before the operator
+    confirms it. The restore endpoint remains the authoritative gate.
+    """
+    restore_trade_data, error_response = _require_json_boolean(
+        data.restore_trade_data,
+        "restore_trade_data",
+    )
+    if error_response is not None:
+        return error_response
+
+    try:
+        return backup_service.classify_backup(
+            data.backup,
+            restore_trade_data=restore_trade_data,
+        )
+    except Exception as exc:  # noqa: BLE001 - surface preview failures to UI.
+        logging.error("Backup classification failed: %s", exc, exc_info=True)
+        return json_response({"error": "Backup classification failed."}, 500)
+
+
 @post(path="/config/backup/restore")
 async def restore_backup(data: JSONBody[RestoreBackupRequest]) -> Any:
     """Restore config-only or full backup payloads."""
@@ -918,5 +950,6 @@ route_handlers = [
     pause_trading,
     resume_trading,
     deny_symbol,
+    classify_backup,
     restore_backup,
 ]

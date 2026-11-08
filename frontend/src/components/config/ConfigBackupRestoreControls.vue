@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
+import type {
+    BackupClassification,
+    BackupRestoreMode,
+    ClassificationFinding,
+    RestoreReviewState,
+} from '../../composables/useConfigBackupRestore'
 
-type BackupRestoreMode = 'config' | 'full'
-
-withDefaults(
+const props = withDefaults(
     defineProps<{
         actionButtonClass?: string | null
+        backupClassification?: BackupClassification | null
+        backupClassifications?: Partial<Record<BackupRestoreMode, BackupClassification>>
         bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
+        classificationLoading?: boolean
         hasSelectedBackupPayload: boolean
         restoreLoading: boolean
         restoreReview?: RestoreReviewState | null
@@ -16,6 +22,10 @@ withDefaults(
     }>(),
     {
         actionButtonClass: null,
+        backupClassification: null,
+        backupClassifications: () => ({}),
+        classificationLoading: false,
+        restoreReview: null,
     },
 )
 
@@ -25,6 +35,14 @@ const emit = defineEmits<{
     'open-backup-file-picker': []
     'restore-backup': [mode: BackupRestoreMode]
 }>()
+
+function isBlocking(mode: BackupRestoreMode): boolean {
+    return props.backupClassifications?.[mode]?.blocking ?? false
+}
+
+function findingLabel(finding: ClassificationFinding): string {
+    return finding.severity === 'blocking' ? 'Blocking' : 'Warning'
+}
 </script>
 
 <template>
@@ -60,6 +78,40 @@ const emit = defineEmits<{
         Loaded backup with {{ selectedBackupConfigCount }} config keys<span v-if="selectedBackupHasTradeData"> and trade data</span>.
     </n-text>
 
+    <div
+        v-if="backupClassification || classificationLoading"
+        class="backup-classification"
+        role="status"
+        aria-live="polite"
+    >
+        <n-text v-if="classificationLoading && !backupClassification" depth="3">
+            Reviewing backup…
+        </n-text>
+        <n-alert
+            v-else-if="backupClassification"
+            :type="backupClassification.blocking ? 'error' : 'info'"
+            :bordered="false"
+            :title="`Backup review (${backupClassification.mode === 'full' ? 'full backup' : 'config only'} restore)`"
+        >
+            <ul class="backup-classification-findings">
+                <li
+                    v-for="finding in backupClassification.findings"
+                    :key="`${finding.code}:${finding.message}`"
+                >
+                    <n-text :depth="finding.severity === 'info' ? 3 : 2">
+                        <template v-if="finding.severity !== 'info'">
+                            [{{ findingLabel(finding) }}]
+                        </template>
+                        {{ finding.message }}
+                    </n-text>
+                    <div v-if="finding.nextAction" class="restore-review-next-action">
+                        {{ finding.nextAction }}
+                    </div>
+                </li>
+            </ul>
+        </n-alert>
+    </div>
+
     <n-alert
         v-if="restoreReview"
         type="warning"
@@ -76,8 +128,8 @@ const emit = defineEmits<{
         <n-button
             :class="actionButtonClass || undefined"
             type="warning"
-            :loading="restoreLoading"
-            :disabled="!hasSelectedBackupPayload"
+            :loading="restoreLoading || classificationLoading"
+            :disabled="!hasSelectedBackupPayload || isBlocking('config')"
             @click="emit('restore-backup', 'config')"
         >
             Restore config only
@@ -86,8 +138,8 @@ const emit = defineEmits<{
             :class="actionButtonClass || undefined"
             type="error"
             ghost
-            :loading="restoreLoading"
-            :disabled="!selectedBackupHasTradeData"
+            :loading="restoreLoading || classificationLoading"
+            :disabled="!selectedBackupHasTradeData || isBlocking('full')"
             @click="emit('restore-backup', 'full')"
         >
             Restore full backup
@@ -102,6 +154,14 @@ const emit = defineEmits<{
 
 .backup-file-name {
     font-size: 14px;
+}
+
+.backup-classification-findings {
+    margin: 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .restore-review-next-action {
