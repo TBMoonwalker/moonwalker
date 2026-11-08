@@ -411,3 +411,39 @@ array-form credentials and custom sensitive header names containing `^` and `|`
 are stripped across hosts while ordinary headers and redirects still work.
 Browser E2E was not run for this dependency-only changeset. GitHub's default-branch
 alerts remain open until the patch is merged there.
+
+## python-dateutil 4.0.0 (2026-11-08)
+
+The held `python-dateutil` major was moved from 3.0.0 to 4.0.0 in a dedicated
+changeset; the companion multidict 7 bump remains blocked (see the close of
+this section).
+
+- `python-dateutil 4.0.0` (released 2026-11-01) is a mostly-bugfix major: it
+  requires Python >=3.11 and drops the `six` dependency. It retains the 3.0.0
+  `tz.tzfile` rewrite, so the "post-2038 TZif support" rationale that justified
+  pinning dateutil for pandas still holds. The one behavior change is a stricter
+  `parser.isoparse` (each numeric field must carry exactly the expected number
+  of ASCII digits), which Moonwalker does not exercise — its only dateutil usage
+  is `dateutil.tz.gettz` in `backend/service/data_ohlcv.py`.
+- pandas 3.1.1 (released 2026-11-04, after dateutil 4.0.0) declares
+  `python-dateutil>=2.9.0` with no upper bound and ships an explicit
+  dateutil>=3.0 compatibility fix for timezones such as `dateutil/US/Pacific`
+  (GH 71459). litestar 2.25.0 and tortoise-orm 1.1.9 declare no dateutil
+  dependency and do not import it at runtime.
+- The `six` 1.17.0 transitive, pulled in only by dateutil, is dropped from both
+  generated locks; `tzdata` is retained because dateutil 4.0.0 still depends on
+  it. No other package version changed in either lock.
+- Security/provenance: the 4.0.0 wheel and sdist carry full PyPI provenance and
+  a verified Sigstore publish attestation from the genuine
+  `github.com/dateutil/dateutil` release workflow
+  (`github.com/dateutil/dateutil/.github/workflows/publish.yml`); OSV and the
+  PyPI security panel report no vulnerabilities for the version.
+- Validation: full CI green — 2,230 backend tests plus the full frontend suite,
+  type checks, lint, builds, coverage gates, both vulnerability audits and
+  registry-signature checks. The timezone regression tests in
+  `backend/tests/test_data_ohlcv_serialization.py` pass unchanged.
+
+Multidict 7 remains blocked: CCXT 4.5.92 (the latest release as of 2026-11-08)
+still hard-pins `multidict==6.9.1`. aiohttp 3.14.5 already permits
+`multidict<8.0,>=4.5`, so CCXT's exact pin is the sole blocker; do not force the
+override. Revisit when a reviewed CCXT release permits multidict 7.

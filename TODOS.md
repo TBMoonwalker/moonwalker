@@ -90,15 +90,14 @@ confirmed it: the full frontend CI passed unmodified, and the typescript
 
 **Priority:** P3
 
-### Upgrade Python major dependencies: multidict 7, python-dateutil 4
+### Upgrade Python major dependency: multidict 7
 
-**Status:** Recorded 2026-11-07 as the hold list of the 2026-11-07 Python dependency hygiene pass (patch/minor wave applied the same day: ccxt 4.5.92, cachetools 7.3.0, pandas 3.1.1, python-socketio 5.18.1, websockets 17.4, ta-lib 0.8.3, anyio 4.16.0, click 8.5.1, mypy 2.4.1, pip 26.3, pytest 9.2.0, pytest-asyncio 1.4.1.post1, ruff 0.17.4, filelock 4.2.9).
+**Status:** Recorded 2026-11-07 as the hold list of the 2026-11-07 Python dependency hygiene pass (patch/minor wave applied the same day: ccxt 4.5.92, cachetools 7.3.0, pandas 3.1.1, python-socketio 5.18.1, websockets 17.4, ta-lib 0.8.3, anyio 4.16.0, click 8.5.1, mypy 2.4.1, pip 26.3, pytest 9.2.0, pytest-asyncio 1.4.1.post1, ruff 0.17.4, filelock 4.2.9). The companion `python-dateutil` 4.0.0 changeset shipped 2026-11-08 (see "Upgrade python-dateutil to 4.0.0" in Completed); this entry is the remaining, still-blocked half.
 
-**What:** Bump the two held major-version Python dependencies in dedicated, separately tested changesets:
-- `multidict` 6.9.1 -> 7.2.1 (transitive of aiohttp and hard-pinned by ccxt: ccxt 4.5.92 still pins `multidict==6.9.1` and aiohttp 3.14.5 requires `multidict<7`, so the resolver cannot move it until a future ccxt release relaxes the pin; revisit together with the next ccxt major).
-- `python-dateutil` 3.0.0 -> 4.0.0 (direct pin in `backend/requirements.in` carrying the "reviewed timezone engine for pandas, including post-2038 TZif support" comment; a major of pandas' reviewed timezone engine — verify pandas 3.x, tortoise-orm and litestar date parsing under dateutil 4, and re-check the post-2038 TZif rationale against the 4.x release notes).
+**What:** Bump the held major-version Python dependency in a dedicated, separately tested changeset:
+- `multidict` 6.9.1 -> 7.2.1 (transitive of aiohttp, hard-pinned to `6.9.1` by ccxt, so the resolver cannot move it until a future ccxt release relaxes the pin; revisit together with the next ccxt release that permits multidict 7).
 
-**Why:** Recorded rather than bundled: major bumps need the compatibility review the dependency hygiene policy requires, and multidict is additionally unresolvable today because of ccxt's hard pin. Note: idna stays at 3.18 for the same reason (ccxt 4.5.90-4.5.92 all hard-pin `idna==3.18`), so the idna 3.20 "outdated" row is expected to persist.
+**Why:** Recorded rather than bundled: major bumps need the compatibility review the dependency hygiene policy requires, and multidict is additionally unresolvable today because of ccxt's hard pin. As of 2026-11-08 the latest ccxt (4.5.92) still pins `multidict==6.9.1`, while aiohttp 3.14.5 already permits `multidict<8.0,>=4.5`, so ccxt's exact pin is the sole blocker and must not be forced through an override. Note: idna stays at 3.18 for the same reason (ccxt 4.5.90-4.5.92 all hard-pin `idna==3.18`), so the idna 3.20 "outdated" row is expected to persist.
 
 **Priority:** P3
 
@@ -181,6 +180,18 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Upgrade python-dateutil to 4.0.0
+
+**Status:** Completed 2026-11-08 as the companion changeset of the "Upgrade Python major dependencies: multidict 7, python-dateutil 4" hold list; the still-blocked multidict 7 half remains in Next up.
+
+**What shipped:**
+- `python-dateutil` 3.0.0 -> 4.0.0 (exact pin in `backend/requirements.in`, regenerated in both hash locks via `scripts/compile_requirements.sh`). dateutil 4.0.0 (released 2026-11-01) requires Python >=3.11 and drops the `six` dependency; it retains the 3.0.0 `tz.tzfile` rewrite, so the "post-2038 TZif support" rationale behind the pin still holds. The only behavior change is a stricter `parser.isoparse` (numeric fields must carry exactly the expected number of digits), which Moonwalker does not exercise — its sole dateutil usage is `dateutil.tz.gettz` in `backend/service/data_ohlcv.py`. The now-orphaned `six` 1.17.0 transitive (pulled in only by dateutil) is dropped from both locks; `tzdata` is retained because dateutil 4.0.0 still depends on it. No other package version changed in either lock.
+- Compatibility review: pandas 3.1.1 (released 2026-11-04, after dateutil 4.0.0) declares `python-dateutil>=2.9.0` with no upper bound and ships an explicit dateutil>=3.0 compatibility fix for timezones such as `dateutil/US/Pacific` (GH 71459); litestar 2.25.0 and tortoise-orm 1.1.9 declare no dateutil dependency and do not import it at runtime.
+- Security/provenance: the 4.0.0 wheel and sdist carry full PyPI provenance and a verified Sigstore publish attestation from the genuine `github.com/dateutil/dateutil` release workflow; OSV and the PyPI security panel report no vulnerabilities for the version.
+- Verification: full CI green — 2,230 backend tests plus the full frontend suite, type checks, lint, builds, coverage gates, both vulnerability audits and registry-signature checks. The two timezone regression tests in `backend/tests/test_data_ohlcv_serialization.py` (repeated autumn hour, summer after 2038) pass unchanged under 4.0.0.
+
+**Priority:** P3
 
 ### Extend the campaign residue gate to the full 021 drop set
 
