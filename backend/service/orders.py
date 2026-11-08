@@ -9,6 +9,7 @@ from typing import Any, TypeGuard
 import helper
 from service.ai_trust import evaluate_entry_enforcement
 from service.capital_budget import CapitalBudgetService
+from service.config_views import DcaRuntimeConfigView
 from service.dca.dust import DcaDustContext, handle_unsellable_remainder
 from service.dca.exchange import DcaExchange
 from service.dca.limit_sell import build_partial_status_from_fallback
@@ -480,6 +481,7 @@ class Orders:
             metadata = self._parse_metadata_json(order_status.get("metadata_json"))
             metadata["dca_policy"] = build_recovery_sizing_policy(config).to_dict()
             order_status["metadata_json"] = json.dumps(metadata, sort_keys=True)
+            self._stamp_deal_dca_strategy(order_status, config)
         payload = build_buy_trade_payload(order_status)
         persistence_options: dict[str, Any] = {
             "create_open_trade": not bool(order_status["safetyorder"]),
@@ -507,6 +509,27 @@ class Orders:
             config,
         )
         return True
+
+    @staticmethod
+    def _stamp_deal_dca_strategy(
+        order_status: ExchangeOrderPayload,
+        config: dict[str, Any],
+    ) -> None:
+        """Record the active DCA strategy on a strategy-less base order.
+
+        Signal-triggered base orders carry only the optional entry-filter
+        strategy. Without the deal's DCA strategy, a dynamic DCA deal that
+        never places a safety order has no strategy metadata in the
+        execution ledger, so its closed replay would lose the indicator
+        overlays shown while the deal was open.
+        """
+        if order_status.get("strategy_slug") or order_status.get("strategy_name"):
+            return
+        runtime_config = DcaRuntimeConfigView.from_config(config)
+        if not (runtime_config.dynamic_dca and runtime_config.dca_strategy):
+            return
+        order_status["strategy_name"] = runtime_config.dca_strategy
+        order_status["strategy_slug"] = runtime_config.dca_strategy
 
     @staticmethod
     def _log_buy_failure(

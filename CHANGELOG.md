@@ -35,6 +35,13 @@ All notable changes to Moonwalker are documented in this file.
   a deal id, empty indicator results, or failed indicator requests — instead
   of rendering candles with no explanation. Failed indicator requests are now
   reported to the browser console.
+- Closed dynamic-DCA deals keep their strategy's indicator overlays on the
+  replay chart after the deal closes: the active DCA strategy is now recorded
+  on base orders that carry no strategy of their own when the order is
+  created. Signal-triggered base orders previously recorded only the optional
+  entry-filter strategy, so a deal that never placed a safety order lost its
+  strategy metadata (and its overlays) the moment it closed. Deals already
+  closed keep the unavailable notice.
 
 ## [6.3.0.0] - 2026-11-07
 
