@@ -71,16 +71,37 @@ entry's plan of record carries the re-verification checklist.
 
 **Priority:** P3
 
-### Upgrade frontend major dependencies: jsdom 31, TypeScript 7, @types/node 26
+### Upgrade frontend major dependencies: TypeScript 7, @types/node 26
 
-**Status:** Recorded 2026-11-06 as the hold list of the 2026-11-06 frontend dependency hygiene pass (patch/minor wave applied in the same day: axios 1.21.0, vite 8.3.6, vitest 5.1.0, vue 3.5.45, vue-tsc 3.3.14, @playwright/test 1.65.0, knip 6.44.1).
+**Status:** jsdom 31.0.0 shipped 2026-11-08 (see "Upgrade the vitest jsdom
+environment to 31" in Completed). TypeScript 7 is now blocked on tooling
+(2026-11-08 compatibility review, owner decision 2026-11-08: hold);
+@types/node 26.x remains held on the Node floor (original 2026-11-06 hold
+list of the 2026-11-06 frontend dependency hygiene pass, patch/minor wave
+applied the same day: axios 1.21.0, vite 8.3.6, vitest 5.1.0, vue 3.5.45,
+vue-tsc 3.3.14, @playwright/test 1.65.0, knip 6.44.1).
 
-**What:** Bump the three held major-version frontend dev dependencies in dedicated, separately tested changesets:
-- `jsdom` 30.1.3 -> 31.0.0 (vitest test environment; review jsdom 31 breaking changes against the 48-file vitest suite and coverage ratchet).
-- `typescript` 6.0.3 -> 7.0.2 (compiler major; run `vue-tsc` type-check, build and the coverage ratchet, watch for removed/deprecated checker APIs used by tooling).
-- `@types/node` 24.19.2 -> 26.x (hold until the repo's Node floor moves: `.nvmrc` and `frontend/package.json` engines pin Node 24.x, so 26 typings describe a runtime the project does not run; revisit together with a Node 26 upgrade decision).
+**What:** Bump the two held major-version frontend dev dependencies in
+dedicated, separately tested changesets:
+- `typescript` 6.0.3 -> 7.0.2 (blocked until Volar supports 7: TypeScript
+  7.0 ships no programmatic compiler API — the `typescript` package's main
+  entry exports only `version`/`versionMajorMinor` — and `vue-tsc` 3.3.14
+  crashes on it with `ERR_PACKAGE_PATH_NOT_EXPORTED: './lib/tsc'`, while
+  its `@vue/language-core` 3.3.14 peer-declares `typescript: <7` and no
+  newer vue-tsc release exists; the 2026-11-06 TypeScript 7.1 beta
+  restores the compiler API and makes Vue first-class, so revisit together
+  with a TS 7.1 stable release plus a vue-tsc that accepts it).
+- `@types/node` 24.19.2 -> 26.x (hold until the repo's Node floor moves:
+  `.nvmrc` and `frontend/package.json` engines pin Node 24.x, so 26 typings
+  describe a runtime the project does not run; revisit together with a
+  Node 26 upgrade decision).
 
-**Why:** Recorded rather than bundled: major bumps need the compatibility review the dependency hygiene policy requires, and the axios 1.21.0 wave proved the test suite is the right gate for behavior changes (its header-default recognition change passed clean).
+**Why:** Recorded rather than bundled: major bumps need the compatibility
+review the dependency hygiene policy requires, and the axios 1.21.0 wave
+proved the test suite is the right gate for behavior changes (its
+header-default recognition change passed clean). The jsdom 31 wave
+confirmed it: the full frontend CI passed unmodified, and the typescript
+7.0.2 blocker was found by the review rather than by a broken build.
 
 **Priority:** P3
 
@@ -175,6 +196,31 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Upgrade the vitest jsdom environment to 31
+
+**Status:** Completed 2026-11-08 as the first changeset of the "Upgrade
+frontend major dependencies: jsdom 31, TypeScript 7, @types/node 26" hold
+list.
+
+**What shipped:**
+- `jsdom` 30.1.3 -> 31.0.0 in `frontend/package.json` (exact devDep pin).
+  jsdom 31 replaces its CSS engine with an integrated implementation (the
+  @asamuzakjp and @csstools packages drop out of the tree), switches the
+  optional canvas backend from `canvas` to `@napi-rs/canvas` (we install
+  no canvas backend, so this is inert), and pauses HTML/XML parsing at
+  blocking scripts.
+- The `whatwg-url` override moved 17.2.0 -> 17.3.0, the attested version
+  inside jsdom 31's declared `^17.3.0` range (17.3.0 only syncs the
+  `search` setter with `searchParams` after stripping ASCII tabs and
+  newlines, per whatwg/url@fde3f74); the npm audit signatures gate stays
+  green.
+- Verification: full frontend CI green — 364 vitest tests across 50 files
+  and 384 legacy CJS tests unmodified, coverage ratchet, vue-tsc
+  type-check, vite build, `npm audit --audit-level=high` (0
+  vulnerabilities) and `npm audit signatures`.
+
+**Priority:** P3
 
 ### Show an unavailable notice on replay charts without indicator series
 
