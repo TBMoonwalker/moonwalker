@@ -59,8 +59,10 @@ async def bump_config_revision(conn: Any, expected: int | None = None) -> int:
 
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
-# Pre-4.9 trade-mode bridge keys are no longer handled here; backup restore
-# drops them silently (see backup_restore.LEGACY_TRADE_MODE_KEYS).
+# The pre-4.9 trade-mode bridge keys are rejected with the canonical
+# trade_mode replacement: the 4.8.x-and-earlier trade-mode era is no longer a
+# supported restore source, so pre-4.9 backups naming them are refused on
+# restore (and skipped on export) like any other removed key.
 REMOVED_CONFIG_KEY_REPLACEMENTS = {
     "autopilot_max_fund": ("capital_max_fund", "v1.4.0.0"),
     "debug": ("", "this release"),
@@ -68,6 +70,9 @@ REMOVED_CONFIG_KEY_REPLACEMENTS = {
         "autopilot_base_order_stretch_max_multiplier",
         "this release",
     ),
+    "trade_lifecycle_mode": ("trade_mode", "4.9.0.0"),
+    "dynamic_dca": ("trade_mode", "4.9.0.0"),
+    "sidestep_campaign_enabled": ("trade_mode", "4.9.0.0"),
 }
 
 HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {

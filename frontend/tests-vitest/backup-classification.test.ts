@@ -32,7 +32,6 @@ function classifyResponse(findings: FindingSeed[]) {
             classification: {
                 schema_version: 3,
                 trade_mode_era: 'legacy_unspecified',
-                pre_4_9_bridge_keys: [],
                 includes_accumulation: false,
             },
             findings,

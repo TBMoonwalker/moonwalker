@@ -76,9 +76,9 @@ Moonwalker now exposes and accepts `trade_mode` as the only supported
 operator-facing lifecycle field. Older stored rows and backup payloads that
 used the since-removed `sidestep` mode carry the pre-4.9 bridge keys
 (`trade_lifecycle_mode`, `dynamic_dca`, `sidestep_campaign_enabled`), which
-the runtime no longer reads; backup restore drops those three keys silently
-so existing installs survive the cutover, and `/config/all` and supported
-config writes do not use them.
+the runtime no longer reads and backup restore now rejects with the canonical
+`trade_mode` replacement; `/config/all` and supported config writes do not
+use them.
 
 ## Configuration Reference
 All supported configuration keys are listed below. Keys marked "(advanced)"

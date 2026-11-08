@@ -4,16 +4,31 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [6.4.0.0] - Unreleased
 
+### Breaking Changes
+
+- Drop the 4.8.x-and-earlier (pre-4.9) trade-mode compatibility. Backups
+  created before `4.9.0.0` that still carry the raw trade-mode bridge keys
+  (`trade_lifecycle_mode`, top-level `dynamic_dca`,
+  `sidestep_campaign_enabled`) are now refused on restore like any other
+  removed config key, with a message that names the canonical `trade_mode`
+  key, instead of being dropped silently. To restore such a backup, remove
+  the three keys from its config rows first (every legacy representation was
+  equivalent to the default `trade_mode` value, so nothing is lost). The
+  pre-confirmation backup review no longer reports them as a silent drop: the
+  `pre_4_9_bridge_keys` summary field and the `legacy_bridge_keys_dropped`
+  finding are gone from `POST /config/backup/classify`, and the keys now
+  surface as `removed_config_key` blocking findings.
+
 ### Added
 
 - Pre-confirmation backup review: before restoring, the dashboard classifies
   the selected backup (read-only, no database access) and shows what the
-  restore would do to it — the backup's era, the pre-4.9 bridge keys or
-  dropped legacy columns it silently discards, the placement intents that
-  will restore into quarantine, and the config-only removal of the local
-  accumulation pin. Backups the restore would refuse (campaign residue,
-  removed config keys, incomplete accumulation sections, invalid recovery
-  manifest) are flagged as blocking and their restore button is disabled;
+  restore would do to it — the backup's era, the dropped legacy column values
+  it silently discards, the placement intents that will restore into
+  quarantine, and the config-only removal of the local accumulation pin.
+  Backups the restore would refuse (campaign residue, removed config keys,
+  incomplete accumulation sections, invalid recovery manifest) are flagged
+  as blocking and their restore button is disabled;
   there is no force-restore path. Restore behavior itself is unchanged.
   See `POST /config/backup/classify` in the API reference.
 

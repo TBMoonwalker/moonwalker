@@ -32,7 +32,6 @@ from service.config import (
 )
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
-from service.msv import LEGACY_TRADE_MODE_KEYS
 from service.placement_intents import (
     NONTERMINAL_PLACEMENT_STATES,
     TERMINAL_PLACEMENT_STATES,
@@ -49,12 +48,6 @@ logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 BACKUP_SCHEMA_VERSION = 3
 RECOVERY_MANIFEST_SCHEMA_VERSION = 1
 RECOVERY_MANIFEST_DISPOSITION = "quarantine_only"
-
-# Pre-4.9 backups may still carry the raw trade-mode bridge keys. Restore
-# drops them silently (decision D11, 2026-11-01): every legacy representation
-# was equivalent to the default `trade_mode` value (`dynamic_dca`), so
-# dropping them loses nothing and keeps old backups restorable without operator
-# action. See docs/operations.md, "Backup And Restore".
 
 TRADE_TABLE_MODELS: dict[str, type] = {
     "trades": model.Trades,
@@ -337,26 +330,14 @@ class BackupService:
                 backup_payload,
                 schema_version,
                 trade_mode_era=None,
-                bridge_keys=frozenset(),
                 includes_accumulation=False,
                 findings=findings,
             )
 
-        bridge_keys, kept_rows, config_findings = self._classify_config_rows(
+        kept_rows, config_findings = self._classify_config_rows(
             backup_payload.get("config")
         )
         findings.extend(config_findings)
-        if bridge_keys:
-            findings.append(
-                _finding(
-                    "legacy_bridge_keys_dropped",
-                    "warning",
-                    f"{len(bridge_keys)} legacy trade-mode key(s) will be "
-                    "dropped on restore; every pre-4.9 representation was "
-                    "equivalent to the default dynamic_dca mode.",
-                    detail={"keys": sorted(bridge_keys)},
-                )
-            )
 
         trade_data = backup_payload.get("trade_data")
         validated_trade_data: dict[str, list[dict[str, Any]]] | None = None
@@ -495,7 +476,6 @@ class BackupService:
             backup_payload,
             schema_version,
             trade_mode_era=trade_mode_era,
-            bridge_keys=bridge_keys,
             includes_accumulation=includes_accumulation,
             findings=findings,
         )
@@ -505,7 +485,6 @@ class BackupService:
         backup_payload: dict[str, Any],
         schema_version: Any,
         trade_mode_era: str | None,
-        bridge_keys: frozenset[str],
         includes_accumulation: bool,
         findings: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -518,7 +497,6 @@ class BackupService:
                     schema_version if isinstance(schema_version, int) else None
                 ),
                 "trade_mode_era": trade_mode_era,
-                "pre_4_9_bridge_keys": sorted(bridge_keys),
                 "includes_accumulation": includes_accumulation,
             },
             "findings": findings,
@@ -527,7 +505,7 @@ class BackupService:
     @staticmethod
     def _classify_config_rows(
         raw_rows: Any,
-    ) -> tuple[frozenset[str], list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Mirror the restore's config validation as a collect-all pass."""
         findings: list[dict[str, Any]] = []
         if not isinstance(raw_rows, list):
@@ -539,9 +517,8 @@ class BackupService:
                     detail={"config_type": type(raw_rows).__name__},
                 )
             )
-            return frozenset(), [], findings
+            return [], findings
 
-        bridge_keys: set[str] = set()
         kept_rows: list[dict[str, Any]] = []
         for raw_row in raw_rows:
             if not isinstance(raw_row, dict):
@@ -566,9 +543,6 @@ class BackupService:
                     )
                 )
                 continue
-            if key in LEGACY_TRADE_MODE_KEYS:
-                bridge_keys.add(key)
-                continue
             if is_removed_config_key(key):
                 findings.append(
                     _finding(
@@ -586,7 +560,7 @@ class BackupService:
                     "value_type": value_type,
                 }
             )
-        return frozenset(bridge_keys), kept_rows, findings
+        return kept_rows, findings
 
     @staticmethod
     def _classify_trade_data(
@@ -904,8 +878,6 @@ class BackupService:
                     message="Backup config rows must include key and value_type.",
                     safe_fields={"key": key or None, "value_type": value_type or None},
                 )
-            if key in LEGACY_TRADE_MODE_KEYS:
-                continue
             if is_removed_config_key(key):
                 raise ValueError(build_removed_config_key_message(key))
             normalized_rows.append(

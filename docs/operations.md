@@ -74,10 +74,9 @@ in the `config_migrations` ledger. It is written on the first run of at-floor
 software: a fresh install is marked before schema history exists (so an
 interrupted startup cannot leave a false pre-floor baseline), and an existing
 install is marked on its first at-floor startup, after the preflight has
-already fired the one-time pre-floor warning. A fresh database that carries
-pre-floor legacy bridge keys (a restored pre-floor backup) is left unmarked,
-so once schema history exists it keeps reporting `unsupported`, and the row
-stays a true floor signal rather than a self-healing one.
+already fired the one-time pre-floor warning. Every fresh database is marked
+on its first at-floor startup, so the row stays a true floor signal rather
+than a self-healing one.
 
 ### What the 6.3.0.0 floor gates
 
@@ -324,21 +323,22 @@ Two restore modes are available:
 
 Backups created before `4.9.0.0` may still carry the raw trade-mode bridge
 keys (`trade_lifecycle_mode`, top-level `dynamic_dca`,
-`sidestep_campaign_enabled`). Restoring such a backup is still supported: the
-three keys are dropped silently and the rest of the backup restores normally,
-because every legacy representation was equivalent to the default `trade_mode`
-value (`dynamic_dca`). All other removed config keys are still rejected on
-restore with a message that names the replacement key.
+`sidestep_campaign_enabled`). The 4.8.x-and-earlier trade-mode era is no
+longer a supported restore source, so restoring such a backup is rejected
+like any other removed config key, with a message that names the canonical
+`trade_mode` key. To restore one, remove the three keys from the backup's
+config rows first (every legacy representation was equivalent to the default
+`trade_mode` value (`dynamic_dca`), so nothing is lost) and retry.
 
 Before the restore confirmation, the dashboard runs a read-only backup review
 (`POST /config/backup/classify`) over the selected file and shows the outcome:
 
 - The review names the backup's era (`accumulation`, `dynamic_dca`, or
   `legacy_unspecified`) and every silent outcome the restore would perform:
-  pre-4.9 bridge keys dropped, row values whose columns no longer exist in the
-  current schema (including the sidestep-era waiting-state values), the count
-  of placement intents that will restore into quarantine, and the config-only
-  removal of the local accumulation pin.
+  row values whose columns no longer exist in the current schema (including
+  the sidestep-era waiting-state values), the count of placement intents that
+  will restore into quarantine, and the config-only removal of the local
+  accumulation pin.
 - A backup that the restore would refuse (campaign residue on open trades,
   removed config keys, incomplete accumulation sections, or an invalid sealed
   recovery manifest) is flagged as blocking, and the matching restore button

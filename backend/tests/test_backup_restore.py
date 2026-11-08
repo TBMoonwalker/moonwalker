@@ -478,10 +478,10 @@ async def test_export_backup_omits_removed_legacy_autopilot_max_fund_key(
 
 
 @pytest.mark.asyncio
-async def test_restore_backup_drops_legacy_trade_mode_bridge_keys_silently(
+async def test_restore_backup_refuses_pre_4_9_bridge_keys(
     tmp_path, monkeypatch
 ) -> None:
-    """Pre-4.9 bridge keys are dropped on restore; trade_mode keeps its default."""
+    """Pre-4.9 bridge keys are refused like any other removed config key."""
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -492,48 +492,48 @@ async def test_restore_backup_drops_legacy_trade_mode_bridge_keys_silently(
     Config._instance = None
 
     backup_service = BackupService()
-    await backup_service.restore_backup(
-        {
-            "schema_version": 1,
-            "config": [
-                {"key": "timezone", "value": "Europe/Vienna", "value_type": "str"},
-                {
-                    "key": "trade_lifecycle_mode",
-                    "value": "classic_dca",
-                    "value_type": "str",
-                },
-                {"key": "dynamic_dca", "value": True, "value_type": "bool"},
-                {
-                    "key": "sidestep_campaign_enabled",
-                    "value": True,
-                    "value_type": "bool",
-                },
-            ],
-        },
-        restore_trade_data=False,
-    )
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Config key 'trade_lifecycle_mode' was removed in 4.9.0.0. "
+            "Use 'trade_mode' instead."
+        ),
+    ):
+        await backup_service.restore_backup(
+            {
+                "schema_version": 1,
+                "config": [
+                    {"key": "timezone", "value": "Europe/Vienna", "value_type": "str"},
+                    {
+                        "key": "trade_lifecycle_mode",
+                        "value": "classic_dca",
+                        "value_type": "str",
+                    },
+                    {"key": "dynamic_dca", "value": True, "value_type": "bool"},
+                    {
+                        "key": "sidestep_campaign_enabled",
+                        "value": True,
+                        "value_type": "bool",
+                    },
+                ],
+            },
+            restore_trade_data=False,
+        )
 
     import model
 
-    persisted_keys = {row.key for row in await model.AppConfig.all()}
-    assert "trade_lifecycle_mode" not in persisted_keys
-    assert "dynamic_dca" not in persisted_keys
-    assert "sidestep_campaign_enabled" not in persisted_keys
-    assert "trade_mode" not in persisted_keys
-    timezone_row = await model.AppConfig.get(key="timezone")
-    assert timezone_row.value == "Europe/Vienna"
-    assert (await Config.instance()).get("trade_mode") == "dynamic_dca"
+    assert len(await model.AppConfig.all()) == 0
 
     await Tortoise.close_connections()
     Config._instance = None
 
 
 @pytest.mark.asyncio
-async def test_restore_backup_drops_bridge_keys_before_destructive_writes(
+async def test_restore_backup_refuses_bridge_keys_before_destructive_writes(
     tmp_path, monkeypatch
 ) -> None:
-    """Bridge keys are dropped before the replace; a payload without trade_mode
-    removes the existing trade_mode row (full-replace semantics)."""
+    """A pre-4.9 backup is refused before the config replace, leaving the
+    existing rows intact."""
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -552,33 +552,31 @@ async def test_restore_backup_drops_bridge_keys_before_destructive_writes(
     )
 
     backup_service = BackupService()
-    await backup_service.restore_backup(
-        {
-            "schema_version": 1,
-            "config": [
-                {
-                    "key": "trade_lifecycle_mode",
-                    "value": "sidestep_reentry",
-                    "value_type": "str",
-                },
-                {"key": "dynamic_dca", "value": True, "value_type": "bool"},
-                {
-                    "key": "dca_strategy",
-                    "value": "ema20_swing",
-                    "value_type": "str",
-                },
-            ],
-        },
-        restore_trade_data=False,
-    )
+    with pytest.raises(ValueError, match="was removed in 4.9.0.0"):
+        await backup_service.restore_backup(
+            {
+                "schema_version": 1,
+                "config": [
+                    {
+                        "key": "trade_lifecycle_mode",
+                        "value": "sidestep_reentry",
+                        "value_type": "str",
+                    },
+                    {"key": "dynamic_dca", "value": True, "value_type": "bool"},
+                    {
+                        "key": "dca_strategy",
+                        "value": "ema20_swing",
+                        "value_type": "str",
+                    },
+                ],
+            },
+            restore_trade_data=False,
+        )
 
     persisted_rows = {
         row.key: row.value for row in await model.AppConfig.all().order_by("key")
     }
-    assert persisted_rows["dca_strategy"] == "ema20_swing"
-    assert "trade_lifecycle_mode" not in persisted_rows
-    assert "dynamic_dca" not in persisted_rows
-    assert "trade_mode" not in persisted_rows
+    assert persisted_rows == {"trade_mode": "accumulation"}
 
     await Tortoise.close_connections()
     Config._instance = None

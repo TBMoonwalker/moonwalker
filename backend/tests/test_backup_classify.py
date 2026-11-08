@@ -49,8 +49,8 @@ def _sealed_manifest(intents: list[dict]) -> dict:
     return {**body, "sha256": BackupService._recovery_manifest_digest(body)}
 
 
-def test_classify_reports_legacy_bridge_keys_as_warning() -> None:
-    """Pre-4.9 bridge keys are named as a silent drop, not a refusal."""
+def test_classify_reports_pre_4_9_bridge_keys_as_blocking() -> None:
+    """Pre-4.9 bridge keys mirror the restore refusal with the replacement."""
     result = BackupService().classify_backup(
         _config_payload(
             [
@@ -68,19 +68,20 @@ def test_classify_reports_legacy_bridge_keys_as_warning() -> None:
 
     classification = result["classification"]
     assert classification["trade_mode_era"] == "legacy_unspecified"
-    assert classification["pre_4_9_bridge_keys"] == [
-        "dynamic_dca",
-        "trade_lifecycle_mode",
+    assert "pre_4_9_bridge_keys" not in classification
+    assert _finding_by_code(result, "legacy_bridge_keys_dropped") is None
+    removed = [
+        finding
+        for finding in result["findings"]
+        if finding["code"] == "removed_config_key"
     ]
-    finding = _finding_by_code(result, "legacy_bridge_keys_dropped")
-    assert finding is not None
-    assert finding["severity"] == "warning"
-    assert finding["detail"]["keys"] == [
-        "dynamic_dca",
+    assert [finding["detail"]["key"] for finding in removed] == [
         "trade_lifecycle_mode",
+        "dynamic_dca",
     ]
+    assert all(finding["severity"] == "blocking" for finding in removed)
+    assert "trade_mode" in removed[0]["message"]
     assert "forced_dry_run_pause" in _finding_codes(result)
-    assert not any(f["severity"] == "blocking" for f in result["findings"])
 
 
 def test_classify_reports_removed_config_key_as_blocking() -> None:

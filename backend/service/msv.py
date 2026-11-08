@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from model import AppConfig, ConfigMigration, SchemaMigration
+from model import ConfigMigration, SchemaMigration
 from tortoise.transactions import in_transaction
 
 MINIMUM_SUPPORTED_VERSION = "6.3.0.0"
@@ -30,20 +30,6 @@ MINIMUM_SUPPORTED_VERSION = "6.3.0.0"
 # presence in the ledger outlives the install that wrote it.  The literal is
 # owned here: the floor meaning belongs to msv, not to any migration module.
 FLOOR_CONFIG_MIGRATION_ROW = "2026-11-msv-floor-6-3-v1"
-
-# The config keys that only pre-4.9 databases carry.  On a *fresh* database
-# their presence marks pre-floor config residue (a restored pre-floor
-# backup): the install keeps reporting ``unsupported`` because nothing in the
-# current code canonicalizes those rows.  On an existing install the keys are
-# inert residue and do not prevent floor marking; the pre-floor warning has
-# already fired at preflight time on the first at-floor startup.
-LEGACY_TRADE_MODE_KEYS = frozenset(
-    {
-        "trade_lifecycle_mode",
-        "dynamic_dca",
-        "sidestep_campaign_enabled",
-    }
-)
 
 UPGRADE_GUIDANCE = (
     "Upgrade through 6.3.0.0 (the release that removed the remaining legacy "
@@ -172,11 +158,6 @@ async def record_msv_floor_marker(baseline: MsvBaseline | None) -> None:
     has already fired at preflight time, and running the floor release is
     precisely what reaches the floor, so later boots report ``supported``.
 
-    A fresh install that still carries the pre-floor legacy bridge keys (a
-    restored pre-floor backup) is left unmarked and keeps reporting
-    ``unsupported`` once schema history exists: nothing in the current code
-    canonicalizes that residue.
-
     Args:
         baseline: The preflight baseline, or ``None`` when the preflight did
             not run. When unavailable the marker is withheld (fail closed).
@@ -185,13 +166,6 @@ async def record_msv_floor_marker(baseline: MsvBaseline | None) -> None:
         return
 
     async with in_transaction() as connection:
-        legacy_present = (
-            await AppConfig.filter(key__in=list(LEGACY_TRADE_MODE_KEYS))
-            .using_db(connection)
-            .exists()
-        )
-        if baseline.status == MsvStatus.FRESH and legacy_present:
-            return
         already_applied = (
             await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW)
             .using_db(connection)

@@ -13,8 +13,9 @@ from typing import Any
 # The seven sidestep-era waiting-state columns that the first contract
 # migration (021) dropped from open trades. Pre-floor backups may still carry
 # them; restore discards them silently because no live code writes or reads
-# them. The campaign-residue hardening (TODOS.md) extends the refusal gate to
-# this same set.
+# them. The refusal gate covers campaign references only: the hardening that
+# would have extended it to this set was dropped 2026-11-08 with the 4.8.x
+# compatibility (see TODOS.md).
 SIDESTEP_WAITING_STATE_COLUMNS: frozenset[str] = frozenset(
     {
         "reserved_reentry_quote",

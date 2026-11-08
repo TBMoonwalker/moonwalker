@@ -152,15 +152,14 @@ async def test_floor_marker_keeps_a_fresh_install_supported_on_later_startups() 
 
 
 @pytest.mark.asyncio
-async def test_floor_marker_is_not_written_for_a_fresh_install_with_legacy_bridge_rows() -> (
+async def test_floor_marker_is_written_for_a_fresh_install_with_inert_legacy_rows() -> (
     None
 ):
-    """A fresh database carrying pre-floor backup residue stays unmarked.
+    """A fresh database with inert pre-4.9 bridge rows is marked at the floor.
 
-    The residue proves the data predates the floor, and nothing in the
-    current code canonicalizes it, so once the first startup's schema
-    migrations commit their rows the install must report ``unsupported``
-    rather than be marked at the floor.
+    The bridge keys are no longer a compatibility surface: pre-4.9 backups
+    are refused on restore, so a fresh install carrying such rows is handled
+    exactly like any other fresh install.
     """
     await AppConfig.create(
         key="trade_lifecycle_mode", value="classic_dca", value_type="str"
@@ -169,14 +168,11 @@ async def test_floor_marker_is_not_written_for_a_fresh_install_with_legacy_bridg
     assert baseline.status == MsvStatus.FRESH
     await record_msv_floor_marker(baseline)
 
-    assert (
-        await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
-        is False
-    )
+    assert await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
     await _seed_schema_history()
     baseline2 = await preflight_msv()
-    assert baseline2.status == MsvStatus.UNSUPPORTED
-    assert baseline2.floor_applied is False
+    assert baseline2.status == MsvStatus.SUPPORTED
+    assert baseline2.floor_applied is True
 
 
 @pytest.mark.asyncio
@@ -188,8 +184,8 @@ async def test_floor_marker_is_written_for_a_pre_floor_install_on_first_at_floor
     The pre-floor warning fires at preflight time (the last-known state), and
     running the floor release is what reaches the floor, so the marker is
     written on the first at-floor startup and later boots report
-    ``supported``. Inert pre-4.9 bridge keys on an existing database do not
-    keep the warning alive.
+    ``supported``. Inert pre-4.9 bridge rows on an existing database do not
+    change the pre-floor outcome.
     """
     await AppConfig.create(
         key="trade_lifecycle_mode", value="classic_dca", value_type="str"

@@ -62,8 +62,9 @@ Notes:
   `autopilot_base_order_stretch_max_multiplier` for
   `autopilot_entry_stretch_max_multiplier`, and canonical `trade_mode` for
   the pre-4.9 bridge keys `trade_lifecycle_mode`, `dynamic_dca`, and
-  `sidestep_campaign_enabled`. Backup restore rejects removed keys other than
-  the three bridge keys, which it drops silently (see the restore section).
+  `sidestep_campaign_enabled`. Backup restore rejects removed keys, including
+  the three bridge keys, with a message that names the replacement (see the
+  restore section).
 - Generic config saves cannot switch `dry_run` from `true` to `false`; that
   transition is rejected unless it goes through `POST /config/live/activate`.
 - `POST /config/live/activate` expects `{"confirm": true}` and returns `409`
@@ -80,8 +81,8 @@ Notes:
   `confirm: true`, and optional `restore_trade_data`. Restore drains active
   exchange-order work, rejects new order work until replacement completes, and
   leaves the restored instance paused in dry-run mode. Backups containing
-  removed legacy config keys are rejected, except the three pre-4.9
-  trade-mode bridge keys, which are dropped silently.
+  removed legacy config keys are rejected with a message that names the
+  replacement key, including the three pre-4.9 trade-mode bridge keys.
 - Full backups use schema 3 and include accumulation ownership, exact balances,
   historical execution records and pinned strategy dependencies. Restore retains
   closing/stopped states and quarantines unfinished orders and commands. Strategy
@@ -94,15 +95,15 @@ Notes:
 - `POST /config/backup/classify` expects the same `backup` and optional
   `restore_trade_data` fields as restore (no `confirm`) and performs no reads
   from or writes to the database. It returns a `classification` summary
-  (`schema_version`, `trade_mode_era`, `pre_4_9_bridge_keys`,
-  `includes_accumulation`) plus a `findings` list ordered blocking-first. Each
-  finding carries `code`, `severity` (`info` | `warning` | `blocking`),
-  `message`, safe-field `detail`, and an optional `next_action`. `blocking`
-  findings mirror the refusal the restore endpoint would raise; `warning`
-  findings name the silent drops the restore performs (pre-4.9 bridge keys,
-  row values whose columns no longer exist, quarantined placement intents,
-  config-only pin removal). The restore endpoint remains the authoritative
-  gate; the preview only makes its outcome legible before confirmation.
+  (`schema_version`, `trade_mode_era`, `includes_accumulation`) plus a
+  `findings` list ordered blocking-first. Each finding carries `code`,
+  `severity` (`info` | `warning` | `blocking`), `message`, safe-field
+  `detail`, and an optional `next_action`. `blocking` findings mirror the
+  refusal the restore endpoint would raise; `warning` findings name the
+  silent drops the restore performs (row values whose columns no longer
+  exist, quarantined placement intents, config-only pin removal). The restore
+  endpoint remains the authoritative gate; the preview only makes its outcome
+  legible before confirmation.
 - Switching the signal plugin to `csv_signal` is rejected while open trades
   still exist.
 
