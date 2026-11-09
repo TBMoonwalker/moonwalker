@@ -87,30 +87,6 @@ confirmed it: the full frontend CI passed unmodified, and the typescript
 
 **Priority:** P3
 
-### Remove the service/orders.py compatibility facade
-
-**Status:** Recorded 2026-11-09 as the follow-up of the completed
-orders.py split (plan of record:
-`~/.gstack/projects/TBMoonwalker-moonwalker/orders-split-dca-facade-plan-20261108.md`,
-decision D5).
-
-**What:** Point the remaining `Orders` consumers — `app.py` (startup
-reconciliation and the `accumulation_recovery` seam),
-`runtime_services.py`, `trading_controls.py`, and the signal plugins — at
-`DcaOrderLifecycle` / `OrderLifecycleRouting` directly, delete
-`service/orders.py`, and move its `reconcile_placement_intents` entry point
-and seam to the mode-neutral service root next to
-`placement_reconciliation.py`.
-
-**Why:** The facade exists so the split could land as one
-behavior-preserving changeset. Once the runtime graph no longer references
-`Orders`, the indirection — and the last trace of the "order service"
-naming ambiguity the split removed — can be retired.
-
-**Effort:** S
-
-**Priority:** P3
-
 ## Dashboard history
 
 ### Evaluate server caching and incremental timeline loading
@@ -176,6 +152,48 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Remove the service/orders.py compatibility facade
+
+**Status:** Completed 2026-11-09 as three CI-green code commits on
+`fixed-todos` (`dc9f29c`, `3b2b02f`, `950f680`) plus the docs commit.
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/orders-facade-removal-plan-20261109.md`
+(decisions R1–R9; the scoped correctness check is recorded in the plan).
+
+**What shipped:**
+- `service/orders.py` is deleted. Its mode-neutral seams moved to the
+  service-root module `service/placement_recovery_entry.py`
+  (`PlacementRecoveryEntry`): it receives a caller-constructed
+  `DcaOrderLifecycle` (app.py owns both constructions), owns the
+  `accumulation_recovery` seam and the startup entry point
+  `reconcile_placement_intents` (which reads the seam at
+  reconciler-construction time, D6 unchanged), builds the operator
+  placement-repair service over the shared recovery resume handler, and
+  wires the bybit reconciler factory. The DCA recovery-handler callback
+  wiring is owned once, on `DcaOrderLifecycle.build_recovery_handler()`.
+- Consumers re-pointed: `app.py` replaces `runtime_state.placement_orders`
+  with `order_lifecycle` + `placement_recovery`; the runtime service graph
+  carries `order_lifecycle` and receives the entry
+  (`build_runtime_services(placement_recovery=…)`);
+  `TradingControlsService` takes `order_lifecycle`; the orders controller
+  proxy resolves the `"order_lifecycle"` graph field; the three signal
+  plugins self-wire `DcaOrderLifecycle()`.
+- 20 test files re-pointed at `DcaOrderLifecycle` (the facade's `.dca` hop
+  collapses onto the lifecycle); the facade-specific split guards are
+  retired and the D6 late-seam guard re-homes in
+  `backend/tests/test_placement_recovery_entry.py` with the
+  entry-composition, finally-close, and repair-wiring units.
+- Coverage ratchet: the `service/orders.py` row is replaced by the
+  `placement_recovery_entry.py` row at the measured 100.0 branch
+  coverage; the split rows are flat or better (lifecycle 73.0 → 73.1,
+  finalization 69.6, routing 90.0, runtime_services 75.0 → 78.6).
+
+**Verification:** full CI green (`cd scripts && ./ci.sh`) — 2,282 backend
+tests, type checks, lint, and coverage floors. No API, config, schema, or
+log-message changes.
+
+**Priority:** P3
 
 ### Make logger handler de-duplication robust to uncanonical log directories
 

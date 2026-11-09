@@ -152,7 +152,9 @@ The backend is a Python application using Litestar with the following structure:
     - `accumulation/runtime.py` - Lifespan-owned accumulation orchestration, entry recovery, strategy evaluation and operator commands
     - `watcher.py` - Real-time OHLCV/trade streaming via CCXT Pro WebSockets with auto-reconnect
     - `trades.py` - Trade persistence layer: CRUD for open/closed trades, aggregation
-    - `orders.py` - Order execution and management
+    - `dca/order_lifecycle.py` - DCA order execution lifecycle: buy/sell receipt, TP limit arm/cancel/reconcile, stop signals, manual operations
+    - `order_routing.py` - Mode-neutral lifecycle routing: ownership guard, snapshot validation, operator mutation-result contract
+    - `placement_recovery_entry.py` - Startup placement-intent recovery entry, operator repair builder, and the `accumulation_recovery` seam
     - `database.py` - Tortoise ORM database connection and management
     - `housekeeper.py` - Periodic cleanup of old ticker data and uPNL history
     - `statistic.py` - Portfolio stats, uPNL tracking, profit calculations

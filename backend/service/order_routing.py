@@ -2,8 +2,8 @@
 
 Owns the lifecycle-ownership rejection, snapshot currency validation, trade
 state loading, and the operator mutation-result contract. DCA execution and
-finalization live in service/dca/; this class is shared by the Orders facade
-and DcaOrderLifecycle.
+finalization live in service/dca/; this class is shared by
+PlacementRecoveryEntry and DcaOrderLifecycle.
 """
 
 import sqlite3

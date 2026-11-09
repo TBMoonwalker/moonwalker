@@ -1,11 +1,13 @@
 """DCA trade finalization: persistence, stats, and the trade.buy/trade.sell seams.
 
-Entry-point contract: these functions are called only from DcaOrderLifecycle
-and the Orders facade's placement-recovery adapters. The caller guarantees
-exclusivity - at runtime by holding the lifecycle_mutation_coordinator lock,
-at startup by reconciling before producers start (unconditional acquisition
-would deadlock the already-locked bybit recovery path). A persistence error
-must not invalidate or notify.
+Entry-point contract: these functions are called only from
+DcaOrderLifecycle, including the recovery-handler wiring that the
+placement-recovery entry composes for startup reconciliation. The caller
+guarantees exclusivity - at runtime by holding the
+lifecycle_mutation_coordinator lock, at startup by reconciling before
+producers start (unconditional acquisition would deadlock the
+already-locked bybit recovery path). A persistence error must not
+invalidate or notify.
 """
 
 import json

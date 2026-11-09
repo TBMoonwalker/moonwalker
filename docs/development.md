@@ -169,9 +169,10 @@ Mode-owned services live in `service/dca/` and `service/accumulation/`:
   fallback policy lives in its `limit_orders.py`, `limit_fills.py`,
   `limit_sell.py`, `sell_execution.py` and `sell_status.py` modules; these reuse
   shared submission, lookup and cancellation mechanics.
-- `dca/dust.py` owns DCA remainder orchestration. `Orders` delegates its existing
-  dependencies; `order_persistence.py` retains atomic execution/history/archive
-  writes. Cache invalidation and notifications occur after persistence.
+- `dca/dust.py` owns DCA remainder orchestration. `DcaOrderLifecycle`
+  delegates its existing dependencies; `order_persistence.py` retains
+  atomic execution/history/archive writes. Cache invalidation and
+  notifications occur after persistence.
 - `dca/finalization.py` owns classic-DCA trade finalization: persistence,
   closed-trade statistics, TP limit sell payload building, entry-size retry,
   unsellable-state reset, order-status predicates, and the two
@@ -188,14 +189,16 @@ Mode-owned services live in `service/dca/` and `service/accumulation/`:
 - `order_routing.py` owns the mode-neutral lifecycle routing
   (`OrderLifecycleRouting`): the legacy-mutation ownership guard for
   accumulation symbols, snapshot-currency validation, trade-state loading,
-  and the operator mutation-result contract. It is shared by the `Orders`
-  facade and `DcaOrderLifecycle`.
-- `service/orders.py` is a thin compatibility facade: it wires the shared
-  collaborators through `build_default_order_collaborators()` and delegates
-  every DCA entry point to `DcaOrderLifecycle`. It owns the
+  and the operator mutation-result contract. It is shared by
+  `PlacementRecoveryEntry` and `DcaOrderLifecycle`.
+- `placement_recovery_entry.py` is the mode-neutral startup recovery entry
+  (`PlacementRecoveryEntry`): it receives a caller-constructed
+  `DcaOrderLifecycle` (the application owns both constructions), owns the
   `accumulation_recovery` seam and the startup reconciliation entry point
   `reconcile_placement_intents`, which reads the seam when it builds the
-  reconciler.
+  reconciler, and builds the operator placement-repair service over the
+  shared recovery resume handler. The DCA recovery-handler callback wiring
+  is owned once, on `DcaOrderLifecycle.build_recovery_handler()`.
 - `accumulation/exchange.py` composes the shared transport for its exact,
   preflighted orders. `runtime.py`, `accounting.py` and `dust.py` retain its
   activation, inventory/basis and archive lifecycle. Its fee adapters reuse the

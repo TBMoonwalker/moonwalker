@@ -64,6 +64,13 @@ All notable changes to Moonwalker are documented in this file.
   `service/order_routing.py`; `service/orders.py` is now a thin compatibility
   facade and `dca/engine.py` uses the lifecycle directly. Internal module
   move — no API, config, or schema change.
+- Removed the `service/orders.py` compatibility facade: its mode-neutral
+  startup seams moved to `service/placement_recovery_entry.py`
+  (`PlacementRecoveryEntry`, which receives a caller-constructed
+  `DcaOrderLifecycle`), and the runtime graph, trading controls, and signal
+  plugins now use the DCA lifecycle directly. The DCA recovery-handler
+  wiring is owned once on `DcaOrderLifecycle.build_recovery_handler()`.
+  Internal refactor — no API, config, schema, or log-message change.
 
 ### Fixed
 
