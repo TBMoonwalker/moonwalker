@@ -182,6 +182,17 @@ def test_new_modules_route_logs_to_shared_dca_logger() -> None:
         )
     ]
     assert other_owners == []
+    # The shared "dca" logger must own exactly one handler that writes to
+    # dca.log; a second one double-writes records and splits rotation/retention.
+    # Count dca.log handlers specifically: the logger may also carry unrelated
+    # test-session handlers (e.g. a /dev/null silencer) that do not touch it.
+    dca_log_handlers = [
+        handler
+        for handler in dca_logger.handlers
+        if isinstance(handler, logging.FileHandler)
+        and Path(getattr(handler, "baseFilename", "")).name == "dca.log"
+    ]
+    assert len(dca_log_handlers) == 1
 
 
 @pytest.mark.asyncio

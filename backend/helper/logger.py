@@ -39,23 +39,47 @@ def _resolve_log_dir() -> Path:
 LOG_DIR = _resolve_log_dir()
 
 
+def _canonical_log_file(path: str | Path) -> str:
+    """Return the canonical (symlink-resolved, absolute) form of a log path.
+
+    ``FileHandler.baseFilename`` is produced by ``os.path.abspath`` (lexical
+    normalization, no symlink resolution), so two handlers that target the same
+    file can carry different ``baseFilename`` strings whenever a path component
+    is a symlink (e.g. macOS ``/var`` -> ``/private/var``) or an absolute path
+    is not normalized. Canonicalizing both sides of a handler comparison with
+    ``os.path.realpath`` makes de-duplication robust to such uncanonical
+    spellings.
+
+    Args:
+        path: A log file path, as a string or ``Path``.
+
+    Returns:
+        The canonical absolute form of the path.
+    """
+    return os.path.realpath(os.fspath(path))
+
+
 def _resolve_log_path(log_file: str | Path) -> Path:
-    """Resolve a caller-supplied log file name against :data:`LOG_DIR`.
+    """Resolve a caller-supplied log file name to a canonical path.
+
+    The returned path is absolute, normalized, and symlink-resolved so the
+    handler's ``baseFilename`` and the de-duplication comparison agree even
+    when ``LOG_DIR`` (or the supplied path) is not canonical - for example a
+    directory behind a symlink.
 
     Historical call sites pass names like ``"logs/startup.log"``. Because the
     location is now anchored, only the file name is retained and joined onto the
-    canonical directory; absolute paths are used unchanged.
+    directory; absolute paths are used as given and then canonicalized.
 
     Args:
         log_file: A relative log file name or an absolute path.
 
     Returns:
-        The resolved absolute ``Path`` for the log file.
+        The fully resolved absolute ``Path`` for the log file.
     """
     path = Path(log_file)
-    if path.is_absolute():
-        return path
-    return LOG_DIR / path.name
+    candidate = path if path.is_absolute() else LOG_DIR / path.name
+    return candidate.resolve()
 
 
 def _register_trace_level() -> None:
@@ -100,7 +124,10 @@ class LoggerFactory:
         """Create a logger instance with file handler and appropriate formatting.
 
         A private method that interacts with the Python logging module to create
-        configured loggers with rotating file handlers.
+        configured loggers with rotating file handlers. A file handler is only
+        attached when the logger does not already own one for the same canonical
+        log file, so repeated ``get_logger`` calls never double-attach handlers
+        even when the log directory is not a canonical path.
 
         Args:
             log_file: Path to the log file
@@ -119,31 +146,32 @@ class LoggerFactory:
         if log_dir:
             log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Set the logging format
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(name)s : %(message)s"
-        )
-
-        file_handler = logging.handlers.RotatingFileHandler(
-            str(resolved),
-            maxBytes=5000000,
-            backupCount=5,
-        )
-
-        # Windows has a problem with the RotatingFileHandler - so only one file
-        if os.name == "nt":
-            file_handler = logging.FileHandler(str(resolved))
-
+        # De-duplicate by canonical form: FileHandler.baseFilename is
+        # os.path.abspath (no symlink resolution), so compare both sides with
+        # realpath to stay correct when the log dir sits behind a symlink.
+        target = _canonical_log_file(resolved)
         existing_handler = next(
             (
                 handler
                 for handler in logger.handlers
                 if isinstance(handler, logging.FileHandler)
-                and getattr(handler, "baseFilename", None) == str(resolved.resolve())
+                and _canonical_log_file(handler.baseFilename) == target
             ),
             None,
         )
         if existing_handler is None:
+            formatter = logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(name)s : %(message)s"
+            )
+            # Windows has a problem with the RotatingFileHandler - so only one file
+            if os.name == "nt":
+                file_handler = logging.FileHandler(str(resolved))
+            else:
+                file_handler = logging.handlers.RotatingFileHandler(
+                    str(resolved),
+                    maxBytes=5000000,
+                    backupCount=5,
+                )
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
 

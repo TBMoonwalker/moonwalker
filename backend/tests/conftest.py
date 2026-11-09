@@ -15,7 +15,12 @@ if ROOT_DIR not in sys.path:
 # anchored production log directory. Redirect that directory to a throwaway
 # location before any service module is imported so the test suite never
 # appends ERROR/Traceback records to the live logs.
-_LOG_TMP = Path(tempfile.mkdtemp(prefix="moonwalker-test-logs-"))
+#
+# Resolve to a canonical path: tempfile.mkdtemp() can return a symlinked
+# spelling (macOS /var -> /private/var). helper.logger canonicalizes its
+# targets, so _close_temp_log_handlers' startswith() match on each handler's
+# baseFilename only works when both sides are canonical.
+_LOG_TMP = Path(tempfile.mkdtemp(prefix="moonwalker-test-logs-")).resolve()
 os.environ["MOONWALKER_LOG_DIR"] = str(_LOG_TMP)
 
 import helper.logger as _logger_module  # noqa: E402
