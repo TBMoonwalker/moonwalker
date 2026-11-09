@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
 from service.analytics import Analytics
 from service.backup_restore import BackupService
 from service.data import Data
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.delisting_protection import DelistingProtectionService
 from service.exchange import Exchange
 from service.log_viewer import LogViewerService
-from service.orders import Orders
+from service.placement_recovery_entry import PlacementRecoveryEntry
 from service.placement_repair import PlacementRepairService
 from service.statistic import Statistic
 from service.trade_replay_indicators import TradeReplayIndicatorService
@@ -38,7 +39,7 @@ class RuntimeServiceShutdownError(RuntimeError):
 class RuntimeServices:
     """Controller-facing collaborators owned by one application lifespan."""
 
-    orders: Orders
+    order_lifecycle: DcaOrderLifecycle
     trades: Trades
     data: Data
     analytics: Analytics
@@ -58,7 +59,7 @@ class RuntimeServices:
         for close in (
             self.data.close,
             self.statistics_exchange.close,
-            self.orders.close,
+            self.order_lifecycle.close,
         ):
             try:
                 await close()
@@ -74,20 +75,21 @@ _compatibility_services: RuntimeServices | None = None
 
 def build_runtime_services(
     *,
-    orders: Orders | None = None,
+    placement_recovery: PlacementRecoveryEntry | None = None,
     delisting_protection: DelistingProtectionService | None = None,
     statistics_balance_cache_ttl_seconds: float = 5.0,
     accumulation: AccumulationRuntime | None = None,
 ) -> RuntimeServices:
     """Build one internally shared controller service graph."""
-    orders_service = orders or Orders()
+    entry = placement_recovery or PlacementRecoveryEntry(lifecycle=DcaOrderLifecycle())
+    lifecycle = entry.dca
     trades_service = cast(
         Trades,
-        getattr(orders_service, "trades", None) or Trades(),
+        getattr(lifecycle, "trades", None) or Trades(),
     )
     statistic_service = Statistic(trades=trades_service)
     return RuntimeServices(
-        orders=orders_service,
+        order_lifecycle=lifecycle,
         trades=trades_service,
         data=Data(),
         analytics=Analytics(),
@@ -98,14 +100,14 @@ def build_runtime_services(
             balance_cache_ttl_seconds=statistics_balance_cache_ttl_seconds
         ),
         trading_controls=TradingControlsService(
-            orders=orders_service,
+            order_lifecycle=lifecycle,
             trades=trades_service,
         ),
         trade_replay_indicators=TradeReplayIndicatorService(trades_service),
         delisting_protection=(
             delisting_protection or DelistingProtectionService.shared()
         ),
-        placement_repair=orders_service.build_placement_repair(),
+        placement_repair=entry.build_placement_repair(),
         accumulation=accumulation,
     )
 
@@ -180,7 +182,9 @@ class RuntimeServiceProxy(Generic[ServiceT]):
 
 
 @overload
-def runtime_service_proxy(service_name: Literal["orders"]) -> Orders: ...
+def runtime_service_proxy(
+    service_name: Literal["order_lifecycle"],
+) -> DcaOrderLifecycle: ...
 
 
 @overload

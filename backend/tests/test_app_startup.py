@@ -106,7 +106,10 @@ class _FakePlacementSummary:
     remaining: int = 0
 
 
-class _FakePlacementOrders:
+class _FakePlacementRecovery:
+    def __init__(self, *, lifecycle: object) -> None:
+        self.dca = lifecycle
+
     async def reconcile_placement_intents(
         self,
         _config: dict[str, object],
@@ -271,7 +274,7 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
         fake_market_cap_service,
     )
     monkeypatch.setattr(app_module, "Database", lambda: fake_database)
-    monkeypatch.setattr(app_module, "Orders", _FakePlacementOrders)
+    monkeypatch.setattr(app_module, "PlacementRecoveryEntry", _FakePlacementRecovery)
     monkeypatch.setattr(app_module, "Config", _FakeConfigFactory)
     monkeypatch.setattr(app_module, "Watcher", _FakeWatcher)
     monkeypatch.setattr(app_module, "Housekeeper", _FakeHousekeeper)
@@ -349,14 +352,14 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
             assert accumulation.startup_calls == 1
             assert accumulation.running
             assert (
-                app_module.runtime_state.placement_orders.accumulation_recovery
+                app_module.runtime_state.placement_recovery.accumulation_recovery
                 == accumulation.recovery.reconcile
             )
         assert app_module.runtime_state.controller_services is not None
         assert app_module.runtime_state.controller_services.accumulation is accumulation
         assert (
-            app_module.runtime_state.controller_services.orders
-            is app_module.runtime_state.placement_orders
+            app_module.runtime_state.controller_services.order_lifecycle
+            is app_module.runtime_state.placement_recovery.dca
         )
 
     assert fake_market_cap_service.shutdown_calls == 1
@@ -368,7 +371,7 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
 
 def _patch_startup_gate_dependencies(
     monkeypatch: pytest.MonkeyPatch,
-    orders_factory: type,
+    recovery_factory: type,
 ) -> None:
     """Patch the globals startup touches before the placement reconciliation gate."""
     monkeypatch.setattr(app_module, "runtime_state", app_module.RuntimeState())
@@ -380,7 +383,7 @@ def _patch_startup_gate_dependencies(
         _FakeMarketCapRankService(),
     )
     monkeypatch.setattr(app_module, "Database", lambda: _FakeDatabase())
-    monkeypatch.setattr(app_module, "Orders", orders_factory)
+    monkeypatch.setattr(app_module, "PlacementRecoveryEntry", recovery_factory)
     monkeypatch.setattr(app_module, "Config", _FakeConfigFactory)
     monkeypatch.setattr(
         app_module, "build_accumulation_runtime", lambda _provider: None
@@ -405,11 +408,11 @@ async def test_lifespan_serves_placement_recovery_when_only_quarantined_intents_
         ready = False
         action_required = ("limit_sell-abc123",)
 
-    class _QuarantinedOrders(_FakePlacementOrders):
+    class _QuarantinedRecovery(_FakePlacementRecovery):
         async def reconcile_placement_intents(self, _config):
             return _QuarantinedSummary()
 
-    _patch_startup_gate_dependencies(monkeypatch, _QuarantinedOrders)
+    _patch_startup_gate_dependencies(monkeypatch, _QuarantinedRecovery)
 
     async with app_module.runtime_lifespan(None):
         assert app_module.runtime_state.recovery_mode == "placement"
@@ -433,11 +436,11 @@ async def test_lifespan_stays_fatal_when_nonterminal_work_remains(
         action_required = ("limit_sell-abc123",)
         remaining = 1
 
-    class _MixedOrders(_FakePlacementOrders):
+    class _MixedRecovery(_FakePlacementRecovery):
         async def reconcile_placement_intents(self, _config):
             return _MixedSummary()
 
-    _patch_startup_gate_dependencies(monkeypatch, _MixedOrders)
+    _patch_startup_gate_dependencies(monkeypatch, _MixedRecovery)
 
     with pytest.raises(RuntimeError, match="requires operator action"):
         async with app_module.runtime_lifespan(None):
@@ -842,7 +845,7 @@ async def test_shutdown_attempts_later_resources_after_early_failure(
         signal_plugin=FailingSignal(),  # type: ignore[arg-type]
         watcher=ShutdownService("watcher"),  # type: ignore[arg-type]
         housekeeper=ShutdownService("housekeeper"),  # type: ignore[arg-type]
-        placement_orders=CloseService("placement_orders"),  # type: ignore[arg-type]
+        placement_recovery=CloseService("placement_recovery"),  # type: ignore[arg-type]
         market_cap_rank_service=ShutdownService("market_cap"),  # type: ignore[arg-type]
         database=ShutdownService("database"),  # type: ignore[arg-type]
     )
@@ -872,14 +875,15 @@ async def test_shutdown_attempts_later_resources_after_early_failure(
         "signal",
         "watcher",
         "housekeeper",
-        "placement_orders",
+        "placement_recovery",
         "market_cap",
         "database",
         "provider",
         "redis",
     ]
     assert state.signal_plugin is None
-    assert state.placement_orders is None
+    assert state.placement_recovery is None
+    assert state.order_lifecycle is None
     assert state.database is None
 
 

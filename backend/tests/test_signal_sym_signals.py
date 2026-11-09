@@ -211,7 +211,9 @@ async def test_sym_signals_run_uses_shared_admission_batch(monkeypatch) -> None:
     async def fake_receive_buy_order(order, _config) -> None:
         orders.append(order)
 
-    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+    plugin.order_lifecycle = types.SimpleNamespace(
+        receive_buy_order=fake_receive_buy_order
+    )
 
     await plugin.run(config)
 
@@ -323,7 +325,9 @@ async def test_sym_signals_idle_timeout_does_not_force_immediate_reconnect(
     async def fake_receive_buy_order(order, _config) -> None:
         orders.append(order)
 
-    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+    plugin.order_lifecycle = types.SimpleNamespace(
+        receive_buy_order=fake_receive_buy_order
+    )
 
     await plugin.run(config)
 
@@ -494,7 +498,9 @@ async def test_sym_signals_error_event_logs_payload_and_uses_backoff(
     async def fake_receive_buy_order(order, _config) -> None:
         orders.append(order)
 
-    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+    plugin.order_lifecycle = types.SimpleNamespace(
+        receive_buy_order=fake_receive_buy_order
+    )
 
     await plugin.run(config)
 
@@ -557,7 +563,9 @@ async def test_sym_signals_skips_buy_when_history_remains_insufficient(
     async def fake_receive_buy_order(order, _config) -> None:
         orders.append(order)
 
-    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+    plugin.order_lifecycle = types.SimpleNamespace(
+        receive_buy_order=fake_receive_buy_order
+    )
 
     await plugin._SignalPlugin__process_valid_signal(
         {

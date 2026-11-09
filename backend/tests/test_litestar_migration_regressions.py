@@ -1246,17 +1246,17 @@ def test_order_mutations_require_post(monkeypatch) -> None:
         orders_controller.Config, "instance", classmethod(_fake_instance)
     )
     monkeypatch.setattr(
-        orders_controller.orders,
+        orders_controller.order_lifecycle,
         "receive_sell_signal_result",
         _fake_sell,
     )
     monkeypatch.setattr(
-        orders_controller.orders,
+        orders_controller.order_lifecycle,
         "receive_buy_signal_result",
         _fake_buy,
     )
     monkeypatch.setattr(
-        orders_controller.orders,
+        orders_controller.order_lifecycle,
         "receive_stop_signal_result",
         _fake_stop,
     )

@@ -102,20 +102,20 @@ class TradingControlsService:
     def __init__(
         self,
         *,
-        orders: Any | None = None,
+        order_lifecycle: Any | None = None,
         trades: Any | None = None,
     ) -> None:
         """Initialize optionally shared lifecycle collaborators."""
-        self._orders = orders
+        self._order_lifecycle = order_lifecycle
         self._trades = trades
 
-    async def _get_orders(self) -> Any:
-        """Return the lazily constructed Orders service."""
-        if self._orders is None:
-            from service.orders import Orders
+    async def _get_order_lifecycle(self) -> Any:
+        """Return the lazily constructed DCA order lifecycle."""
+        if self._order_lifecycle is None:
+            from service.dca.order_lifecycle import DcaOrderLifecycle
 
-            self._orders = Orders()
-        return self._orders
+            self._order_lifecycle = DcaOrderLifecycle()
+        return self._order_lifecycle
 
     async def _legacy_pause_rejection(self, symbol: str) -> MissionPauseResult | None:
         """Require revisioned accumulation commands instead of mutating DCA flags."""
@@ -269,8 +269,8 @@ class TradingControlsService:
             )
 
         if mission.get("tp_limit_order_id"):
-            orders = await self._get_orders()
-            canceled = await orders.cancel_tp_limit_order_prelocked(
+            order_lifecycle = await self._get_order_lifecycle()
+            canceled = await order_lifecycle.cancel_tp_limit_order_prelocked(
                 mission["symbol"], config or {}
             )
             if not canceled:

@@ -1,5 +1,6 @@
 import pytest
-from service.orders import Orders
+from service.dca.order_lifecycle import DcaOrderLifecycle
+from service.placement_recovery_entry import PlacementRecoveryEntry
 from service.runtime_services import (
     RuntimeServiceProxy,
     RuntimeServiceShutdownError,
@@ -14,13 +15,14 @@ from service.runtime_services import (
 
 def test_runtime_services_share_lifecycle_collaborators() -> None:
     reset_runtime_services_for_testing()
-    orders = Orders()
-    services = build_runtime_services(orders=orders)
+    lifecycle = DcaOrderLifecycle()
+    entry = PlacementRecoveryEntry(lifecycle=lifecycle)
+    services = build_runtime_services(placement_recovery=entry)
 
-    assert services.orders is orders
-    assert services.trades is orders.trades
+    assert services.order_lifecycle is lifecycle
+    assert services.trades is lifecycle.trades
     assert services.statistic.trades is services.trades
-    assert services.trading_controls._orders is services.orders
+    assert services.trading_controls._order_lifecycle is services.order_lifecycle
     assert services.trading_controls._trades is services.trades
     assert services.trade_replay_indicators.trades is services.trades
     assert services.accumulation is None
@@ -39,13 +41,13 @@ def test_runtime_service_proxy_prefers_active_lifespan_graph() -> None:
     reset_runtime_services_for_testing()
     compatibility = get_runtime_services()
     active = build_runtime_services()
-    proxy = RuntimeServiceProxy[Orders]("orders")
+    proxy = RuntimeServiceProxy[DcaOrderLifecycle]("order_lifecycle")
 
-    assert proxy._resolve() is compatibility.orders
+    assert proxy._resolve() is compatibility.order_lifecycle
 
     activate_runtime_services(active)
     try:
-        assert proxy._resolve() is active.orders
+        assert proxy._resolve() is active.order_lifecycle
         assert proxy._resolve() is proxy._resolve()
     finally:
         deactivate_runtime_services(active)
@@ -65,8 +67,8 @@ async def test_runtime_services_close_controller_owned_clients(
     async def close_statistics_exchange() -> None:
         closed.append("statistics_exchange")
 
-    async def close_orders() -> None:
-        closed.append("orders")
+    async def close_order_lifecycle() -> None:
+        closed.append("order_lifecycle")
 
     monkeypatch.setattr(services.data, "close", close_data)
     monkeypatch.setattr(
@@ -74,11 +76,11 @@ async def test_runtime_services_close_controller_owned_clients(
         "close",
         close_statistics_exchange,
     )
-    monkeypatch.setattr(services.orders, "close", close_orders)
+    monkeypatch.setattr(services.order_lifecycle, "close", close_order_lifecycle)
 
     await services.shutdown()
 
-    assert closed == ["data", "statistics_exchange", "orders"]
+    assert closed == ["data", "statistics_exchange", "order_lifecycle"]
 
 
 @pytest.mark.asyncio
@@ -95,8 +97,8 @@ async def test_runtime_services_attempt_every_close_after_failure(
     async def close_statistics_exchange() -> None:
         closed.append("statistics_exchange")
 
-    async def close_orders() -> None:
-        closed.append("orders")
+    async def close_order_lifecycle() -> None:
+        closed.append("order_lifecycle")
 
     monkeypatch.setattr(services.data, "close", fail_data)
     monkeypatch.setattr(
@@ -104,7 +106,7 @@ async def test_runtime_services_attempt_every_close_after_failure(
         "close",
         close_statistics_exchange,
     )
-    monkeypatch.setattr(services.orders, "close", close_orders)
+    monkeypatch.setattr(services.order_lifecycle, "close", close_order_lifecycle)
 
     with pytest.raises(
         RuntimeServiceShutdownError,
@@ -112,7 +114,7 @@ async def test_runtime_services_attempt_every_close_after_failure(
     ):
         await services.shutdown()
 
-    assert closed == ["data", "statistics_exchange", "orders"]
+    assert closed == ["data", "statistics_exchange", "order_lifecycle"]
 
 
 def test_proxy_monkeypatch_undo_restores_class_method(
@@ -128,8 +130,8 @@ def test_proxy_monkeypatch_undo_restores_class_method(
     """
     reset_runtime_services_for_testing()
     services = get_runtime_services()
-    proxy = RuntimeServiceProxy("orders")
-    original = type(services.orders).close
+    proxy = RuntimeServiceProxy("order_lifecycle")
+    original = type(services.order_lifecycle).close
 
     monkeypatch.setattr(proxy, "close", lambda: None)
     assert proxy.close is not original

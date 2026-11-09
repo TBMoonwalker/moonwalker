@@ -16,7 +16,7 @@ from service.placement_repair import (
 )
 from service.runtime_services import runtime_service_proxy
 
-orders = runtime_service_proxy("orders")
+order_lifecycle = runtime_service_proxy("order_lifecycle")
 placement_repair = runtime_service_proxy("placement_repair")
 OPERATION_ID_HEADER = "x-moonwalker-operation-id"
 OPERATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
@@ -56,7 +56,7 @@ async def sell_order(
         operation_id = _operation_id_from_request(request)
     except ValueError as exc:
         return json_response({"result": "", "error": str(exc)}, 400)
-    mutation = await orders.receive_sell_signal_result(
+    mutation = await order_lifecycle.receive_sell_signal_result(
         symbol,
         config,
         operation_id=operation_id,
@@ -91,7 +91,7 @@ async def buy_order(
         operation_id = _operation_id_from_request(request)
     except ValueError as exc:
         return json_response({"result": "", "error": str(exc)}, 400)
-    mutation = await orders.receive_buy_signal_result(
+    mutation = await order_lifecycle.receive_buy_signal_result(
         symbol,
         ordersize,
         config,
@@ -117,7 +117,7 @@ async def stop_order(symbol: FromPath[str]) -> dict[str, Any]:
         {"result": "stop"} or {"result": ""}
     """
     config = await Config.instance()
-    mutation = await orders.receive_stop_signal_result(symbol, config)
+    mutation = await order_lifecycle.receive_stop_signal_result(symbol, config)
     return {
         "result": "stop" if mutation.applied else "",
         "mutation": mutation.to_dict(),
@@ -149,7 +149,7 @@ async def add_manual_buy(request: Request[Any, Any, Any]) -> Any:
 
     config = await Config.instance()
     try:
-        result = await orders.receive_manual_buy_add(
+        result = await order_lifecycle.receive_manual_buy_add(
             symbol=str(payload.get("symbol", "")),
             date_input=payload.get("date"),
             price_raw=payload.get("price"),

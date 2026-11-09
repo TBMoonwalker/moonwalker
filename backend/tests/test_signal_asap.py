@@ -132,7 +132,9 @@ async def test_asap_run_uses_shared_admission_batch(monkeypatch) -> None:
     async def fake_receive_buy_order(order, _config) -> None:
         orders.append(order)
 
-    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+    plugin.order_lifecycle = types.SimpleNamespace(
+        receive_buy_order=fake_receive_buy_order
+    )
 
     await plugin.run({"bo": 10})
 
@@ -194,7 +196,7 @@ async def test_asap_releases_admission_when_watcher_queue_fails() -> None:
             plugin.statistic,
             plugin.autopilot,
             plugin.watcher_queue,
-            plugin.orders,
+            plugin.order_lifecycle,
             ["BTC/USDT"],
             signal_name="asap",
             strategy_name=None,

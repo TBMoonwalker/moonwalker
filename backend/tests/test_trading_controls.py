@@ -6,7 +6,7 @@ from service.trading_controls import TradingControlsService
 from tortoise import Tortoise
 
 
-class _FakeOrders:
+class _FakeLifecycle:
     def __init__(self, *, cancel_result: bool) -> None:
         self.cancel_result = cancel_result
         self.cancel_calls: list[tuple[str, dict[str, object]]] = []
@@ -56,13 +56,15 @@ async def test_pause_and_resume_classic_mission_are_idempotent(
     )
 
     controls = TradingControlsService()
-    fake_orders = _FakeOrders(cancel_result=True)
-    monkeypatch.setattr(controls, "_get_orders", lambda: _async_result(fake_orders))
+    fake_lifecycle = _FakeLifecycle(cancel_result=True)
+    monkeypatch.setattr(
+        controls, "_get_order_lifecycle", lambda: _async_result(fake_lifecycle)
+    )
 
     paused = await controls.pause_mission("BTC/USDT", {"exchange": "binance"})
     assert paused.status == "paused"
     assert paused.automation_paused is True
-    assert fake_orders.cancel_calls == [("BTC/USDT", {"exchange": "binance"})]
+    assert fake_lifecycle.cancel_calls == [("BTC/USDT", {"exchange": "binance"})]
 
     open_trade = await model.OpenTrades.get(symbol="BTC/USDT")
     assert open_trade.automation_paused is True
@@ -104,8 +106,10 @@ async def test_pause_mission_reports_tp_cancel_failure(tmp_path, monkeypatch) ->
     )
 
     controls = TradingControlsService()
-    fake_orders = _FakeOrders(cancel_result=False)
-    monkeypatch.setattr(controls, "_get_orders", lambda: _async_result(fake_orders))
+    fake_lifecycle = _FakeLifecycle(cancel_result=False)
+    monkeypatch.setattr(
+        controls, "_get_order_lifecycle", lambda: _async_result(fake_lifecycle)
+    )
 
     result = await controls.pause_mission("SOL/USDT", {})
 

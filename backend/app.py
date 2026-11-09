@@ -32,16 +32,17 @@ from service.coin_market_cap import (
 )
 from service.config import Config
 from service.database import Database
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.delisting_protection import DelistingProtectionService
 from service.green_phase import GreenPhaseService
 from service.housekeeper import Housekeeper
-from service.orders import Orders
 from service.origin_policy import (
     TrustedLanHttpMiddleware,
     WebSocketOriginMiddleware,
     parse_allowed_hosts,
     parse_allowed_origins,
 )
+from service.placement_recovery_entry import PlacementRecoveryEntry
 from service.redis import redis_client, start_redis
 from service.replay_repair_queue import replay_repair_queue
 from service.runtime_services import (
@@ -68,7 +69,8 @@ class RuntimeState:
     config_service: Config | None = None
     market_cap_rank_service: CoinMarketCapRankService | None = None
     controller_services: RuntimeServices | None = None
-    placement_orders: Orders | None = None
+    order_lifecycle: DcaOrderLifecycle | None = None
+    placement_recovery: PlacementRecoveryEntry | None = None
     accumulation_runtime: AccumulationRuntime | None = None
     watcher: Watcher | None = None
     housekeeper: Housekeeper | None = None
@@ -226,18 +228,21 @@ async def startup() -> None:
             runtime_state.market_cap_rank_service.start,
         )
 
-        runtime_state.placement_orders = Orders()
+        runtime_state.order_lifecycle = DcaOrderLifecycle()
+        runtime_state.placement_recovery = PlacementRecoveryEntry(
+            lifecycle=runtime_state.order_lifecycle
+        )
         runtime_state.accumulation_runtime = build_accumulation_runtime(
             config_service.snapshot
         )
         if runtime_state.accumulation_runtime is not None:
-            runtime_state.placement_orders.accumulation_recovery = (
+            runtime_state.placement_recovery.accumulation_recovery = (
                 runtime_state.accumulation_runtime.recovery.reconcile
             )
         reconciliation = await _run_startup_step(
             "exchange placement reconciliation",
             lambda: runtime_state.database.run_with_context(
-                runtime_state.placement_orders.reconcile_placement_intents,
+                runtime_state.placement_recovery.reconcile_placement_intents,
                 config_service.snapshot(),
             ),
         )
@@ -263,7 +268,7 @@ async def startup() -> None:
                 runtime_state.recovery_mode = "placement"
             if runtime_state.recovery_mode is not None:
                 runtime_state.controller_services = build_runtime_services(
-                    orders=runtime_state.placement_orders,
+                    placement_recovery=runtime_state.placement_recovery,
                     accumulation=runtime_state.accumulation_runtime,
                 )
                 activate_runtime_services(runtime_state.controller_services)
@@ -321,9 +326,9 @@ async def startup() -> None:
             runtime_state.delisting_protection_service.start,
         )
 
-        assert runtime_state.placement_orders is not None
+        assert runtime_state.placement_recovery is not None
         runtime_state.controller_services = build_runtime_services(
-            orders=runtime_state.placement_orders,
+            placement_recovery=runtime_state.placement_recovery,
             accumulation=runtime_state.accumulation_runtime,
             delisting_protection=runtime_state.delisting_protection_service,
             statistics_balance_cache_ttl_seconds=(
@@ -432,10 +437,12 @@ async def shutdown() -> None:
         await attempt("controller services", controller_services.shutdown)
         deactivate_runtime_services(controller_services)
         runtime_state.controller_services = None
-        runtime_state.placement_orders = None
-    elif runtime_state.placement_orders is not None:
-        await attempt("placement orders", runtime_state.placement_orders.close)
-        runtime_state.placement_orders = None
+        runtime_state.placement_recovery = None
+        runtime_state.order_lifecycle = None
+    elif runtime_state.placement_recovery is not None:
+        await attempt("placement recovery", runtime_state.placement_recovery.close)
+        runtime_state.placement_recovery = None
+        runtime_state.order_lifecycle = None
     if runtime_state.market_cap_rank_service is not None:
         await attempt(
             "CoinMarketCap rank service",

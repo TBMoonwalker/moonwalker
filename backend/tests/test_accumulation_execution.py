@@ -1846,7 +1846,7 @@ async def test_restored_quarantine_has_lookup_only_http_repair_access(env, monke
 
     config = SimpleNamespace(snapshot=lambda: env[3])
     db = SimpleNamespace(init=AsyncMock(), run_with_context=context)
-    orders = SimpleNamespace(
+    recovery_entry = SimpleNamespace(
         reconcile_placement_intents=AsyncMock(
             return_value=SimpleNamespace(ready=False, action_required=(buy_id,))
         )
@@ -1857,7 +1857,9 @@ async def test_restored_quarantine_has_lookup_only_http_repair_access(env, monke
     monkeypatch.setattr(
         app_module, "Config", SimpleNamespace(instance=AsyncMock(return_value=config))
     )
-    monkeypatch.setattr(app_module, "Orders", lambda: orders)
+    monkeypatch.setattr(
+        app_module, "PlacementRecoveryEntry", lambda lifecycle: recovery_entry
+    )
     monkeypatch.setattr(
         app_module, "build_accumulation_runtime", lambda provider: runtime
     )
