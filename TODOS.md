@@ -101,17 +101,27 @@ confirmed it: the full frontend CI passed unmodified, and the typescript
 
 **Priority:** P3
 
-### Split service/orders.py into the dca/ package and a mode-neutral facade
+### Remove the service/orders.py compatibility facade
 
-**Status:** Identified 2026-11-06 during the accumulation Telegram notification investigation; follow-up cleanup, not part of that fix.
+**Status:** Recorded 2026-11-09 as the follow-up of the completed
+orders.py split (plan of record:
+`~/.gstack/projects/TBMoonwalker-moonwalker/orders-split-dca-facade-plan-20261108.md`,
+decision D5).
 
-**What:** `service/orders.py` (legacy `Orders` class, from the 2025-09-17 upstream merge) predates the `dca/` subpackage carved out in `7bc61fe` (2026-10-26, "organize trading modes around shared exchange execution"). That refactor moved the DCA-owned mechanics into `dca/` but left `orders.py` at the service root, where it now mixes: (a) classic DCA order lifecycle finalization (persist + stats + the two `MonitoringService.notify_trade` calls at `orders.py:504`/`:621`), (b) the mode-agnostic placement reconciliation entry point `reconcile_placement_intents` (`orders.py:319`), which routes accumulation intents to the injected `accumulation_recovery` callback (`orders.py:100`, wired in `app.py:213-215`), and (c) the legacy-mutation lifecycle guard for accumulation symbols (`orders.py:106-144`). The refactor commit message says "DCA finalization ... owned by its mode", yet the finalization still lives in the root facade. Move the DCA-only finalization into `dca/` (keeping `dca/` as the layer `orders.py` imports from, not the reverse), keep the mode-neutral reconciliation and lifecycle routing at the service root (adjacent to `placement_reconciliation.py`, which already owns the routing), and reduce `orders.py` to a thin compatibility facade or remove it once `signals/*`, `app.py`, `runtime_services.py`, `trading_controls.py` and `dca/engine.py` point at the new locations.
+**What:** Point the remaining `Orders` consumers — `app.py` (startup
+reconciliation and the `accumulation_recovery` seam),
+`runtime_services.py`, `trading_controls.py`, and the signal plugins — at
+`DcaOrderLifecycle` / `OrderLifecycleRouting` directly, delete
+`service/orders.py`, and move its `reconcile_placement_intents` entry point
+and seam to the mode-neutral service root next to
+`placement_reconciliation.py`.
 
-**Why:** The ambiguity is not cosmetic: the missing accumulation Telegram notification was easier to miss precisely because "the order service" looks like a DCA module while still hosting accumulation seams. A clear mode boundary makes it obvious which mode owns trade finalization (and its notifications).
+**Why:** The facade exists so the split could land as one
+behavior-preserving changeset. Once the runtime graph no longer references
+`Orders`, the indirection — and the last trace of the "order service"
+naming ambiguity the split removed — can be retired.
 
-**Context:** 2026-11-06 investigation of missing accumulation trade notifications (see also `docs/monitoring.md` scope drift). Keep this split out of the notification fix diff.
-
-**Effort:** M
+**Effort:** S
 
 **Priority:** P3
 
@@ -180,6 +190,57 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Split service/orders.py into the dca/ package and a mode-neutral facade
+
+**Status:** Completed 2026-11-09 as one changeset on `fixed-todos`
+(commit `2583f1d`), CI-green per commit.
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/orders-split-dca-facade-plan-20261108.md`
+(decisions D1–D6; outside-voice corrections OV1–OV4 applied).
+
+**What shipped:**
+- `service/orders.py` (2,591 lines) split into three modules plus a thin
+  facade. `service/dca/finalization.py` owns the classic-DCA trade
+  finalization (persist + stats + the two `MonitoringService.notify_trade`
+  seams at former `orders.py:506`/`:644`, partial-sell handling, TP-limit
+  payload building, entry-size retry, unsellable-state reset,
+  order-status predicates) as 18 free functions behind an explicit
+  `DcaFinalizationContext` built from the current collaborators at call
+  time. `service/dca/order_lifecycle.py` owns the DCA execution lifecycle
+  (`DcaOrderLifecycle`: buy/sell receipt, TP-limit arm/cancel/reconcile,
+  stop signals, manual operations, durable placement-intent transitions).
+  `service/order_routing.py` owns the mode-neutral lifecycle routing
+  (`OrderLifecycleRouting`: the legacy-mutation ownership guard at former
+  `orders.py:107-145`, snapshot-currency validation, trade-state loading,
+  operator mutation results).
+- `service/orders.py` is now a ~250-line compatibility facade (`Orders`)
+  that composes the mode-neutral routing and the DCA lifecycle over the
+  shared `build_default_order_collaborators()` wiring list. The
+  mode-neutral startup reconciliation entry point (former `orders.py:320`)
+  stays on the facade with the `accumulation_recovery` seam (former
+  `orders.py:101`, wired in `app.py:213-215`), read at
+  reconciler-construction time. `dca/engine.py` uses `DcaOrderLifecycle`
+  directly; importing the new modules pulls in neither the root facade nor
+  the engine, and the lazy `from service.dca import Dca` export is
+  preserved.
+- New structural guards (`backend/tests/test_orders_split_guards.py`):
+  import invariant, facade shape, delegation parity, self-wiring parity,
+  logger routing (both new `dca/` modules log through the shared `dca`
+  logger to `logs/dca.log`), and the D6 post-construction
+  accumulation-seam test; plus finalization leaf units
+  (`backend/tests/test_dca_finalization.py`). 20 test files migrated (121
+  reassignment/patch sites).
+- Coverage ratchet: the `service/orders.py` row is replaced by rows for
+  the three new modules plus the facade at the measured post-move branch
+  coverage (finalization 69.6, lifecycle 73.0, routing 90.0, facade
+  100.0), each at or above its pre-move per-group baseline (66.1 / 73.0 /
+  90.0, measured at `ae272a8`).
+
+**Verification:** full CI green (`cd scripts && ./ci.sh`) — 2,249 backend
+tests, type checks, lint, and coverage floors.
+
+**Priority:** P3
 
 ### Upgrade python-dateutil to 4.0.0
 

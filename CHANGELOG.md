@@ -42,6 +42,12 @@ All notable changes to Moonwalker are documented in this file.
   no-op repeat of 003) is no longer tracked. Operator-invisible ledger
   hygiene; migration behavior for supported and pre-floor installations is
   unchanged.
+- Split `service/orders.py`: classic-DCA trade finalization now lives in
+  `service/dca/finalization.py`, the DCA execution lifecycle in
+  `service/dca/order_lifecycle.py`, and the mode-neutral lifecycle routing in
+  `service/order_routing.py`; `service/orders.py` is now a thin compatibility
+  facade and `dca/engine.py` uses the lifecycle directly. Internal module
+  move — no API, config, or schema change.
 
 ### Fixed
 

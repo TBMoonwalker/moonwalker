@@ -172,6 +172,30 @@ Mode-owned services live in `service/dca/` and `service/accumulation/`:
 - `dca/dust.py` owns DCA remainder orchestration. `Orders` delegates its existing
   dependencies; `order_persistence.py` retains atomic execution/history/archive
   writes. Cache invalidation and notifications occur after persistence.
+- `dca/finalization.py` owns classic-DCA trade finalization: persistence,
+  closed-trade statistics, TP limit sell payload building, entry-size retry,
+  unsellable-state reset, order-status predicates, and the two
+  `MonitoringService.notify_trade` seams (`trade.buy` / `trade.sell`).
+  Functions take an explicit `DcaFinalizationContext` built from the current
+  collaborators at call time; the caller guarantees exclusivity (runtime
+  lifecycle lock or startup ordering).
+- `dca/order_lifecycle.py` owns the DCA execution lifecycle
+  (`DcaOrderLifecycle`): buy/sell receipt, TP limit arm/cancel/reconcile,
+  stop signals, manual operations, and the durable placement-intent
+  transitions behind them. It calls `dca/finalization.py` for persistence
+  and `order_routing.py` for ownership, snapshot and operator-result
+  decisions.
+- `order_routing.py` owns the mode-neutral lifecycle routing
+  (`OrderLifecycleRouting`): the legacy-mutation ownership guard for
+  accumulation symbols, snapshot-currency validation, trade-state loading,
+  and the operator mutation-result contract. It is shared by the `Orders`
+  facade and `DcaOrderLifecycle`.
+- `service/orders.py` is a thin compatibility facade: it wires the shared
+  collaborators through `build_default_order_collaborators()` and delegates
+  every DCA entry point to `DcaOrderLifecycle`. It owns the
+  `accumulation_recovery` seam and the startup reconciliation entry point
+  `reconcile_placement_intents`, which reads the seam when it builds the
+  reconciler.
 - `accumulation/exchange.py` composes the shared transport for its exact,
   preflighted orders. `runtime.py`, `accounting.py` and `dust.py` retain its
   activation, inventory/basis and archive lifecycle. Its fee adapters reuse the
