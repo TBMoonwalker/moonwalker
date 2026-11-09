@@ -125,6 +125,41 @@ naming ambiguity the split removed — can be retired.
 
 **Priority:** P3
 
+### Make logger handler de-duplication robust to uncanonical log directories
+
+**Status:** Recorded 2026-11-09 while writing the logger-routing guard for
+the orders.py split (completed 2026-11-09; the split's new `dca/` modules
+log through the shared `dca` logger, and the guard exposed a pre-existing
+de-duplication gap in `backend/helper/logger.py`).
+
+**What:** Harden the `LoggerFactory` handler de-duplication so one
+(logger name, log file) pair never receives two file handlers when
+`LOG_DIR` is not a canonical path:
+- `__create_logger` compares each existing handler's un-resolved
+  `baseFilename` against `str(resolved.resolve())`. When `LOG_DIR` sits
+  behind a symlink (macOS `/var` -> `/private/var`), the comparison
+  misses and every `get_logger` caller attaches its own
+  `RotatingFileHandler` to the same file — observed under pytest, where
+  `conftest.py` overwrites `helper.logger.LOG_DIR` with an un-resolved
+  `tempfile.mkdtemp()` path: two modules sharing `logs/dca.log` already
+  produce two handlers.
+- Fix at the source (canonicalize once, e.g. resolve inside
+  `_resolve_log_path`, or compare both sides resolved), have
+  `backend/tests/conftest.py` anchor its temp log dir with
+  `_LOG_TMP.resolve()`, and let
+  `backend/tests/test_orders_split_guards.py::test_new_modules_route_logs_to_shared_dca_logger`
+  then assert a single file handler on the shared `dca` logger.
+
+**Why:** Duplicate handlers on one log file double-write records and
+  split rotation/retention. Production is unaffected today (both
+  `_resolve_log_dir` branches canonicalize the path); the trap is latent
+  for the test suite and for any future code that assigns `LOG_DIR`
+  without resolving it.
+
+**Effort:** S
+
+**Priority:** P3
+
 ## Dashboard history
 
 ### Evaluate server caching and incremental timeline loading
