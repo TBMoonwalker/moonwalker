@@ -336,6 +336,15 @@ async def startup() -> None:
             ),
         )
         activate_runtime_services(runtime_state.controller_services)
+        if (
+            runtime_state.housekeeper is not None
+            and runtime_state.controller_services is not None
+        ):
+            # Retention cleanup prunes rows the timeline resamples; let the
+            # housekeeper drop the cached timeline right after such a prune.
+            runtime_state.housekeeper.on_upnl_history_changed = (
+                runtime_state.controller_services.statistic.invalidate_timeline_cache
+            )
 
         runtime_state.signal_plugin = Signal(runtime_state.watcher_queue)
         if runtime_state.accumulation_runtime is not None:

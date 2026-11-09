@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -24,6 +25,22 @@ from tortoise.functions import Sum
 
 logging = helper.LoggerFactory.get_logger("logs/statistics.log", "statistic")
 PROFIT_TIMELINE_HORIZON = timedelta(days=365)
+# Resampled timeline cache lifetime. Matches the snapshot cadence so a
+# timeline is at most one snapshot interval behind when no snapshot was
+# stored; stored snapshots invalidate the cache immediately.
+TIMELINE_CACHE_TTL_SECONDS = 60
+
+# Process-wide generation of the uPNL snapshot data. Any Statistic instance
+# (the controller graph, the DCA engine, a signal plugin) may store the next
+# snapshot, so a cached timeline is only valid while this generation is
+# unchanged; it advances once per stored snapshot.
+_timeline_generation = 0
+
+
+def _advance_timeline_generation() -> None:
+    """Mark the uPNL snapshot data as changed for every cache holder."""
+    global _timeline_generation
+    _timeline_generation += 1
 
 
 class Statistic:
@@ -38,6 +55,9 @@ class Statistic:
         self.capital_budget = CapitalBudgetService()
         self.snapshot_interval_seconds = 60
         self._snapshot_lock = asyncio.Lock()
+        # (generation, expiry on the monotonic clock, cached point list).
+        self._timeline_cache: tuple[int, float, list[dict[str, Any]]] | None = None
+        self._timeline_cache_lock = asyncio.Lock()
         self.timeline_horizons = {
             "day": timedelta(days=1),
             "week": timedelta(days=7),
@@ -575,6 +595,11 @@ class Statistic:
                 ),
                 "storing upnl snapshot",
             )
+            # The new snapshot is the freshest timeline input; advance the
+            # shared generation so every cached resample (this instance or
+            # another Statistic's) is dropped until rebuilt.
+            self.invalidate_timeline_cache()
+            _advance_timeline_generation()
         except BaseORMException as e:
             # Broad catch to avoid stats persistence failures affecting websocket data.
             logging.error("Error storing uPNL snapshot: %s", e)
@@ -602,6 +627,21 @@ class Statistic:
 
         return upnl_data
 
+    def invalidate_timeline_cache(self) -> None:
+        """Drop this instance's cached timeline so the next fetch re-resamples."""
+        self._timeline_cache = None
+
+    @staticmethod
+    def _timeline_cache_valid(
+        entry: tuple[int, float, list[dict[str, Any]]] | None,
+    ) -> bool:
+        """Whether a cached entry still matches the current data generation."""
+        return (
+            entry is not None
+            and entry[0] == _timeline_generation
+            and time.monotonic() < entry[1]
+        )
+
     async def get_profit_overall_timeline(self) -> list[dict[str, Any]]:
         """Return last-12-month timeline with multi-resolution buckets.
 
@@ -610,29 +650,50 @@ class Statistic:
         - week: 4h
         - month: 1d
         - year: 1w
+
+        The resampled timeline is cached for ``TIMELINE_CACHE_TTL_SECONDS``
+        and invalidated when any Statistic instance stores a new snapshot or
+        old history is pruned, so concurrent dashboard clients share one
+        rebuild per window. The cached value is treated as immutable;
+        callers receive a copy of the point list.
         """
-        now = datetime.now(timezone.utc)
-        year_start = now - self.timeline_horizons["year"]
-        try:
-            rows = (
-                await model.UpnlHistory.filter(
-                    timestamp__gte=year_start, performance_verified=True
+        cached = self._timeline_cache
+        if self._timeline_cache_valid(cached):
+            return list(cached[2])
+        async with self._timeline_cache_lock:
+            cached = self._timeline_cache
+            if self._timeline_cache_valid(cached):
+                return list(cached[2])
+            now = datetime.now(timezone.utc)
+            year_start = now - self.timeline_horizons["year"]
+            try:
+                rows = (
+                    await model.UpnlHistory.filter(
+                        timestamp__gte=year_start, performance_verified=True
+                    )
+                    .order_by("timestamp")
+                    .values_list("timestamp", "profit_overall", "funds_locked")
                 )
-                .order_by("timestamp")
-                .values_list("timestamp", "profit_overall", "funds_locked")
-            )
-            if not rows:
+                if rows:
+                    timeline = await asyncio.to_thread(
+                        self._build_profit_overall_timeline_sync,
+                        rows,
+                        now,
+                        self.timeline_horizons,
+                    )
+                else:
+                    timeline = []
+            except BaseORMException as e:
+                # Broad catch to keep stats endpoints responsive. Errors are
+                # not cached, so a healthy follow-up fetch re-queries.
+                logging.error("Error getting profit-overall timeline: %s", e)
                 return []
-            return await asyncio.to_thread(
-                self._build_profit_overall_timeline_sync,
-                rows,
-                now,
-                self.timeline_horizons,
+            self._timeline_cache = (
+                _timeline_generation,
+                time.monotonic() + TIMELINE_CACHE_TTL_SECONDS,
+                timeline,
             )
-        except BaseORMException as e:
-            # Broad catch to keep stats endpoints responsive.
-            logging.error("Error getting profit-overall timeline: %s", e)
-            return []
+            return list(timeline)
 
     async def update_statistic_data(self, stats: dict[str, Any]) -> None:
         """Update open trade statistics based on recent ticker data."""
