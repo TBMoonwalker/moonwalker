@@ -7,9 +7,9 @@ import model
 import pytest
 import pytest_asyncio
 from service.dca import Dca
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
-from service.orders import Orders
 from tortoise import Tortoise
 from tortoise.exceptions import OperationalError
 
@@ -112,17 +112,17 @@ async def test_legacy_dca_route_still_reaches_evaluator(routing_db, mode):
 )
 async def test_payload_cannot_authorize_an_accumulation_sale(routing_db, reason):
     await _accumulation()
-    orders = Orders()
-    orders.exchange.create_spot_sell = AsyncMock(
+    lifecycle = DcaOrderLifecycle()
+    lifecycle.exchange.create_spot_sell = AsyncMock(
         side_effect=AssertionError("no exchange submission")
     )
-    orders.dca._cancel_tp_limit_order_locked = AsyncMock(
+    lifecycle._cancel_tp_limit_order_locked = AsyncMock(
         side_effect=AssertionError("no cancellation before admission")
     )
-    orders.placement_workflow.begin = AsyncMock(
+    lifecycle.placement_workflow.begin = AsyncMock(
         side_effect=AssertionError("no placement intent")
     )
-    assert not await orders.receive_sell_order(
+    assert not await lifecycle.receive_sell_order(
         {
             "symbol": "BTC/USDC",
             "sell_reason": reason,
@@ -132,50 +132,58 @@ async def test_payload_cannot_authorize_an_accumulation_sale(routing_db, reason)
         },
         {},
     )
-    orders.placement_workflow.begin.assert_not_called()
-    orders.exchange.create_spot_sell.assert_not_called()
+    lifecycle.placement_workflow.begin.assert_not_called()
+    lifecycle.exchange.create_spot_sell.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_legacy_mutations_cannot_bypass_accumulation_lifecycle(routing_db):
     activation = await _accumulation()
-    orders = Orders()
-    orders.trades.get_trades_for_orders = AsyncMock(
+    lifecycle = DcaOrderLifecycle()
+    lifecycle.trades.get_trades_for_orders = AsyncMock(
         side_effect=AssertionError("no history")
     )
-    orders.placement_workflow.begin = AsyncMock(side_effect=AssertionError("no order"))
-    assert not await orders.arm_tp_limit_order({"symbol": "BTC/USDC"}, {})
-    assert not await orders.receive_buy_order({"symbol": "BTC/USDC"}, {})
+    lifecycle.placement_workflow.begin = AsyncMock(
+        side_effect=AssertionError("no order")
+    )
+    assert not await lifecycle.arm_tp_limit_order({"symbol": "BTC/USDC"}, {})
+    assert not await lifecycle.receive_buy_order({"symbol": "BTC/USDC"}, {})
     async with lifecycle_mutation_coordinator.mutation("BTC/USDC"):
-        assert not await orders.receive_buy_order_prelocked({"symbol": "BTC/USDC"}, {})
-    assert not await orders.receive_buy_signal("BTC/USDC", 10, {})
-    assert not await orders.receive_sell_signal("BTC/USDC", {})
-    assert not await orders.receive_stop_signal("BTC/USDC", {})
+        assert not await lifecycle.receive_buy_order_prelocked(
+            {"symbol": "BTC/USDC"}, {}
+        )
+    assert not await lifecycle.receive_buy_signal("BTC/USDC", 10, {})
+    assert not await lifecycle.receive_sell_signal("BTC/USDC", {})
+    assert not await lifecycle.receive_stop_signal("BTC/USDC", {})
     for call in (
-        orders.receive_sell_signal_result("BTC/USDC", {}, operation_id="operator-1"),
-        orders.receive_buy_signal_result("BTC/USDC", 10, {}, operation_id="operator-2"),
-        orders.receive_stop_signal_result("BTC/USDC", {}, operation_id="operator-3"),
+        lifecycle.receive_sell_signal_result("BTC/USDC", {}, operation_id="operator-1"),
+        lifecycle.receive_buy_signal_result(
+            "BTC/USDC", 10, {}, operation_id="operator-2"
+        ),
+        lifecycle.receive_stop_signal_result("BTC/USDC", {}, operation_id="operator-3"),
     ):
         result = await call
         assert result.reason_code == "accumulation_lifecycle_required"
         assert not result.applied
     with pytest.raises(ValueError, match="accumulation"):
-        await orders.receive_manual_buy_add("BTC/USDC", "2000000000000", "10", "1", {})
+        await lifecycle.receive_manual_buy_add(
+            "BTC/USDC", "2000000000000", "10", "1", {}
+        )
     assert await model.OpenTrades.filter(id=activation.holding_id).exists()
-    orders.trades.get_trades_for_orders.assert_not_called()
+    lifecycle.trades.get_trades_for_orders.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_stopped_zero_inventory_activation_blocks_asap_reentry(routing_db):
     await _accumulation(holding=False, state="stopped")
-    orders = Orders()
-    orders.placement_workflow.begin = AsyncMock(
+    lifecycle = DcaOrderLifecycle()
+    lifecycle.placement_workflow.begin = AsyncMock(
         side_effect=AssertionError("no base order")
     )
-    assert not await orders.receive_buy_order(
+    assert not await lifecycle.receive_buy_order(
         {"symbol": "BTC/USDC", "baseorder": True}, {}
     )
-    orders.placement_workflow.begin.assert_not_called()
+    lifecycle.placement_workflow.begin.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -183,16 +191,16 @@ async def test_unknown_mode_and_database_failure_block_order_admission(
     routing_db, monkeypatch
 ):
     await model.OpenTrades.create(symbol="BTC/USDC", lifecycle_mode="unknown")
-    orders = Orders()
-    result = await orders.receive_sell_signal_result("BTC/USDC", {})
+    lifecycle = DcaOrderLifecycle()
+    result = await lifecycle.receive_sell_signal_result("BTC/USDC", {})
     assert result.reason_code == "unknown_lifecycle_mode"
     monkeypatch.setattr(
         "service.order_routing.load_lifecycle_route",
         AsyncMock(side_effect=OperationalError("read failure")),
     )
-    assert not await orders.receive_buy_order({"symbol": "BTC/USDC"}, {})
-    assert not await orders.receive_sell_order({"symbol": "BTC/USDC"}, {})
-    result = await orders.receive_buy_signal_result("BTC/USDC", 10, {})
+    assert not await lifecycle.receive_buy_order({"symbol": "BTC/USDC"}, {})
+    assert not await lifecycle.receive_sell_order({"symbol": "BTC/USDC"}, {})
+    result = await lifecycle.receive_buy_signal_result("BTC/USDC", 10, {})
     assert result.reason_code == "trade_state_unavailable"
 
 
@@ -217,15 +225,15 @@ async def test_unreadable_ownership_skips_ticker_without_falling_back_to_dca(
 @pytest.mark.asyncio
 async def test_queued_buy_rechecks_ownership_inside_symbol_lock(routing_db):
     holding = await model.OpenTrades.create(symbol="BTC/USDC")
-    orders = Orders()
-    orders.placement_workflow.begin = AsyncMock(
+    lifecycle = DcaOrderLifecycle()
+    lifecycle.placement_workflow.begin = AsyncMock(
         side_effect=AssertionError("no placement")
     )
     start = asyncio.Event()
 
     async def queued_buy():
         await start.wait()
-        return await orders.receive_buy_order({"symbol": "BTC/USDC"}, {})
+        return await lifecycle.receive_buy_order({"symbol": "BTC/USDC"}, {})
 
     # Create the contender outside the owning task's lock ContextVar scope.
     contender = asyncio.create_task(queued_buy())
@@ -239,7 +247,7 @@ async def test_queued_buy_rechecks_ownership_inside_symbol_lock(routing_db):
             symbol="BTC/USDC", account_scope="test", holding=holding
         )
     assert not await contender
-    orders.placement_workflow.begin.assert_not_called()
+    lifecycle.placement_workflow.begin.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -248,17 +256,17 @@ async def test_existing_tp_order_can_still_be_cancelled_for_accumulation(routing
     await model.OpenTrades.filter(id=activation.holding_id).update(
         tp_limit_order_id="old-limit"
     )
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     # No buy ledger is needed to cancel an unfilled exchange order.
-    orders.exchange.cancel_spot_order = AsyncMock(
+    lifecycle.exchange.cancel_spot_order = AsyncMock(
         return_value={
             "id": "old-limit",
             "status": "canceled",
             "filled": 0,
         }
     )
-    assert await orders.cancel_tp_limit_order("BTC/USDC", {"dry_run": True})
-    orders.exchange.cancel_spot_order.assert_awaited_once()
+    assert await lifecycle.cancel_tp_limit_order("BTC/USDC", {"dry_run": True})
+    lifecycle.exchange.cancel_spot_order.assert_awaited_once()
     holding = await model.OpenTrades.get(id=activation.holding_id)
     assert holding.tp_limit_order_id is None
     assert await model.AccumulationActivation.filter(id=activation.id).exists()

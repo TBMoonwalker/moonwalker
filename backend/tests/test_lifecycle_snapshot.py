@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.lifecycle_snapshot import (
     LifecycleSnapshotIdentity,
     build_config_revision,
     snapshots_match,
 )
-from service.orders import Orders
 
 
 def _trade(**overrides: Any) -> dict[str, Any]:
@@ -114,8 +114,8 @@ async def test_stale_buy_decision_aborts_before_any_exchange_work() -> None:
     config = {"dry_run": True, "bo": 25.0}
     evaluated_trade = _trade()
     reader = _FreshTradeReader(_trade(execution_count=3))
-    orders = Orders()
-    orders.routing.trades = reader  # type: ignore[assignment]
+    lifecycle = DcaOrderLifecycle()
+    lifecycle.routing.trades = reader  # type: ignore[assignment]
     order = {
         "symbol": "BTC/USDC",
         "lifecycle_snapshot": LifecycleSnapshotIdentity.from_trade(
@@ -124,7 +124,7 @@ async def test_stale_buy_decision_aborts_before_any_exchange_work() -> None:
         ).to_dict(),
     }
 
-    result = await orders.receive_buy_order(order, config)
+    result = await lifecycle.receive_buy_order(order, config)
 
     assert result is False
     assert reader.fresh_reads == 1
@@ -145,13 +145,13 @@ async def test_stale_buy_decision_aborts_before_any_exchange_work() -> None:
 async def test_invalid_snapshot_fails_closed_before_trade_loading(
     raw_snapshot: dict[str, Any],
 ) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     order = {
         "symbol": "BTC/USDC",
         "lifecycle_snapshot": raw_snapshot,
     }
 
-    result = await orders.receive_buy_order(order, {"dry_run": True})
+    result = await lifecycle.receive_buy_order(order, {"dry_run": True})
 
     assert result is False
 
@@ -161,14 +161,14 @@ async def test_matching_and_absent_snapshots_remain_admissible() -> None:
     config = {"dry_run": True, "bo": 25.0}
     current_trade = _trade()
     reader = _FreshTradeReader(current_trade)
-    orders = Orders()
-    orders.routing.trades = reader  # type: ignore[assignment]
+    lifecycle = DcaOrderLifecycle()
+    lifecycle.routing.trades = reader  # type: ignore[assignment]
 
-    assert await orders.routing.order_snapshot_is_current(
+    assert await lifecycle.routing.order_snapshot_is_current(
         {"symbol": "BTC/USDC"},
         config,
     )
-    assert await orders.routing.order_snapshot_is_current(
+    assert await lifecycle.routing.order_snapshot_is_current(
         {
             "symbol": "BTC/USDC",
             "lifecycle_snapshot": LifecycleSnapshotIdentity.from_trade(

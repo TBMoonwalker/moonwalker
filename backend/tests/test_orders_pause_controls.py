@@ -1,12 +1,12 @@
 import pytest
 from service.ai_trust import AiTrustEntryGate
-from service.orders import Orders
+from service.dca.order_lifecycle import DcaOrderLifecycle
 
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_buy_order_rejects_global_pause(monkeypatch) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     executed = 0
 
     async def fake_get_trades_for_orders(_symbol: str):
@@ -18,17 +18,17 @@ async def test_receive_buy_order_rejects_global_pause(monkeypatch) -> None:
         raise AssertionError("buy execution should be blocked before exchange work")
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
     monkeypatch.setattr(
-        orders.dca,
+        lifecycle,
         "_execute_budgeted_buy_order",
         fail_execute_budgeted_buy_order,
     )
 
-    accepted = await orders.receive_buy_order(
+    accepted = await lifecycle.receive_buy_order(
         {
             "symbol": "BTC/USDT",
             "ordersize": 100.0,
@@ -47,7 +47,7 @@ async def test_receive_buy_order_rejects_global_pause(monkeypatch) -> None:
 async def test_receive_buy_order_rejects_ai_warning_enforced_entry(
     monkeypatch,
 ) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     executed = 0
 
     async def fake_get_trades_for_orders(_symbol: str):
@@ -70,7 +70,7 @@ async def test_receive_buy_order_rejects_ai_warning_enforced_entry(
         raise AssertionError("AI warning should block before exchange work")
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
@@ -79,12 +79,12 @@ async def test_receive_buy_order_rejects_ai_warning_enforced_entry(
         fake_ai_gate,
     )
     monkeypatch.setattr(
-        orders.dca,
+        lifecycle,
         "_execute_budgeted_buy_order",
         fail_execute_budgeted_buy_order,
     )
 
-    accepted = await orders.receive_buy_order(
+    accepted = await lifecycle.receive_buy_order(
         {
             "symbol": "BTC/USDT",
             "ordersize": 100.0,
@@ -103,7 +103,7 @@ async def test_receive_buy_order_rejects_ai_warning_enforced_entry(
 async def test_receive_buy_order_rejects_ai_unscored_enforced_entry(
     monkeypatch,
 ) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     executed = 0
 
     async def fake_get_trades_for_orders(_symbol: str):
@@ -126,7 +126,7 @@ async def test_receive_buy_order_rejects_ai_unscored_enforced_entry(
         return None
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
@@ -135,13 +135,13 @@ async def test_receive_buy_order_rejects_ai_unscored_enforced_entry(
         fake_ai_gate,
     )
     monkeypatch.setattr(
-        orders.dca,
+        lifecycle,
         "_execute_budgeted_buy_order",
         fail_execute_budgeted_buy_order,
     )
-    monkeypatch.setattr(orders.exchange, "close", fake_close)
+    monkeypatch.setattr(lifecycle.exchange, "close", fake_close)
 
-    accepted = await orders.receive_buy_order(
+    accepted = await lifecycle.receive_buy_order(
         {
             "symbol": "BTC/USDT",
             "ordersize": 100.0,
@@ -158,7 +158,7 @@ async def test_receive_buy_order_rejects_ai_unscored_enforced_entry(
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_buy_order_rejects_paused_mission(monkeypatch) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     executed = 0
 
     async def fake_get_trades_for_orders(_symbol: str):
@@ -173,17 +173,17 @@ async def test_receive_buy_order_rejects_paused_mission(monkeypatch) -> None:
         raise AssertionError("buy execution should be blocked before exchange work")
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
     monkeypatch.setattr(
-        orders.dca,
+        lifecycle,
         "_execute_budgeted_buy_order",
         fail_execute_budgeted_buy_order,
     )
 
-    accepted = await orders.receive_buy_order(
+    accepted = await lifecycle.receive_buy_order(
         {
             "symbol": "BTC/USDT",
             "ordersize": 100.0,

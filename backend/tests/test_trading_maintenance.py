@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 import service.dca.engine as dca_module
 from service.dca import Dca
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.lifecycle_mutation import LifecycleMutationCoordinator
-from service.orders import Orders
 from service.trading_maintenance import TradingMaintenanceBarrier
 
 
@@ -64,14 +64,14 @@ async def test_sell_is_rejected_while_restore_owns_maintenance_barrier(
         exchange_called = True
         return {}
 
-    orders = Orders()
-    orders.dca.exchange = types.SimpleNamespace(
+    lifecycle = DcaOrderLifecycle()
+    lifecycle.exchange = types.SimpleNamespace(
         create_spot_sell=create_spot_sell,
         close=types.SimpleNamespace(),
     )
 
     async with barrier.maintenance():
-        await orders.receive_sell_order({"symbol": "BTC/USDT"}, {})
+        await lifecycle.receive_sell_order({"symbol": "BTC/USDT"}, {})
 
     assert exchange_called is False
 
@@ -86,10 +86,10 @@ async def test_buy_is_rejected_while_restore_owns_lifecycle_coordinator(
         "service.dca.order_lifecycle.lifecycle_mutation_coordinator",
         LifecycleMutationCoordinator(barrier),
     )
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
 
     async with barrier.maintenance():
-        accepted = await orders.receive_buy_order(
+        accepted = await lifecycle.receive_buy_order(
             {"symbol": "ETH/USDC"},
             {},
         )

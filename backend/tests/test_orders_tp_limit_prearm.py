@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from service.orders import Orders
+from service.dca.order_lifecycle import DcaOrderLifecycle
 
 
 class _FakeExchange:
@@ -105,13 +105,13 @@ class _FakeTrades:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_arm_tp_limit_order_places_and_persists_order() -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     fake_exchange = _FakeExchange()
     fake_trades = _FakeTrades()
-    orders.dca.exchange = fake_exchange  # type: ignore[assignment]
-    orders.dca.trades = fake_trades  # type: ignore[assignment]
+    lifecycle.exchange = fake_exchange  # type: ignore[assignment]
+    lifecycle.trades = fake_trades  # type: ignore[assignment]
 
-    armed = await orders.arm_tp_limit_order(
+    armed = await lifecycle.arm_tp_limit_order(
         {
             "symbol": "XPL/USDC",
             "total_amount": 1.0,
@@ -137,11 +137,11 @@ async def test_arm_tp_limit_order_marks_minimum_notional_remainder_unsellable(
     monkeypatch,
 ) -> None:
     """Stop retrying a proactive TP order that cannot meet the exchange minimum."""
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     fake_exchange = _FakeExchange()
     fake_trades = _FakeTrades()
-    orders.dca.exchange = fake_exchange  # type: ignore[assignment]
-    orders.dca.trades = fake_trades  # type: ignore[assignment]
+    lifecycle.exchange = fake_exchange  # type: ignore[assignment]
+    lifecycle.trades = fake_trades  # type: ignore[assignment]
 
     async def minimum_notional_limit_sell(
         order: dict[str, Any],
@@ -171,7 +171,7 @@ async def test_arm_tp_limit_order_marks_minimum_notional_remainder_unsellable(
         record_partial_status,
     )
 
-    armed = await orders.arm_tp_limit_order(
+    armed = await lifecycle.arm_tp_limit_order(
         {
             "symbol": "SIGN/USDC",
             "total_amount": 490.0,
@@ -199,13 +199,13 @@ async def test_arm_tp_limit_order_marks_minimum_notional_remainder_unsellable(
 
 @pytest.mark.asyncio
 async def test_cancel_tp_limit_order_clears_persisted_metadata() -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     fake_exchange = _FakeExchange()
     fake_trades = _FakeTrades()
-    orders.dca.exchange = fake_exchange  # type: ignore[assignment]
-    orders.dca.trades = fake_trades  # type: ignore[assignment]
+    lifecycle.exchange = fake_exchange  # type: ignore[assignment]
+    lifecycle.trades = fake_trades  # type: ignore[assignment]
 
-    canceled = await orders.cancel_tp_limit_order("XPL/USDC", {})
+    canceled = await lifecycle.cancel_tp_limit_order("XPL/USDC", {})
 
     assert canceled is True
     assert fake_exchange.cancel_calls == [("XPL/USDC", "tp-limit-1")]
@@ -214,7 +214,7 @@ async def test_cancel_tp_limit_order_clears_persisted_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_cancel_tp_limit_order_persists_partial_fill() -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     fake_exchange = _FakeExchange()
     fake_exchange.cancel_status = {
         "id": "tp-limit-1",
@@ -227,10 +227,10 @@ async def test_cancel_tp_limit_order_persists_partial_fill() -> None:
         "timestamp": 1_742_000_000_123,
     }
     fake_trades = _FakeTrades()
-    orders.dca.exchange = fake_exchange  # type: ignore[assignment]
-    orders.dca.trades = fake_trades  # type: ignore[assignment]
+    lifecycle.exchange = fake_exchange  # type: ignore[assignment]
+    lifecycle.trades = fake_trades  # type: ignore[assignment]
 
-    canceled = await orders.cancel_tp_limit_order("XPL/USDC", {})
+    canceled = await lifecycle.cancel_tp_limit_order("XPL/USDC", {})
 
     assert canceled is True
     assert fake_trades.clear_calls == [
@@ -247,7 +247,7 @@ async def test_cancel_tp_limit_order_persists_partial_fill() -> None:
 async def test_reconcile_tp_limit_order_handles_unsellable_partial_fill(
     monkeypatch,
 ) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     fake_exchange = _FakeExchange()
     fake_exchange.fetch_status = {
         "id": "tp-limit-1",
@@ -272,8 +272,8 @@ async def test_reconcile_tp_limit_order_handles_unsellable_partial_fill(
         }
 
     fake_trades.get_trades_for_orders = fake_get_trades_for_orders  # type: ignore[assignment]
-    orders.dca.exchange = fake_exchange  # type: ignore[assignment]
-    orders.dca.trades = fake_trades  # type: ignore[assignment]
+    lifecycle.exchange = fake_exchange  # type: ignore[assignment]
+    lifecycle.trades = fake_trades  # type: ignore[assignment]
 
     async def fake_build_spot_sell_order_status(
         _payload: dict[str, Any],
@@ -304,7 +304,7 @@ async def test_reconcile_tp_limit_order_handles_unsellable_partial_fill(
         "service.dca.order_lifecycle.handle_partial_sell_status", fake_handle_partial
     )
 
-    reconciled = await orders.reconcile_tp_limit_order(
+    reconciled = await lifecycle.reconcile_tp_limit_order(
         {
             "symbol": "TWT/USDC",
             "tp_limit_order_id": "tp-limit-1",

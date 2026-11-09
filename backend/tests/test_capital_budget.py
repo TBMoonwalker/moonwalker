@@ -5,7 +5,7 @@ import model
 import pytest
 import service.capital_budget_logic as capital_budget_logic
 from service.capital_budget import CapitalBudgetService
-from service.orders import Orders
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from tortoise import Tortoise
 
 
@@ -337,7 +337,7 @@ async def test_receive_buy_order_blocks_live_buy_over_global_cap(
 
     try:
         await model.OpenTrades.create(symbol="ETH/USDT", cost=90.0, so_count=0)
-        orders = Orders()
+        lifecycle = DcaOrderLifecycle()
         exchange_calls = {"count": 0}
 
         async def fake_create_spot_market_buy(_order, _config) -> None:
@@ -348,13 +348,13 @@ async def test_receive_buy_order_blocks_live_buy_over_global_cap(
             return None
 
         monkeypatch.setattr(
-            orders.exchange,
+            lifecycle.exchange,
             "create_spot_market_buy",
             fake_create_spot_market_buy,
         )
-        monkeypatch.setattr(orders.exchange, "close", fake_close)
+        monkeypatch.setattr(lifecycle.exchange, "close", fake_close)
 
-        result = await orders.receive_buy_order(
+        result = await lifecycle.receive_buy_order(
             {
                 "ordersize": 20.0,
                 "symbol": "BTC/USDT",
@@ -384,7 +384,7 @@ async def test_receive_buy_order_blocks_live_buy_over_global_cap(
 async def test_manual_ledger_buy_add_warns_but_persists_when_over_budget(
     monkeypatch,
 ) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     persisted: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
 
     async def fake_get_open_trades_by_symbol(_symbol: str) -> list[dict[str, Any]]:
@@ -419,17 +419,17 @@ async def test_manual_ledger_buy_add_warns_but_persists_when_over_budget(
         persisted.append((symbol, trade_payload, open_trade_payload))
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_open_trades_by_symbol",
         fake_get_open_trades_by_symbol,
     )
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_by_symbol",
         fake_get_trades_by_symbol,
     )
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
@@ -442,12 +442,12 @@ async def test_manual_ledger_buy_add_warns_but_persists_when_over_budget(
         return {"reason": "capital_budget_exceeded"}
 
     monkeypatch.setattr(
-        orders.dca,
+        lifecycle,
         "_build_manual_buy_budget_warning",
         fake_budget_warning,
     )
 
-    result = await orders.receive_manual_buy_add(
+    result = await lifecycle.receive_manual_buy_add(
         symbol="BTC/USDC",
         date_input="3000",
         price_raw=80.0,

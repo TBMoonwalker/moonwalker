@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.delisting_protection import (
     DelistingDecision,
     DelistingProtectionService,
 )
 from service.exchange import Exchange
-from service.orders import Orders
 
 
 class FakeDelistingExchange:
@@ -463,7 +463,7 @@ async def test_central_order_guard_blocks_every_buy_role(
     baseorder: bool,
     safetyorder: bool,
 ) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     executed = False
 
     async def get_existing_trade(_symbol: str) -> None:
@@ -486,18 +486,18 @@ async def test_central_order_guard_blocks_every_buy_role(
         raise AssertionError("delisting guard must run before buy execution")
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_for_orders",
         get_existing_trade,
     )
     monkeypatch.setattr(
-        orders.delisting_protection,
+        lifecycle.delisting_protection,
         "evaluate_buy",
         block_delisting_buy,
     )
-    monkeypatch.setattr(orders.dca, "_execute_budgeted_buy_order", execute_buy)
+    monkeypatch.setattr(lifecycle, "_execute_budgeted_buy_order", execute_buy)
 
-    accepted = await orders.receive_buy_order(
+    accepted = await lifecycle.receive_buy_order(
         {
             "symbol": "ADA/USDT",
             "ordersize": 25.0,

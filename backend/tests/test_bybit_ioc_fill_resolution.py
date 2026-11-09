@@ -203,15 +203,15 @@ async def test_ack_waits_for_terminal_partial_fill_without_another_buy():
 async def test_runtime_duplicate_buy_recovers_once_without_closing_client(
     tmp_path, monkeypatch
 ):
-    from service.orders import Orders
+    from service.dca.order_lifecycle import DcaOrderLifecycle
 
     await Tortoise.init(
         db_url=f"sqlite://{tmp_path / 'runtime.sqlite'}", modules={"models": ["model"]}
     )
     await Tortoise.generate_schemas()
     try:
-        orders = Orders()
-        intents = orders.placement_intents
+        lifecycle = DcaOrderLifecycle()
+        intents = lifecycle.placement_intents
         config = {"exchange": "bybiteu", "market": "spot", "dry_run": False}
         await intents.prepare(
             {"operation_id": "buy-existing", "symbol": "DOGE/USDC"},
@@ -253,13 +253,15 @@ async def test_runtime_duplicate_buy_recovers_once_without_closing_client(
         lease = SimpleNamespace(bind_operation=AsyncMock(), release=AsyncMock())
         check = SimpleNamespace(ok=True, order_quote=5, required_quote=5)
         monkeypatch.setattr(
-            orders.dca,
+            lifecycle,
             "capital_budget",
             SimpleNamespace(acquire_order_lease=AsyncMock(return_value=(lease, check))),
         )
-        monkeypatch.setattr(orders, "_build_placement_reconciler", lambda: reconciler)
         monkeypatch.setattr(
-            orders.placement_workflow,
+            lifecycle, "_build_placement_reconciler", lambda: reconciler
+        )
+        monkeypatch.setattr(
+            lifecycle.placement_workflow,
             "begin",
             AsyncMock(
                 return_value=SimpleNamespace(
@@ -271,7 +273,7 @@ async def test_runtime_duplicate_buy_recovers_once_without_closing_client(
             ),
         )
         for _ in range(2):
-            filled, precheck = await orders.dca._execute_budgeted_buy_order(
+            filled, precheck = await lifecycle._execute_budgeted_buy_order(
                 {"symbol": "DOGE/USDC", "maximum_buy_price": 0.08915}, config
             )
             assert filled is True
@@ -282,7 +284,7 @@ async def test_runtime_duplicate_buy_recovers_once_without_closing_client(
         exchange.close.assert_not_awaited()
         # The initial accepted read reserves no fresh capital. Only the
         # already-completed replay enters the existing admission path.
-        orders.dca.capital_budget.acquire_order_lease.assert_awaited_once()
+        lifecycle.capital_budget.acquire_order_lease.assert_awaited_once()
         lease.release.assert_awaited_once()
     finally:
         await Tortoise.close_connections()
@@ -499,7 +501,7 @@ async def test_runtime_unresolved_buy_remains_accepted(tmp_path, case):
 async def test_runtime_recovery_persists_real_partial_fill_once(
     tmp_path, monkeypatch, initial_state
 ):
-    from service.orders import Orders
+    from service.dca.order_lifecycle import DcaOrderLifecycle
 
     await Tortoise.init(
         db_url=f"sqlite://{tmp_path / 'accounting.sqlite'}",
@@ -507,8 +509,8 @@ async def test_runtime_recovery_persists_real_partial_fill_once(
     )
     await Tortoise.generate_schemas()
     try:
-        orders = Orders()
-        intents = orders.placement_intents
+        lifecycle = DcaOrderLifecycle()
+        intents = lifecycle.placement_intents
         config = {"exchange": "bybiteu", "market": "spot", "dry_run": False}
         request = {
             "operation_id": "buy-accounted",
@@ -566,18 +568,18 @@ async def test_runtime_recovery_persists_real_partial_fill_once(
             create_spot_market_buy=AsyncMock(),
             close=AsyncMock(),
         )
-        monkeypatch.setattr(orders, "exchange", exchange)
-        monkeypatch.setattr(orders.dca, "exchange", exchange)
-        monkeypatch.setattr(orders.monitoring, "notify_trade", AsyncMock())
+        monkeypatch.setattr(lifecycle, "exchange", exchange)
+        monkeypatch.setattr(lifecycle, "exchange", exchange)
+        monkeypatch.setattr(lifecycle.monitoring, "notify_trade", AsyncMock())
         lease = SimpleNamespace(bind_operation=AsyncMock(), release=AsyncMock())
         check = SimpleNamespace(ok=True, order_quote=5, required_quote=5)
         monkeypatch.setattr(
-            orders.dca,
+            lifecycle,
             "capital_budget",
             SimpleNamespace(acquire_order_lease=AsyncMock(return_value=(lease, check))),
         )
         for _ in range(2):
-            result, precheck = await orders.dca._execute_budgeted_buy_order(
+            result, precheck = await lifecycle._execute_budgeted_buy_order(
                 dict(request), config
             )
             assert result is True
@@ -596,7 +598,7 @@ async def test_runtime_recovery_persists_real_partial_fill_once(
         exchange.close.assert_not_awaited()
         # The initial accepted read reserves no fresh capital. Only the
         # already-completed replay enters the existing admission path.
-        orders.dca.capital_budget.acquire_order_lease.assert_awaited_once()
+        lifecycle.capital_budget.acquire_order_lease.assert_awaited_once()
         lease.release.assert_awaited_once()
     finally:
         await Tortoise.close_connections()
@@ -608,7 +610,7 @@ async def test_runtime_recovery_persists_real_partial_fill_once(
 # no_claim=live exchange (real intents, fixture lookup and denied fresh budget).
 @pytest.mark.asyncio
 async def test_accepted_buy_recovers_before_denied_fresh_budget(tmp_path, monkeypatch):
-    from service.orders import Orders
+    from service.dca.order_lifecycle import DcaOrderLifecycle
 
     await Tortoise.init(
         db_url=f"sqlite://{tmp_path / 'full-budget.sqlite'}",
@@ -616,14 +618,14 @@ async def test_accepted_buy_recovers_before_denied_fresh_budget(tmp_path, monkey
     )
     await Tortoise.generate_schemas()
     try:
-        orders = Orders()
+        lifecycle = DcaOrderLifecycle()
         config = {
             "exchange": "bybiteu",
             "market": "spot",
             "dry_run": False,
             "max_fund": 5,
         }
-        await orders.placement_intents.prepare(
+        await lifecycle.placement_intents.prepare(
             {"operation_id": "buy-full-budget", "symbol": "DOGE/USDC"},
             config,
             action=PlacementAction.BUY,
@@ -632,8 +634,8 @@ async def test_accepted_buy_recovers_before_denied_fresh_budget(tmp_path, monkey
             requested_quote=5,
             reserved_quote=5,
         )
-        await orders.placement_intents.claim_submission("buy-full-budget")
-        await orders.placement_intents.transition(
+        await lifecycle.placement_intents.claim_submission("buy-full-budget")
+        await lifecycle.placement_intents.transition(
             "buy-full-budget",
             PlacementIntentState.ACCEPTED,
             exchange_order_id="bybit-order",
@@ -648,16 +650,16 @@ async def test_accepted_buy_recovers_before_denied_fresh_budget(tmp_path, monkey
             create_spot_market_buy=AsyncMock(),
             close=AsyncMock(),
         )
-        monkeypatch.setattr(orders, "exchange", exchange)
-        monkeypatch.setattr(orders.dca, "exchange", exchange)
+        monkeypatch.setattr(lifecycle, "exchange", exchange)
+        monkeypatch.setattr(lifecycle, "exchange", exchange)
         denied = SimpleNamespace(
             ok=False, to_precheck_result=lambda: {"reason": "capital_budget_exceeded"}
         )
         budget = SimpleNamespace(
             acquire_order_lease=AsyncMock(return_value=(None, denied))
         )
-        monkeypatch.setattr(orders.dca, "capital_budget", budget)
-        filled, precheck = await orders.dca._execute_budgeted_buy_order(
+        monkeypatch.setattr(lifecycle, "capital_budget", budget)
+        filled, precheck = await lifecycle._execute_budgeted_buy_order(
             {"symbol": "DOGE/USDC", "ordersize": 5}, config
         )
         assert filled is False
@@ -666,7 +668,7 @@ async def test_accepted_buy_recovers_before_denied_fresh_budget(tmp_path, monkey
         exchange.lookup_spot_order.assert_awaited_once()
         exchange.create_spot_market_buy.assert_not_awaited()
         assert (
-            await orders.placement_intents.get("buy-full-budget")
+            await lifecycle.placement_intents.get("buy-full-budget")
         ).state == "rejected"
     finally:
         await Tortoise.close_connections()

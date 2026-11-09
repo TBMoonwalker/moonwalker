@@ -1,9 +1,9 @@
-"""Regression coverage for stamping the active DCA strategy onto base orders.
+"""Regression coverage for stamping the active DCA strategy onto base lifecycle.
 
 Value: protects=a dynamic DCA deal whose base order carries no entry-filter
     strategy still records the deal's DCA strategy, so its closed replay keeps
     the indicator overlays shown while the deal was open.
-fails_when=the stamp stops applying to strategy-less base orders, overwrites an
+fails_when=the stamp stops applying to strategy-less base lifecycle, overwrites an
     existing entry-filter strategy, or leaks into non-dynamic-DCA modes.
 why_new=no prior test exercised base-order DCA strategy recording; the open-deal
     replay fallback masked the gap while deals were open.
@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 from service.dca import finalization
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.order_payloads import build_buy_trade_payload
-from service.orders import Orders
 
 
 def _buy_order_status(**overrides: Any) -> dict[str, Any]:
@@ -139,7 +139,7 @@ async def test_finalize_buy_order_applies_the_stamp_to_base_orders_only(
     status: dict[str, Any],
     expected_slug: str | None,
 ) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     captured: dict[str, Any] = {}
 
     async def fake_persist_buy_trade(symbol: str, payload: Any, **kwargs: Any) -> None:
@@ -158,15 +158,17 @@ async def test_finalize_buy_order_applies_the_stamp_to_base_orders_only(
 
     monkeypatch.setattr(finalization, "persist_buy_trade", fake_persist_buy_trade)
     monkeypatch.setattr(finalization, "has_valid_buy_fill", lambda _status: True)
-    monkeypatch.setattr(orders.placement_workflow, "log_persisted", fake_log_persisted)
+    monkeypatch.setattr(
+        lifecycle.placement_workflow, "log_persisted", fake_log_persisted
+    )
     monkeypatch.setattr(finalization, "reset_unsellable_state", fake_reset_unsellable)
-    monkeypatch.setattr(orders.monitoring, "notify_trade", fake_notify_trade)
+    monkeypatch.setattr(lifecycle.monitoring, "notify_trade", fake_notify_trade)
 
     finalized = await finalization.finalize_buy_order(
         status,
         _config(),
         original_order=dict(status),
-        dependencies=orders.dca.finalization,
+        dependencies=lifecycle.finalization,
     )
 
     assert finalized is True

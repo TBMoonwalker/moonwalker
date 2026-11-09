@@ -2,7 +2,7 @@ import json
 
 import pytest
 from service.dca import finalization
-from service.orders import Orders
+from service.dca.order_lifecycle import DcaOrderLifecycle
 
 
 @pytest.mark.asyncio
@@ -10,7 +10,7 @@ from service.orders import Orders
 async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
     monkeypatch,
 ) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     attempts: list[dict] = []
     persisted: list[tuple[str, dict, bool]] = []
     notifications: list[tuple[str, dict]] = []
@@ -18,7 +18,7 @@ async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
     async def fake_create_spot_market_buy(order, _config):
         attempts.append(dict(order))
         if len(attempts) == 1:
-            orders.exchange._last_buy_precheck_result = {
+            lifecycle.exchange._last_buy_precheck_result = {
                 "ok": False,
                 "reason": "invalid_price_or_amount",
                 "required_quote": 115.0,
@@ -56,18 +56,18 @@ async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
         return None
 
     monkeypatch.setattr(
-        orders.exchange,
+        lifecycle.exchange,
         "create_spot_market_buy",
         fake_create_spot_market_buy,
     )
-    monkeypatch.setattr(orders.exchange, "close", fake_close)
+    monkeypatch.setattr(lifecycle.exchange, "close", fake_close)
     monkeypatch.setattr(finalization, "persist_buy_trade", fake_persist_buy_trade)
-    monkeypatch.setattr(orders.monitoring, "notify_trade", fake_notify)
+    monkeypatch.setattr(lifecycle.monitoring, "notify_trade", fake_notify)
     monkeypatch.setattr(
         finalization, "reset_unsellable_state", fake_reset_unsellable_state
     )
 
-    result = await orders.receive_buy_order(
+    result = await lifecycle.receive_buy_order(
         {
             "ordersize": 115.0,
             "symbol": "BTC/USDT",

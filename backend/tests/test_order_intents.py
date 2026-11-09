@@ -1,11 +1,11 @@
 from typing import Any
 
 import pytest
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.order_intents import (
     build_manual_buy_order_intent,
     build_manual_sell_order_intent,
 )
-from service.orders import Orders
 
 
 def test_build_manual_sell_order_intent_returns_expected_payload() -> None:
@@ -61,7 +61,7 @@ def test_build_manual_buy_order_intent_counts_existing_safety_orders() -> None:
 async def test_receive_sell_signal_returns_false_when_trade_context_missing(
     monkeypatch,
 ) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     dispatched: list[dict[str, Any]] = []
 
     async def fake_get_trades_for_orders(_symbol: str) -> None:
@@ -75,17 +75,17 @@ async def test_receive_sell_signal_returns_false_when_trade_context_missing(
         raise AssertionError("Missing trade must not reach exchange/persistence")
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
     monkeypatch.setattr(
-        orders.dca,
+        lifecycle,
         "receive_sell_order",
         unexpected_sell_dispatch,
     )
 
-    result = await orders.receive_sell_signal("btc-usdt", {})
+    result = await lifecycle.receive_sell_signal("btc-usdt", {})
 
     assert result is False
     assert dispatched == []
@@ -96,7 +96,7 @@ async def test_receive_sell_signal_returns_false_when_trade_context_missing(
 async def test_receive_buy_signal_builds_and_dispatches_manual_buy_order(
     monkeypatch,
 ) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     dispatched: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
     async def fake_get_trades_for_orders(_symbol: str) -> dict[str, Any]:
@@ -118,13 +118,13 @@ async def test_receive_buy_signal_builds_and_dispatches_manual_buy_order(
         return True
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
-    monkeypatch.setattr(orders.dca, "receive_buy_order", fake_receive_buy_order)
+    monkeypatch.setattr(lifecycle, "receive_buy_order", fake_receive_buy_order)
 
-    result = await orders.receive_buy_signal("eth-usdt", 25.0, {"dry_run": True})
+    result = await lifecycle.receive_buy_signal("eth-usdt", 25.0, {"dry_run": True})
 
     assert result is True
     assert dispatched == [
@@ -148,7 +148,7 @@ async def test_receive_buy_signal_builds_and_dispatches_manual_buy_order(
 
 @pytest.mark.asyncio
 async def test_receive_buy_signal_returns_failed_dispatch_result(monkeypatch) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
 
     async def fake_get_trades_for_orders(_symbol: str) -> dict[str, Any]:
         return {
@@ -168,20 +168,20 @@ async def test_receive_buy_signal_returns_failed_dispatch_result(monkeypatch) ->
         return False
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
-    monkeypatch.setattr(orders.dca, "receive_buy_order", fake_receive_buy_order)
+    monkeypatch.setattr(lifecycle, "receive_buy_order", fake_receive_buy_order)
 
-    result = await orders.receive_buy_signal("eth-usdt", 25.0, {"dry_run": True})
+    result = await lifecycle.receive_buy_signal("eth-usdt", 25.0, {"dry_run": True})
 
     assert result is False
 
 
 @pytest.mark.asyncio
 async def test_receive_sell_signal_reports_failed_execution(monkeypatch) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
 
     async def fake_get_trades_for_orders(_symbol: str) -> dict[str, Any]:
         return {
@@ -200,12 +200,12 @@ async def test_receive_sell_signal_reports_failed_execution(monkeypatch) -> None
         return False
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
-    monkeypatch.setattr(orders.dca, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(lifecycle, "receive_sell_order", fake_receive_sell_order)
 
-    result = await orders.receive_sell_signal("eth-usdt", {"dry_run": True})
+    result = await lifecycle.receive_sell_signal("eth-usdt", {"dry_run": True})
 
     assert result is False

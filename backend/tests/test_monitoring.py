@@ -1,6 +1,6 @@
 import pytest
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.monitoring import MonitoringService
-from service.orders import Orders
 
 
 @pytest.mark.asyncio
@@ -142,7 +142,7 @@ def test_resolve_telegram_entity_username() -> None:
 @pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_orders_buy_triggers_monitoring_notification(monkeypatch) -> None:
     try:
-        orders = Orders()
+        lifecycle = DcaOrderLifecycle()
         notify_calls = []
 
         async def fake_run_sqlite(func, *args, **kwargs) -> None:
@@ -183,15 +183,17 @@ async def test_orders_buy_triggers_monitoring_notification(monkeypatch) -> None:
             return 0.0, 0.0
 
         monkeypatch.setattr(
-            orders.exchange, "create_spot_market_buy", fake_create_spot_market_buy
+            lifecycle.exchange, "create_spot_market_buy", fake_create_spot_market_buy
         )
-        monkeypatch.setattr(orders.exchange, "close", fake_close)
+        monkeypatch.setattr(lifecycle.exchange, "close", fake_close)
         monkeypatch.setattr(
-            orders.trades, "get_partial_sell_execution", fake_get_partial_sell_execution
+            lifecycle.trades,
+            "get_partial_sell_execution",
+            fake_get_partial_sell_execution,
         )
-        monkeypatch.setattr(orders.monitoring, "notify_trade", fake_notify)
+        monkeypatch.setattr(lifecycle.monitoring, "notify_trade", fake_notify)
 
-        result = await orders.receive_buy_order(
+        result = await lifecycle.receive_buy_order(
             {
                 "ordersize": 25.0,
                 "symbol": "BTC/USDT",
@@ -219,7 +221,7 @@ async def test_orders_buy_triggers_monitoring_notification(monkeypatch) -> None:
 @pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_orders_sell_triggers_monitoring_notification(monkeypatch) -> None:
     try:
-        orders = Orders()
+        lifecycle = DcaOrderLifecycle()
         notify_calls = []
 
         async def fake_run_sqlite(func, *args, **kwargs) -> None:
@@ -260,25 +262,31 @@ async def test_orders_sell_triggers_monitoring_notification(monkeypatch) -> None
         async def fake_get_partial_sell_execution(_symbol) -> None:
             return 0.0, 0.0
 
-        monkeypatch.setattr(orders.exchange, "create_spot_sell", fake_create_spot_sell)
-        monkeypatch.setattr(orders.exchange, "close", fake_close)
         monkeypatch.setattr(
-            orders.trades,
+            lifecycle.exchange, "create_spot_sell", fake_create_spot_sell
+        )
+        monkeypatch.setattr(lifecycle.exchange, "close", fake_close)
+        monkeypatch.setattr(
+            lifecycle.trades,
             "get_token_amount_from_trades",
             fake_get_token_amount_from_trades,
         )
         monkeypatch.setattr(
-            orders.trades, "get_trade_by_ordertype", fake_get_trade_by_ordertype
+            lifecycle.trades, "get_trade_by_ordertype", fake_get_trade_by_ordertype
         )
         monkeypatch.setattr(
-            orders.trades, "get_open_trades_by_symbol", fake_get_open_trades_by_symbol
+            lifecycle.trades,
+            "get_open_trades_by_symbol",
+            fake_get_open_trades_by_symbol,
         )
         monkeypatch.setattr(
-            orders.trades, "get_partial_sell_execution", fake_get_partial_sell_execution
+            lifecycle.trades,
+            "get_partial_sell_execution",
+            fake_get_partial_sell_execution,
         )
-        monkeypatch.setattr(orders.monitoring, "notify_trade", fake_notify)
+        monkeypatch.setattr(lifecycle.monitoring, "notify_trade", fake_notify)
 
-        await orders.receive_sell_order(
+        await lifecycle.receive_sell_order(
             {
                 "symbol": "BTC/USDT",
                 "direction": "long",

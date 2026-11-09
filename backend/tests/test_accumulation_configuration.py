@@ -13,8 +13,8 @@ from service.accumulation.lifecycle import AccumulationLifecycleService
 from service.accumulation.strategy import build_accumulation_strategy_document
 from service.config import Config
 from service.csv_signal_import import CSVSignalImportService
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
-from service.orders import Orders
 from service.trading_maintenance import TradingMaintenanceBarrier
 from tortoise import Tortoise
 
@@ -205,7 +205,10 @@ async def test_settled_mode_switch_releases_dca_admission_without_deleting_histo
     assert not await model.AccumulationLifecycleOperation.filter(
         operation_id="test-stale-tab-reactivation"
     ).exists()
-    assert await Orders().routing.reject_legacy_lifecycle("BTC/USDC", "buy") is None
+    assert (
+        await DcaOrderLifecycle().routing.reject_legacy_lifecycle("BTC/USDC", "buy")
+        is None
+    )
     await CSVSignalImportService().import_from_csv(
         "date;symbol;price;amount\n18/08/2025 19:32:00;BTC/USDC;100;1\n",
         "USDC",
