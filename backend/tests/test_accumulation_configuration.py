@@ -205,7 +205,7 @@ async def test_settled_mode_switch_releases_dca_admission_without_deleting_histo
     assert not await model.AccumulationLifecycleOperation.filter(
         operation_id="test-stale-tab-reactivation"
     ).exists()
-    assert await Orders()._legacy_lifecycle_rejection("BTC/USDC", "buy") is None
+    assert await Orders().routing.reject_legacy_lifecycle("BTC/USDC", "buy") is None
     await CSVSignalImportService().import_from_csv(
         "date;symbol;price;amount\n18/08/2025 19:32:00;BTC/USDC;100;1\n",
         "USDC",

@@ -66,7 +66,9 @@ async def test_tp_spike_confirmation_skips_single_tick_wick(monkeypatch) -> None
     async def fake_update_statistic_data(_payload) -> None:
         return None
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
@@ -96,7 +98,9 @@ async def test_tp_spike_confirmation_sells_after_duration_and_tick_filter(
     async def fake_get_bid_price_for_symbol(_symbol: str) -> str:
         return "111.4"
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
@@ -132,7 +136,9 @@ async def test_tp_spike_confirmation_restarts_after_fade_below_tp(monkeypatch) -
     async def fake_get_bid_price_for_symbol(_symbol: str) -> str:
         return "111.3"
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
@@ -169,7 +175,9 @@ async def test_tp_spike_confirmation_does_not_delay_stop_loss(monkeypatch) -> No
     async def fake_get_bid_price_for_symbol(_symbol: str) -> str:
         return "94.0"
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
@@ -212,12 +220,16 @@ async def test_tp_limit_prearm_arms_before_tp_when_near(monkeypatch) -> None:
         return None
 
     monkeypatch.setattr(
-        dca.orders,
+        dca.order_lifecycle,
         "reconcile_tp_limit_order",
         fake_reconcile_tp_limit_order,
     )
-    monkeypatch.setattr(dca.orders, "arm_tp_limit_order", fake_arm_tp_limit_order)
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "arm_tp_limit_order", fake_arm_tp_limit_order
+    )
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
@@ -255,11 +267,13 @@ async def test_tp_limit_prearm_skips_when_spike_confirmation_enabled(
         return None
 
     monkeypatch.setattr(
-        dca.orders,
+        dca.order_lifecycle,
         "reconcile_tp_limit_order",
         fake_reconcile_tp_limit_order,
     )
-    monkeypatch.setattr(dca.orders, "arm_tp_limit_order", fake_arm_tp_limit_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "arm_tp_limit_order", fake_arm_tp_limit_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
@@ -300,11 +314,13 @@ async def test_tp_limit_prearm_waits_for_existing_order_at_tp(monkeypatch) -> No
         stat_payloads.append(payload)
 
     monkeypatch.setattr(
-        dca.orders,
+        dca.order_lifecycle,
         "reconcile_tp_limit_order",
         fake_reconcile_tp_limit_order,
     )
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
@@ -355,16 +371,18 @@ async def test_tp_limit_prearm_rearms_existing_order_with_remaining_sellable_amo
         return None
 
     monkeypatch.setattr(
-        dca.orders,
+        dca.order_lifecycle,
         "reconcile_tp_limit_order",
         fake_reconcile_tp_limit_order,
     )
     monkeypatch.setattr(
-        dca.orders,
+        dca.order_lifecycle,
         "cancel_tp_limit_order",
         fake_cancel_tp_limit_order,
     )
-    monkeypatch.setattr(dca.orders, "arm_tp_limit_order", fake_arm_tp_limit_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "arm_tp_limit_order", fake_arm_tp_limit_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )

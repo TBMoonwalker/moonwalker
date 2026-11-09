@@ -67,8 +67,12 @@ async def test_trailing_tp_state_is_instance_local(monkeypatch) -> None:
     async def fake_update_statistic_data(_payload) -> None:
         return None
 
-    monkeypatch.setattr(first.orders, "receive_sell_order", fake_first_sell_order)
-    monkeypatch.setattr(second.orders, "receive_sell_order", fake_second_sell_order)
+    monkeypatch.setattr(
+        first.order_lifecycle, "receive_sell_order", fake_first_sell_order
+    )
+    monkeypatch.setattr(
+        second.order_lifecycle, "receive_sell_order", fake_second_sell_order
+    )
     monkeypatch.setattr(
         first.statistic, "update_statistic_data", fake_update_statistic_data
     )

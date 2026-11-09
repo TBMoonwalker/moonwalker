@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 import service.dca.engine as dca_module
-import service.orders as orders_module
 from service.dca import Dca
 from service.lifecycle_mutation import LifecycleMutationCoordinator
 from service.orders import Orders
@@ -52,8 +51,7 @@ async def test_sell_is_rejected_while_restore_owns_maintenance_barrier(
     """A stale DCA sell snapshot must not reach the exchange during restore."""
     barrier = TradingMaintenanceBarrier()
     monkeypatch.setattr(
-        orders_module,
-        "lifecycle_mutation_coordinator",
+        "service.dca.order_lifecycle.lifecycle_mutation_coordinator",
         LifecycleMutationCoordinator(barrier),
     )
     exchange_called = False
@@ -67,7 +65,7 @@ async def test_sell_is_rejected_while_restore_owns_maintenance_barrier(
         return {}
 
     orders = Orders()
-    orders.exchange = types.SimpleNamespace(
+    orders.dca.exchange = types.SimpleNamespace(
         create_spot_sell=create_spot_sell,
         close=types.SimpleNamespace(),
     )
@@ -85,8 +83,7 @@ async def test_buy_is_rejected_while_restore_owns_lifecycle_coordinator(
     """No buy mutation may enter while destructive maintenance is active."""
     barrier = TradingMaintenanceBarrier()
     monkeypatch.setattr(
-        orders_module,
-        "lifecycle_mutation_coordinator",
+        "service.dca.order_lifecycle.lifecycle_mutation_coordinator",
         LifecycleMutationCoordinator(barrier),
     )
     orders = Orders()

@@ -108,8 +108,8 @@ async def test_arm_tp_limit_order_places_and_persists_order() -> None:
     orders = Orders()
     fake_exchange = _FakeExchange()
     fake_trades = _FakeTrades()
-    orders.exchange = fake_exchange  # type: ignore[assignment]
-    orders.trades = fake_trades  # type: ignore[assignment]
+    orders.dca.exchange = fake_exchange  # type: ignore[assignment]
+    orders.dca.trades = fake_trades  # type: ignore[assignment]
 
     armed = await orders.arm_tp_limit_order(
         {
@@ -140,8 +140,8 @@ async def test_arm_tp_limit_order_marks_minimum_notional_remainder_unsellable(
     orders = Orders()
     fake_exchange = _FakeExchange()
     fake_trades = _FakeTrades()
-    orders.exchange = fake_exchange  # type: ignore[assignment]
-    orders.trades = fake_trades  # type: ignore[assignment]
+    orders.dca.exchange = fake_exchange  # type: ignore[assignment]
+    orders.dca.trades = fake_trades  # type: ignore[assignment]
 
     async def minimum_notional_limit_sell(
         order: dict[str, Any],
@@ -167,8 +167,7 @@ async def test_arm_tp_limit_order_marks_minimum_notional_remainder_unsellable(
 
     fake_exchange.place_spot_limit_sell = minimum_notional_limit_sell  # type: ignore[method-assign]
     monkeypatch.setattr(
-        orders,
-        "_Orders__handle_partial_sell_status",
+        "service.dca.order_lifecycle.handle_partial_sell_status",
         record_partial_status,
     )
 
@@ -203,8 +202,8 @@ async def test_cancel_tp_limit_order_clears_persisted_metadata() -> None:
     orders = Orders()
     fake_exchange = _FakeExchange()
     fake_trades = _FakeTrades()
-    orders.exchange = fake_exchange  # type: ignore[assignment]
-    orders.trades = fake_trades  # type: ignore[assignment]
+    orders.dca.exchange = fake_exchange  # type: ignore[assignment]
+    orders.dca.trades = fake_trades  # type: ignore[assignment]
 
     canceled = await orders.cancel_tp_limit_order("XPL/USDC", {})
 
@@ -228,8 +227,8 @@ async def test_cancel_tp_limit_order_persists_partial_fill() -> None:
         "timestamp": 1_742_000_000_123,
     }
     fake_trades = _FakeTrades()
-    orders.exchange = fake_exchange  # type: ignore[assignment]
-    orders.trades = fake_trades  # type: ignore[assignment]
+    orders.dca.exchange = fake_exchange  # type: ignore[assignment]
+    orders.dca.trades = fake_trades  # type: ignore[assignment]
 
     canceled = await orders.cancel_tp_limit_order("XPL/USDC", {})
 
@@ -273,8 +272,8 @@ async def test_reconcile_tp_limit_order_handles_unsellable_partial_fill(
         }
 
     fake_trades.get_trades_for_orders = fake_get_trades_for_orders  # type: ignore[assignment]
-    orders.exchange = fake_exchange  # type: ignore[assignment]
-    orders.trades = fake_trades  # type: ignore[assignment]
+    orders.dca.exchange = fake_exchange  # type: ignore[assignment]
+    orders.dca.trades = fake_trades  # type: ignore[assignment]
 
     async def fake_build_spot_sell_order_status(
         _payload: dict[str, Any],
@@ -296,12 +295,13 @@ async def test_reconcile_tp_limit_order_handles_unsellable_partial_fill(
     async def fake_handle_partial(
         order_status: dict[str, Any],
         _config: dict[str, Any],
+        **_kwargs: Any,
     ) -> None:
         handled.append(order_status)
 
     fake_exchange.build_spot_sell_order_status = fake_build_spot_sell_order_status  # type: ignore[attr-defined]
     monkeypatch.setattr(
-        orders, "_Orders__handle_partial_sell_status", fake_handle_partial
+        "service.dca.order_lifecycle.handle_partial_sell_status", fake_handle_partial
     )
 
     reconciled = await orders.reconcile_tp_limit_order(

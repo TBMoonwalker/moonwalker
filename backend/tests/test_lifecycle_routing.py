@@ -116,7 +116,7 @@ async def test_payload_cannot_authorize_an_accumulation_sale(routing_db, reason)
     orders.exchange.create_spot_sell = AsyncMock(
         side_effect=AssertionError("no exchange submission")
     )
-    orders._cancel_tp_limit_order_locked = AsyncMock(
+    orders.dca._cancel_tp_limit_order_locked = AsyncMock(
         side_effect=AssertionError("no cancellation before admission")
     )
     orders.placement_workflow.begin = AsyncMock(
@@ -187,7 +187,7 @@ async def test_unknown_mode_and_database_failure_block_order_admission(
     result = await orders.receive_sell_signal_result("BTC/USDC", {})
     assert result.reason_code == "unknown_lifecycle_mode"
     monkeypatch.setattr(
-        "service.orders.load_lifecycle_route",
+        "service.order_routing.load_lifecycle_route",
         AsyncMock(side_effect=OperationalError("read failure")),
     )
     assert not await orders.receive_buy_order({"symbol": "BTC/USDC"}, {})

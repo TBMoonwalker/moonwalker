@@ -80,7 +80,7 @@ async def test_receive_sell_signal_returns_false_when_trade_context_missing(
         fake_get_trades_for_orders,
     )
     monkeypatch.setattr(
-        orders,
+        orders.dca,
         "receive_sell_order",
         unexpected_sell_dispatch,
     )
@@ -122,7 +122,7 @@ async def test_receive_buy_signal_builds_and_dispatches_manual_buy_order(
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
-    monkeypatch.setattr(orders, "receive_buy_order", fake_receive_buy_order)
+    monkeypatch.setattr(orders.dca, "receive_buy_order", fake_receive_buy_order)
 
     result = await orders.receive_buy_signal("eth-usdt", 25.0, {"dry_run": True})
 
@@ -172,7 +172,7 @@ async def test_receive_buy_signal_returns_failed_dispatch_result(monkeypatch) ->
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
-    monkeypatch.setattr(orders, "receive_buy_order", fake_receive_buy_order)
+    monkeypatch.setattr(orders.dca, "receive_buy_order", fake_receive_buy_order)
 
     result = await orders.receive_buy_signal("eth-usdt", 25.0, {"dry_run": True})
 
@@ -204,7 +204,7 @@ async def test_receive_sell_signal_reports_failed_execution(monkeypatch) -> None
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
-    monkeypatch.setattr(orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(orders.dca, "receive_sell_order", fake_receive_sell_order)
 
     result = await orders.receive_sell_signal("eth-usdt", {"dry_run": True})
 

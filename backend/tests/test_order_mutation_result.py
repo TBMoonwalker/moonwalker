@@ -131,7 +131,7 @@ async def test_operator_stop_includes_fill_during_tp_cancellation(
         )
 
     monkeypatch.setattr(
-        orders, "_cancel_tp_limit_order_locked", cancel_with_partial_fill
+        orders.dca, "_cancel_tp_limit_order_locked", cancel_with_partial_fill
     )
     assert (await orders.receive_stop_signal_result("BTC/USDC", {})).applied
     closed = await model.ClosedTrades.get(symbol="BTC/USDC")
@@ -259,7 +259,9 @@ async def test_operator_stop_retains_trade_when_cancellation_fails(
     stopped_trade_db, monkeypatch
 ):
     monkeypatch.setattr(
-        stopped_trade_db, "_cancel_tp_limit_order_locked", AsyncMock(return_value=False)
+        stopped_trade_db.dca,
+        "_cancel_tp_limit_order_locked",
+        AsyncMock(return_value=False),
     )
     assert not (
         await stopped_trade_db.receive_stop_signal_result("BTC/USDC", {})
@@ -443,10 +445,10 @@ async def test_placement_state_maps_to_typed_operator_outcome(
     trade = _trade()
     snapshot = LifecycleSnapshotIdentity.from_trade(trade, config)
     orders = Orders()
-    orders.trades = _TradeReader(trade)  # type: ignore[assignment]
-    orders.placement_intents = _IntentReader(_intent(state))  # type: ignore[assignment]
+    orders.routing.trades = _TradeReader(trade)  # type: ignore[assignment]
+    orders.routing.placement_intents = _IntentReader(_intent(state))  # type: ignore[assignment]
 
-    result = await orders._operator_mutation_result(
+    result = await orders.routing.operator_mutation_result(
         order={"symbol": "BTC/USDC", "operation_id": "operation-1"},
         action="manual_sell",
         applied=state is PlacementIntentState.COMPLETED,
@@ -469,10 +471,10 @@ async def test_missing_intent_distinguishes_applied_and_stale() -> None:
     evaluated_trade = _trade()
     snapshot = LifecycleSnapshotIdentity.from_trade(evaluated_trade, config)
     orders = Orders()
-    orders.placement_intents = _IntentReader(None)  # type: ignore[assignment]
-    orders.trades = _TradeReader(evaluated_trade)  # type: ignore[assignment]
+    orders.routing.placement_intents = _IntentReader(None)  # type: ignore[assignment]
+    orders.routing.trades = _TradeReader(evaluated_trade)  # type: ignore[assignment]
 
-    applied = await orders._operator_mutation_result(
+    applied = await orders.routing.operator_mutation_result(
         order={"symbol": "BTC/USDC", "operation_id": "operation-1"},
         action="manual_buy",
         applied=True,
@@ -480,8 +482,8 @@ async def test_missing_intent_distinguishes_applied_and_stale() -> None:
         expected_snapshot=snapshot,
         config=config,
     )
-    orders.trades = _TradeReader(_trade(execution_count=2))  # type: ignore[assignment]
-    stale = await orders._operator_mutation_result(
+    orders.routing.trades = _TradeReader(_trade(execution_count=2))  # type: ignore[assignment]
+    stale = await orders.routing.operator_mutation_result(
         order={"symbol": "BTC/USDC", "operation_id": "operation-2"},
         action="manual_buy",
         applied=False,
@@ -503,10 +505,10 @@ async def test_post_dispatch_recheck_fails_closed_when_trade_state_is_unavailabl
     trade = _trade()
     snapshot = LifecycleSnapshotIdentity.from_trade(trade, config)
     orders = Orders()
-    orders.placement_intents = _IntentReader(None)  # type: ignore[assignment]
-    orders.trades = _UnavailableTradeReader()  # type: ignore[assignment]
+    orders.routing.placement_intents = _IntentReader(None)  # type: ignore[assignment]
+    orders.routing.trades = _UnavailableTradeReader()  # type: ignore[assignment]
 
-    result = await orders._operator_mutation_result(
+    result = await orders.routing.operator_mutation_result(
         order={"symbol": "BTC/USDC", "operation_id": "operation-1"},
         action="manual_buy",
         applied=False,
@@ -547,7 +549,7 @@ async def test_typed_order_result_reports_missing_trade(
 ) -> None:
     orders = Orders()
     trade_reader = _MissingTradeReader()
-    orders.trades = trade_reader  # type: ignore[assignment]
+    orders.routing.trades = trade_reader  # type: ignore[assignment]
     method = getattr(orders, method_name)
 
     result = (
@@ -568,8 +570,8 @@ async def test_completed_manual_buy_retry_deduplicates_before_rebuilding_order()
     None
 ):
     orders = Orders()
-    orders.trades = _UnexpectedTradeReader()  # type: ignore[assignment]
-    orders.placement_intents = _IntentReader(
+    orders.routing.trades = _UnexpectedTradeReader()  # type: ignore[assignment]
+    orders.routing.placement_intents = _IntentReader(
         _intent(PlacementIntentState.COMPLETED),
     )  # type: ignore[assignment]
 
@@ -610,8 +612,8 @@ async def test_manual_sell_retry_recovers_intent_after_trade_closes(
     """A retry must reconcile the durable intent after the trade row is gone."""
     orders = Orders()
     trade_reader = _MissingTradeReader()
-    orders.trades = trade_reader  # type: ignore[assignment]
-    orders.placement_intents = _IntentReader(_intent(state))  # type: ignore[assignment]
+    orders.routing.trades = trade_reader  # type: ignore[assignment]
+    orders.routing.placement_intents = _IntentReader(_intent(state))  # type: ignore[assignment]
 
     result = await orders.receive_sell_signal_result(
         "btc-usdc",
@@ -642,7 +644,7 @@ async def test_typed_order_result_fails_closed_when_trade_state_is_unavailable(
     expected_action: str,
 ) -> None:
     orders = Orders()
-    orders.trades = _UnavailableTradeReader()  # type: ignore[assignment]
+    orders.routing.trades = _UnavailableTradeReader()  # type: ignore[assignment]
     method = getattr(orders, method_name)
 
     result = (
@@ -674,15 +676,15 @@ async def test_typed_order_result_reports_applied_dispatch(
     config = {"dry_run": True}
     trade = _trade()
     orders = Orders()
-    orders.trades = _TradeReader(trade)  # type: ignore[assignment]
-    orders.placement_intents = _IntentReader(None)  # type: ignore[assignment]
+    orders.routing.trades = _TradeReader(trade)  # type: ignore[assignment]
+    orders.routing.placement_intents = _IntentReader(None)  # type: ignore[assignment]
     dispatched: list[dict[str, Any]] = []
 
     async def dispatch(order: dict[str, Any], _config: dict[str, Any]) -> bool:
         dispatched.append(order)
         return True
 
-    monkeypatch.setattr(orders, dispatch_name, dispatch)
+    monkeypatch.setattr(orders.dca, dispatch_name, dispatch)
     method = getattr(orders, method_name)
     result = (
         await method("btc-usdc", 25.0, config, operation_id="operator-1")
@@ -705,15 +707,15 @@ async def test_manual_sell_actions_get_distinct_default_operation_ids(
     config = {"dry_run": True}
     trade = _trade()
     orders = Orders()
-    orders.trades = _TradeReader(trade)  # type: ignore[assignment]
-    orders.placement_intents = _IntentReader(None)  # type: ignore[assignment]
+    orders.routing.trades = _TradeReader(trade)  # type: ignore[assignment]
+    orders.routing.placement_intents = _IntentReader(None)  # type: ignore[assignment]
     dispatched: list[dict[str, Any]] = []
 
     async def reject(order: dict[str, Any], _config: dict[str, Any]) -> bool:
         dispatched.append(order)
         return False
 
-    monkeypatch.setattr(orders, "receive_sell_order", reject)
+    monkeypatch.setattr(orders.dca, "receive_sell_order", reject)
 
     first = await orders.receive_sell_signal_result("btc-usdc", config)
     second = await orders.receive_sell_signal_result("btc-usdc", config)
@@ -736,29 +738,29 @@ async def test_typed_stop_result_covers_invalid_missing_applied_and_stale(
     orders = Orders()
 
     invalid = await orders.receive_stop_signal_result("", config)
-    orders.trades = _MissingTradeReader()  # type: ignore[assignment]
+    orders.routing.trades = _MissingTradeReader()  # type: ignore[assignment]
     missing = await orders.receive_stop_signal_result("btc-usdc", config)
 
-    orders.trades = _TradeReader(_trade())  # type: ignore[assignment]
+    orders.routing.trades = _TradeReader(_trade())  # type: ignore[assignment]
 
     async def applied_stop(*_args: Any, **_kwargs: Any) -> bool:
         return True
 
-    monkeypatch.setattr(orders, "receive_stop_signal", applied_stop)
+    monkeypatch.setattr(orders.dca, "receive_stop_signal", applied_stop)
     applied = await orders.receive_stop_signal_result(
         "btc-usdc",
         config,
         operation_id="stop-1",
     )
 
-    orders.trades = _SequenceTradeReader(  # type: ignore[assignment]
+    orders.routing.trades = _SequenceTradeReader(  # type: ignore[assignment]
         [_trade(), _trade(execution_count=2)]
     )
 
     async def rejected_stop(*_args: Any, **_kwargs: Any) -> bool:
         return False
 
-    monkeypatch.setattr(orders, "receive_stop_signal", rejected_stop)
+    monkeypatch.setattr(orders.dca, "receive_stop_signal", rejected_stop)
     stale = await orders.receive_stop_signal_result("btc-usdc", config)
 
     assert invalid.reason_code == "invalid_symbol"

@@ -4,7 +4,6 @@ from typing import Any
 import model
 import pytest
 import service.capital_budget_logic as capital_budget_logic
-import service.orders as orders_module
 from service.capital_budget import CapitalBudgetService
 from service.orders import Orders
 from tortoise import Tortoise
@@ -435,8 +434,7 @@ async def test_manual_ledger_buy_add_warns_but_persists_when_over_budget(
         fake_get_trades_for_orders,
     )
     monkeypatch.setattr(
-        orders_module,
-        "persist_manual_buy_add",
+        "service.dca.order_lifecycle.persist_manual_buy_add",
         fake_persist_manual_buy_add,
     )
 
@@ -444,7 +442,7 @@ async def test_manual_ledger_buy_add_warns_but_persists_when_over_budget(
         return {"reason": "capital_budget_exceeded"}
 
     monkeypatch.setattr(
-        orders,
+        orders.dca,
         "_build_manual_buy_budget_warning",
         fake_budget_warning,
     )

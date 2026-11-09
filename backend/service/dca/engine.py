@@ -29,6 +29,7 @@ from service.dca.math import (
     calculate_stop_loss_price,
     calculate_take_profit_price,
 )
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.dca.recovery_sizing import (
     LEGACY_SIZING_MODE,
     RECOVERY_SHADOW_MODE,
@@ -55,7 +56,6 @@ from service.exchange import Exchange
 from service.indicators import Indicators
 from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.lifecycle_snapshot import LifecycleSnapshotIdentity
-from service.orders import Orders
 from service.statistic import Statistic
 from service.strategy_runtime import get_strategy_adapter
 from service.trades import Trades
@@ -79,7 +79,7 @@ class Dca:
         self.ath_service = AthService()
         self.exchange = Exchange()
         self.indicators = Indicators()
-        self.orders = Orders()
+        self.order_lifecycle = DcaOrderLifecycle()
         self.statistic = Statistic()
         self.trades = Trades()
         self.utils = helper.Utils()
@@ -99,7 +99,7 @@ class Dca:
         """Close exchange resources owned by the DCA runtime."""
         await self.exchange.close()
         await self.ath_service.close()
-        await self.orders.close()
+        await self.order_lifecycle.close()
 
     @property
     def config(self) -> dict[str, Any] | None:
@@ -271,7 +271,7 @@ class Dca:
             "fallback_min_price": take_profit_price,
             **self.__order_snapshot_payload(trades),
         }
-        return await self.orders.arm_tp_limit_order(order, self.config or {})
+        return await self.order_lifecycle.arm_tp_limit_order(order, self.config or {})
 
     async def __dynamic_dca_strategy(self, symbol: str) -> tuple[bool, bool]:
         result = False
@@ -957,12 +957,12 @@ class Dca:
         if not isinstance(expected_snapshot, LifecycleSnapshotIdentity):
             expected_snapshot = None
         if expected_snapshot is None:
-            reconciled = await self.orders.reconcile_tp_limit_order(
+            reconciled = await self.order_lifecycle.reconcile_tp_limit_order(
                 trades,
                 self.config or {},
             )
         else:
-            reconciled = await self.orders.reconcile_tp_limit_order(
+            reconciled = await self.order_lifecycle.reconcile_tp_limit_order(
                 trades,
                 self.config or {},
                 expected_snapshot=expected_snapshot,
@@ -983,12 +983,12 @@ class Dca:
             )
         ):
             if expected_snapshot is None:
-                canceled = await self.orders.cancel_tp_limit_order(
+                canceled = await self.order_lifecycle.cancel_tp_limit_order(
                     trades["symbol"],
                     self.config or {},
                 )
             else:
-                canceled = await self.orders.cancel_tp_limit_order(
+                canceled = await self.order_lifecycle.cancel_tp_limit_order(
                     trades["symbol"],
                     self.config or {},
                     expected_snapshot=expected_snapshot,
@@ -1106,12 +1106,12 @@ class Dca:
             else:
                 if has_tp_limit_order:
                     if expected_snapshot is None:
-                        canceled = await self.orders.cancel_tp_limit_order(
+                        canceled = await self.order_lifecycle.cancel_tp_limit_order(
                             trades["symbol"],
                             self.config or {},
                         )
                     else:
-                        canceled = await self.orders.cancel_tp_limit_order(
+                        canceled = await self.order_lifecycle.cancel_tp_limit_order(
                             trades["symbol"],
                             self.config or {},
                             expected_snapshot=expected_snapshot,
@@ -1151,7 +1151,7 @@ class Dca:
                     "exit_guard_max_price": exit_guard_max_price,
                     **self.__order_snapshot_payload(trades),
                 }
-                await self.orders.receive_sell_order(order, self.config or {})
+                await self.order_lifecycle.receive_sell_order(order, self.config or {})
         elif exit_action is DcaAction.ARM_TP_LIMIT:
             has_tp_limit_order = await self.__arm_tp_limit_order(
                 trades=trades,
@@ -1429,7 +1429,7 @@ class Dca:
                         ),
                         **self.__order_snapshot_payload(trades),
                     }
-                    placed_new_so = await self.orders.receive_buy_order(
+                    placed_new_so = await self.order_lifecycle.receive_buy_order(
                         order, self.config
                     )
 

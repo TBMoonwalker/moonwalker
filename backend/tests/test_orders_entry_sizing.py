@@ -1,7 +1,7 @@
 import json
 
 import pytest
-import service.orders as orders_module
+from service.dca import finalization
 from service.orders import Orders
 
 
@@ -52,7 +52,7 @@ async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
     async def fake_notify(event_type, payload, _config):
         notifications.append((event_type, payload))
 
-    async def fake_reset_unsellable_state(_symbol: str) -> None:
+    async def fake_reset_unsellable_state(_symbol: str, *, dependencies=None) -> None:
         return None
 
     monkeypatch.setattr(
@@ -61,9 +61,11 @@ async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
         fake_create_spot_market_buy,
     )
     monkeypatch.setattr(orders.exchange, "close", fake_close)
-    monkeypatch.setattr(orders_module, "persist_buy_trade", fake_persist_buy_trade)
+    monkeypatch.setattr(finalization, "persist_buy_trade", fake_persist_buy_trade)
     monkeypatch.setattr(orders.monitoring, "notify_trade", fake_notify)
-    monkeypatch.setattr(orders, "_reset_unsellable_state", fake_reset_unsellable_state)
+    monkeypatch.setattr(
+        finalization, "reset_unsellable_state", fake_reset_unsellable_state
+    )
 
     result = await orders.receive_buy_order(
         {

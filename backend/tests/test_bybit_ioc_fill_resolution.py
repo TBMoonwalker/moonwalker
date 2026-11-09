@@ -253,7 +253,7 @@ async def test_runtime_duplicate_buy_recovers_once_without_closing_client(
         lease = SimpleNamespace(bind_operation=AsyncMock(), release=AsyncMock())
         check = SimpleNamespace(ok=True, order_quote=5, required_quote=5)
         monkeypatch.setattr(
-            orders,
+            orders.dca,
             "capital_budget",
             SimpleNamespace(acquire_order_lease=AsyncMock(return_value=(lease, check))),
         )
@@ -271,7 +271,7 @@ async def test_runtime_duplicate_buy_recovers_once_without_closing_client(
             ),
         )
         for _ in range(2):
-            filled, precheck = await orders._execute_budgeted_buy_order(
+            filled, precheck = await orders.dca._execute_budgeted_buy_order(
                 {"symbol": "DOGE/USDC", "maximum_buy_price": 0.08915}, config
             )
             assert filled is True
@@ -282,7 +282,7 @@ async def test_runtime_duplicate_buy_recovers_once_without_closing_client(
         exchange.close.assert_not_awaited()
         # The initial accepted read reserves no fresh capital. Only the
         # already-completed replay enters the existing admission path.
-        orders.capital_budget.acquire_order_lease.assert_awaited_once()
+        orders.dca.capital_budget.acquire_order_lease.assert_awaited_once()
         lease.release.assert_awaited_once()
     finally:
         await Tortoise.close_connections()
@@ -567,16 +567,17 @@ async def test_runtime_recovery_persists_real_partial_fill_once(
             close=AsyncMock(),
         )
         monkeypatch.setattr(orders, "exchange", exchange)
+        monkeypatch.setattr(orders.dca, "exchange", exchange)
         monkeypatch.setattr(orders.monitoring, "notify_trade", AsyncMock())
         lease = SimpleNamespace(bind_operation=AsyncMock(), release=AsyncMock())
         check = SimpleNamespace(ok=True, order_quote=5, required_quote=5)
         monkeypatch.setattr(
-            orders,
+            orders.dca,
             "capital_budget",
             SimpleNamespace(acquire_order_lease=AsyncMock(return_value=(lease, check))),
         )
         for _ in range(2):
-            result, precheck = await orders._execute_budgeted_buy_order(
+            result, precheck = await orders.dca._execute_budgeted_buy_order(
                 dict(request), config
             )
             assert result is True
@@ -595,7 +596,7 @@ async def test_runtime_recovery_persists_real_partial_fill_once(
         exchange.close.assert_not_awaited()
         # The initial accepted read reserves no fresh capital. Only the
         # already-completed replay enters the existing admission path.
-        orders.capital_budget.acquire_order_lease.assert_awaited_once()
+        orders.dca.capital_budget.acquire_order_lease.assert_awaited_once()
         lease.release.assert_awaited_once()
     finally:
         await Tortoise.close_connections()
@@ -648,14 +649,15 @@ async def test_accepted_buy_recovers_before_denied_fresh_budget(tmp_path, monkey
             close=AsyncMock(),
         )
         monkeypatch.setattr(orders, "exchange", exchange)
+        monkeypatch.setattr(orders.dca, "exchange", exchange)
         denied = SimpleNamespace(
             ok=False, to_precheck_result=lambda: {"reason": "capital_budget_exceeded"}
         )
         budget = SimpleNamespace(
             acquire_order_lease=AsyncMock(return_value=(None, denied))
         )
-        monkeypatch.setattr(orders, "capital_budget", budget)
-        filled, precheck = await orders._execute_budgeted_buy_order(
+        monkeypatch.setattr(orders.dca, "capital_budget", budget)
+        filled, precheck = await orders.dca._execute_budgeted_buy_order(
             {"symbol": "DOGE/USDC", "ordersize": 5}, config
         )
         assert filled is False

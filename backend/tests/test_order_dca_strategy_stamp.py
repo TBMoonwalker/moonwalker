@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-import service.orders as orders_module
+from service.dca import finalization
 from service.order_payloads import build_buy_trade_payload
 from service.orders import Orders
 
@@ -101,14 +101,14 @@ def test_stamp_deal_dca_strategy_branches(
     config: dict[str, Any],
     expected_slug: str | None,
 ) -> None:
-    Orders._stamp_deal_dca_strategy(status, config)
+    finalization.stamp_deal_dca_strategy(status, config)
     assert status.get("strategy_slug") == expected_slug
     assert status.get("strategy_name") == expected_slug
 
 
 def test_stamped_strategy_reaches_the_persistence_payload() -> None:
     status = _buy_order_status()
-    Orders._stamp_deal_dca_strategy(status, _config())
+    finalization.stamp_deal_dca_strategy(status, _config())
     payload = build_buy_trade_payload(status)
     assert payload["strategy_slug"] == "ema20_swing"
     assert payload["strategy_name"] == "ema20_swing"
@@ -150,24 +150,23 @@ async def test_finalize_buy_order_applies_the_stamp_to_base_orders_only(
     async def fake_notify_trade(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    async def fake_reset_unsellable(_symbol: str) -> None:
+    async def fake_reset_unsellable(_symbol: str, *, dependencies=None) -> None:
         return None
 
     def fake_log_persisted(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr(orders_module, "persist_buy_trade", fake_persist_buy_trade)
-    monkeypatch.setattr(
-        Orders, "_has_valid_buy_fill", staticmethod(lambda _status: True)
-    )
+    monkeypatch.setattr(finalization, "persist_buy_trade", fake_persist_buy_trade)
+    monkeypatch.setattr(finalization, "has_valid_buy_fill", lambda _status: True)
     monkeypatch.setattr(orders.placement_workflow, "log_persisted", fake_log_persisted)
-    monkeypatch.setattr(orders, "_reset_unsellable_state", fake_reset_unsellable)
+    monkeypatch.setattr(finalization, "reset_unsellable_state", fake_reset_unsellable)
     monkeypatch.setattr(orders.monitoring, "notify_trade", fake_notify_trade)
 
-    finalized = await orders._finalize_buy_order(
+    finalized = await finalization.finalize_buy_order(
         status,
         _config(),
         original_order=dict(status),
+        dependencies=orders.dca.finalization,
     )
 
     assert finalized is True

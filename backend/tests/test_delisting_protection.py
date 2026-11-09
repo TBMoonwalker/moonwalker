@@ -495,7 +495,7 @@ async def test_central_order_guard_blocks_every_buy_role(
         "evaluate_buy",
         block_delisting_buy,
     )
-    monkeypatch.setattr(orders, "_execute_budgeted_buy_order", execute_buy)
+    monkeypatch.setattr(orders.dca, "_execute_budgeted_buy_order", execute_buy)
 
     accepted = await orders.receive_buy_order(
         {

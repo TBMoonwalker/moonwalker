@@ -96,7 +96,9 @@ async def test_market_tp_sell_proceeds_with_verified_price(monkeypatch) -> None:
     async def fake_receive_sell_order(order, _config) -> None:
         sell_calls.append(order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, bid_price="111.0")
 
     await dca._Dca__calculate_tp(110.5, _build_trades(), _build_policy())
@@ -121,7 +123,9 @@ async def test_market_tp_sell_aborts_when_fresh_price_below_tp(
     async def fake_receive_sell_order(_order, _config) -> None:
         sell_calls.append(_order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, bid_price="109.5", stat_payloads=stat_payloads)
 
     await dca._Dca__calculate_tp(111.0, _build_trades(), _build_policy())
@@ -142,7 +146,9 @@ async def test_market_stop_loss_proceeds_when_fresh_price_within_bound(
     async def fake_receive_sell_order(order, _config) -> None:
         sell_calls.append(order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, bid_price="94.0")
 
     await dca._Dca__calculate_tp(94.0, _build_trades(), _build_policy())
@@ -165,7 +171,9 @@ async def test_market_stop_loss_aborts_when_fresh_price_recovered(
     async def fake_receive_sell_order(_order, _config) -> None:
         sell_calls.append(_order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, bid_price="96.0", stat_payloads=stat_payloads)
 
     await dca._Dca__calculate_tp(94.0, _build_trades(), _build_policy())
@@ -184,7 +192,9 @@ async def test_market_trailing_exit_uses_pnl_inverted_bound(monkeypatch) -> None
     async def fake_receive_sell_order(order, _config) -> None:
         sell_calls.append(order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, bid_price="109.5")
 
     trades = _build_trades()
@@ -209,7 +219,9 @@ async def test_market_trailing_exit_aborts_when_fresh_price_drops_out(
     async def fake_receive_sell_order(_order, _config) -> None:
         sell_calls.append(_order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, bid_price="108.0")
 
     trades = _build_trades()
@@ -230,7 +242,9 @@ async def test_market_autopilot_timeout_exit_uses_sl_inverted_bound(
     async def fake_receive_sell_order(order, _config) -> None:
         sell_calls.append(order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, bid_price="95.5")
 
     policy = _build_policy(stop_loss_timeout=1)
@@ -253,7 +267,9 @@ async def test_market_autopilot_timeout_exit_aborts_when_fresh_price_falls_out(
     async def fake_receive_sell_order(_order, _config) -> None:
         sell_calls.append(_order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, bid_price="94.0")
 
     policy = _build_policy(stop_loss_timeout=1)
@@ -278,7 +294,9 @@ async def test_market_sell_aborts_when_price_fetch_fails(
     async def fake_receive_sell_order(_order, _config) -> None:
         sell_calls.append(_order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, fetch_error=fetch_error)
 
     await dca._Dca__calculate_tp(111.0, _build_trades(), _build_policy())
@@ -295,7 +313,9 @@ async def test_market_sell_aborts_when_price_fetch_returns_empty(monkeypatch) ->
     async def fake_receive_sell_order(_order, _config) -> None:
         sell_calls.append(_order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, bid_price=None)
 
     await dca._Dca__calculate_tp(111.0, _build_trades(), _build_policy())
@@ -313,7 +333,9 @@ async def test_limit_sell_mode_skips_exit_price_fetch(monkeypatch) -> None:
     async def fake_receive_sell_order(order, _config) -> None:
         sell_calls.append(order)
 
-    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
+    )
     _patch_engine(dca, monkeypatch, bid_price="111.0", fetch_calls=fetch_calls)
 
     await dca._Dca__calculate_tp(111.0, _build_trades(), _build_policy())

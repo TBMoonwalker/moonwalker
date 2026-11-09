@@ -115,7 +115,7 @@ async def test_stale_buy_decision_aborts_before_any_exchange_work() -> None:
     evaluated_trade = _trade()
     reader = _FreshTradeReader(_trade(execution_count=3))
     orders = Orders()
-    orders.trades = reader  # type: ignore[assignment]
+    orders.routing.trades = reader  # type: ignore[assignment]
     order = {
         "symbol": "BTC/USDC",
         "lifecycle_snapshot": LifecycleSnapshotIdentity.from_trade(
@@ -162,13 +162,13 @@ async def test_matching_and_absent_snapshots_remain_admissible() -> None:
     current_trade = _trade()
     reader = _FreshTradeReader(current_trade)
     orders = Orders()
-    orders.trades = reader  # type: ignore[assignment]
+    orders.routing.trades = reader  # type: ignore[assignment]
 
-    assert await orders._order_snapshot_is_current(
+    assert await orders.routing.order_snapshot_is_current(
         {"symbol": "BTC/USDC"},
         config,
     )
-    assert await orders._order_snapshot_is_current(
+    assert await orders.routing.order_snapshot_is_current(
         {
             "symbol": "BTC/USDC",
             "lifecycle_snapshot": LifecycleSnapshotIdentity.from_trade(

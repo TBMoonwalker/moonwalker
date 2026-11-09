@@ -1,5 +1,4 @@
 import pytest
-import service.orders as orders_module
 from service.ai_trust import AiTrustEntryGate
 from service.orders import Orders
 
@@ -24,7 +23,7 @@ async def test_receive_buy_order_rejects_global_pause(monkeypatch) -> None:
         fake_get_trades_for_orders,
     )
     monkeypatch.setattr(
-        orders,
+        orders.dca,
         "_execute_budgeted_buy_order",
         fail_execute_budgeted_buy_order,
     )
@@ -75,9 +74,12 @@ async def test_receive_buy_order_rejects_ai_warning_enforced_entry(
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
-    monkeypatch.setattr(orders_module, "evaluate_entry_enforcement", fake_ai_gate)
     monkeypatch.setattr(
-        orders,
+        "service.dca.order_lifecycle.evaluate_entry_enforcement",
+        fake_ai_gate,
+    )
+    monkeypatch.setattr(
+        orders.dca,
         "_execute_budgeted_buy_order",
         fail_execute_budgeted_buy_order,
     )
@@ -128,9 +130,12 @@ async def test_receive_buy_order_rejects_ai_unscored_enforced_entry(
         "get_trades_for_orders",
         fake_get_trades_for_orders,
     )
-    monkeypatch.setattr(orders_module, "evaluate_entry_enforcement", fake_ai_gate)
     monkeypatch.setattr(
-        orders,
+        "service.dca.order_lifecycle.evaluate_entry_enforcement",
+        fake_ai_gate,
+    )
+    monkeypatch.setattr(
+        orders.dca,
         "_execute_budgeted_buy_order",
         fail_execute_budgeted_buy_order,
     )
@@ -173,7 +178,7 @@ async def test_receive_buy_order_rejects_paused_mission(monkeypatch) -> None:
         fake_get_trades_for_orders,
     )
     monkeypatch.setattr(
-        orders,
+        orders.dca,
         "_execute_budgeted_buy_order",
         fail_execute_budgeted_buy_order,
     )

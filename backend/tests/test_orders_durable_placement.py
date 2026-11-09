@@ -312,18 +312,18 @@ async def test_filled_buy_is_persisted_once_and_duplicate_is_deduplicated(
             return _filled_buy(order)
 
         monkeypatch.setattr(
-            orders.exchange,
+            orders.dca.exchange,
             "create_spot_market_buy",
             create_spot_market_buy,
         )
         order = _buy_order("buy-once")
         config = {"exchange": "binance", "dry_run": False}
 
-        first, first_precheck = await orders._execute_budgeted_buy_order(
+        first, first_precheck = await orders.dca._execute_budgeted_buy_order(
             order,
             config,
         )
-        second, second_precheck = await orders._execute_budgeted_buy_order(
+        second, second_precheck = await orders.dca._execute_budgeted_buy_order(
             order,
             config,
         )
@@ -364,12 +364,12 @@ async def test_lost_buy_response_is_retained_without_blind_retry(
             )
 
         monkeypatch.setattr(
-            orders.exchange,
+            orders.dca.exchange,
             "create_spot_market_buy",
             create_spot_market_buy,
         )
         order = _buy_order("buy-indeterminate")
-        result, precheck = await orders._execute_budgeted_buy_order(
+        result, precheck = await orders.dca._execute_budgeted_buy_order(
             order,
             {"exchange": "binance", "dry_run": False},
         )
@@ -416,17 +416,17 @@ async def test_accepted_buy_finalization_failure_blocks_new_ticker_submission(
             )
 
         monkeypatch.setattr(
-            orders.exchange,
+            orders.dca.exchange,
             "create_spot_market_buy",
             accepted_then_failed,
         )
         config = {"exchange": "binance", "dry_run": False}
 
-        first, first_precheck = await orders._execute_budgeted_buy_order(
+        first, first_precheck = await orders.dca._execute_budgeted_buy_order(
             _buy_order("buy-accepted-first"),
             config,
         )
-        second, second_precheck = await orders._execute_budgeted_buy_order(
+        second, second_precheck = await orders.dca._execute_budgeted_buy_order(
             _buy_order("buy-fresh-ticker"),
             config,
         )
@@ -461,14 +461,14 @@ async def test_definitive_buy_failure_is_rejected_and_can_use_new_operation(
             _order: dict[str, Any],
             _config: dict[str, Any],
         ) -> None:
-            orders.exchange._last_buy_precheck_result = {
+            orders.dca.exchange._last_buy_precheck_result = {
                 "ok": False,
                 "reason": "insufficient_quote_balance",
             }
             return None
 
-        monkeypatch.setattr(orders.exchange, "create_spot_market_buy", reject_buy)
-        result, precheck = await orders._execute_budgeted_buy_order(
+        monkeypatch.setattr(orders.dca.exchange, "create_spot_market_buy", reject_buy)
+        result, precheck = await orders.dca._execute_budgeted_buy_order(
             _buy_order("buy-rejected"),
             {"exchange": "binance", "dry_run": False},
         )
@@ -493,7 +493,7 @@ async def test_proactive_limit_placement_persists_intent_and_trade_metadata(
         await model.OpenTrades.create(symbol="XPL/USDC")
         orders = Orders()
         fake_exchange = _FakeProactiveExchange()
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
 
         armed = await orders.arm_tp_limit_order(
             {
@@ -538,7 +538,7 @@ async def test_proactive_limit_lost_response_stays_indeterminate(
             )
 
         monkeypatch.setattr(fake_exchange, "place_spot_limit_sell", lose_response)
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
 
         order = {
             "operation_id": "durable-tp-lost",
@@ -578,7 +578,7 @@ async def test_proactive_limit_definitive_failure_is_rejected(
             return None
 
         monkeypatch.setattr(fake_exchange, "place_spot_limit_sell", reject_order)
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
 
         armed = await orders.arm_tp_limit_order(
             {
@@ -607,7 +607,7 @@ async def test_proactive_limit_persistence_failure_uses_durable_cancel_child(
     try:
         orders = Orders()
         fake_exchange = _FakeProactiveExchange()
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
 
         armed = await orders.arm_tp_limit_order(
             {
@@ -641,7 +641,7 @@ async def test_lost_compensation_response_is_not_submitted_twice(tmp_path) -> No
     try:
         orders = Orders()
         fake_exchange = _FakeProactiveExchange(indeterminate_cancel=True)
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
         order = {
             "operation_id": "durable-tp-cancel-lost",
             "symbol": "MISSING/USDC",
@@ -696,7 +696,7 @@ async def test_definitive_sell_rejection_is_durable_and_not_retried(
         await model.OpenTrades.create(symbol="ETH/USDC")
         orders = Orders()
         fake_exchange = _FakeRejectedSellExchange()
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
         sell_order = {
             "operation_id": "durable-sell-rejected",
             "symbol": "ETH/USDC",
@@ -751,7 +751,7 @@ async def test_lost_sell_response_stays_indeterminate(
         await model.OpenTrades.create(symbol="SOL/USDC")
         orders = Orders()
         fake_exchange = _FakeIndeterminateSellExchange()
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
 
         await orders.receive_sell_order(
             {
@@ -825,6 +825,7 @@ async def test_filled_sell_advances_through_atomic_persistence(
             _status: dict[str, Any],
             _config: dict[str, Any],
             *,
+            dependencies=None,
             placement_operation_id: str | None = None,
         ) -> None:
             await orders.placement_intents.transition(
@@ -833,8 +834,10 @@ async def test_filled_sell_advances_through_atomic_persistence(
             )
 
         monkeypatch.setattr(fake_exchange, "create_spot_sell", filled_sell)
-        monkeypatch.setattr(orders, "_finalize_completed_sell", persist_sell)
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        monkeypatch.setattr(
+            "service.dca.order_lifecycle.finalize_completed_sell", persist_sell
+        )
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
 
         await orders.receive_sell_order(
             {
@@ -890,12 +893,13 @@ async def test_limit_fallback_uses_distinct_durable_child_identity(
         await model.OpenTrades.create(symbol="LINK/USDC")
         orders = Orders()
         fake_exchange = _FakeLimitFallbackExchange()
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
 
         async def persist_sell(
             _status: dict[str, Any],
             _config: dict[str, Any],
             *,
+            dependencies=None,
             placement_operation_ids: list[str] | None = None,
         ) -> None:
             async with in_transaction() as connection:
@@ -904,7 +908,9 @@ async def test_limit_fallback_uses_distinct_durable_child_identity(
                     connection,
                 )
 
-        monkeypatch.setattr(orders, "_finalize_completed_sell", persist_sell)
+        monkeypatch.setattr(
+            "service.dca.order_lifecycle.finalize_completed_sell", persist_sell
+        )
         await orders.receive_sell_order(
             {
                 "operation_id": "durable-limit-parent",
@@ -971,7 +977,7 @@ async def test_limit_sell_missing_id_does_not_submit_market_fallback(tmp_path) -
         await model.OpenTrades.create(symbol="NEAR/USDC")
         orders = Orders()
         fake_exchange = _FakeMissingIdLimitExchange()
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
 
         await orders.receive_sell_order(
             {
@@ -1034,7 +1040,7 @@ async def test_indeterminate_market_fallback_blocks_parent_retry(
         await model.OpenTrades.create(symbol="AVAX/USDC")
         orders = Orders()
         fake_exchange = _FakeLimitFallbackExchange(indeterminate_market=True)
-        orders.exchange = fake_exchange  # type: ignore[assignment]
+        orders.dca.exchange = fake_exchange  # type: ignore[assignment]
         sell_order = {
             "operation_id": "durable-limit-loss",
             "symbol": "AVAX/USDC",
@@ -1096,7 +1102,7 @@ async def test_partial_market_fallback_persists_both_placement_legs(
         )
         await model.OpenTrades.create(symbol="ATOM/USDC")
         orders = Orders()
-        orders.exchange = _FakeLimitFallbackExchange(  # type: ignore[assignment]
+        orders.dca.exchange = _FakeLimitFallbackExchange(  # type: ignore[assignment]
             partial_market=True
         )
 
