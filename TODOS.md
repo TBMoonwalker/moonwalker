@@ -2,20 +2,6 @@
 
 ## Next up
 
-### Add an operator repair path for quarantined classic-DCA placement intents
-
-**Status:** Recorded 2026-11-07 during investigation of a reported startup lockout after upgrading to the latest main. The same-day fix (below) removed the most common trigger; this entry is the remaining operator-exit gap.
-
-**What:** A quarantined placement intent (`quarantined`/`restored_quarantined`) keeps the fail-closed startup gate in `app.py` (`reconcile().ready is False` via `list_action_required()`) red forever: `QUARANTINED` is terminal with no valid transition (`_VALID_TRANSITIONS` in `service/placement_intents.py`), and no endpoint releases a classic-DCA intent — the only escape is manual SQLite surgery. Only accumulation orders have a repair path (`POST /accumulation/repair`, `service/accumulation/repair.py`, served in the accumulation `_repair_only()` mode). Add a mode-neutral recovery affordance for classic-DCA quarantined intents, e.g. extend repair-only mode to them and expose a lookup-only endpoint that (a) reconciles the quarantined order under the currently configured credentials and applies terminal evidence through the existing `PlacementRecoveryHandler.resume` path, or (b) records an explicit operator dismissal into a non-blocking terminal disposition after review.
-
-**Why:** The startup error "Exchange placement reconciliation requires operator action before trading can start: \<operation_id\>" names an operator action that does not exist for classic-DCA intents. Any quarantine cause (legacy unscoped `accepted`/`filled` intent surviving a pre-`075fe4f` upgrade, `local_recovery_failed`, `exchange_lookup_unavailable`, account-scope change, `limit_order_missing_id`) can end in a permanent lockout; the 2026-11-07 startup fix only completes legacy unscoped `persisted` intents (no exchange I/O), so the remaining states still have no exit.
-
-**Context:** 2026-11-07 investigation of the reported startup lockout (a `limit_sell` intent quarantined at startup after upgrading to the latest main). The scope gate added in `075fe4f` (2026-10-24) quarantines every nonterminal intent whose `request_json` lacks `_execution_scope`; legacy `persisted` intents now complete before the gate (regression test `test_legacy_unscoped_persisted_intent_completes_without_lookup`), while I/O-requiring legacy states stay quarantined as codified by `test_legacy_unscoped_result_stays_unresolved_without_invented_binding` and the runtime dedup guard `test_workflow_does_not_complete_unscoped_saved_result`.
-
-**Depends on:** The startup gate and `AccumulationRepairOnlyMiddleware` in `app.py`; the accumulation repair flow is the reference pattern. The completed backup-classification entry (2026-11-08) left a follow-up here: point its `quarantined_intents` finding's `next_action` copy at this repair endpoint once it ships.
-
-**Priority:** P2
-
 ### Upgrade to Litestar 3.x and pandas 4.x after release
 
 **Status:** Recorded 2026-11-07 as the follow-up of the completed "Prepare
@@ -225,6 +211,77 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Add an operator repair path for quarantined classic-DCA placement intents
+
+**Status:** Completed 2026-11-09. Recorded 2026-11-07 during investigation of
+a reported startup lockout after upgrading to the latest main: a
+`limit_sell` intent quarantined at startup (most likely
+`reconciliation_account_scope_unverified` on a legacy unscoped intent) had
+no operator exit, so the instance crashed on every boot with "Exchange
+placement reconciliation requires operator action before trading can start".
+The 2026-11-07 same-day fix removed the most common trigger (legacy unscoped
+`persisted` intents now complete before the gate); this entry closed the
+remaining operator-exit gap.
+
+**What shipped:**
+- Repair-only startup mode now covers quarantined classic-DCA intents: when
+  reconciliation reports `ready is False` with action-required work and no
+  other nonterminal work (`PlacementReconciliationSummary.remaining == 0`),
+  `app.py` serves recovery instead of exiting. The accumulation branch keeps
+  precedence; any remaining nonterminal work still fails closed.
+  `AccumulationRepairOnlyMiddleware` became `RecoveryOnlyMiddleware` and
+  gates both modes (recovery reads + `POST /accumulation/repair` +
+  `POST /orders/placement-recovery/{id}/repair|dismiss` allowed; websockets
+  closed with 1013; everything else 503/409 with `code: recovery_only`).
+- `PlacementRepairService` (`backend/service/placement_repair.py`) with
+  `list_quarantined()` / `repair()` / `dismiss()`. Repair is lookup-only:
+  it resolves the order under the currently configured credentials and
+  applies terminal evidence through the same `resume` handler startup
+  reconciliation uses (`operator_repair_fill_resumed`,
+  `operator_repair_open_limit_reattached`, `operator_repair_cancel_confirmed`,
+  `operator_repair_identity_not_found`,
+  `operator_repair_exchange_order_{state}`); inconclusive evidence leaves the
+  intent quarantined. Dismissal records a terminal `rejected` disposition
+  with reason code `operator_dismissed` and the operator's required note as
+  the audit trail.
+- The quarantine exit lives in
+  `PlacementIntentService.release_quarantine()` (only
+  `quarantined`/`restored_quarantined` → `completed`/`rejected`), so the
+  sticky-quarantine invariant of `_VALID_TRANSITIONS` stays structural:
+  normal transitions still cannot move a quarantined row.
+- Endpoints in `backend/controller/orders.py`: `GET
+  /orders/placement-recovery`, `POST
+  /orders/placement-recovery/{operation_id}/repair`, `POST
+  /orders/placement-recovery/{operation_id}/dismiss` (body
+  `{"note": ...}` required). Errors: 404 `not_found`, 409 `conflict`
+  (not-quarantined or accumulation-routed intents), 400 `invalid_request`.
+- Dashboard: `PlacementRecoveryCard.vue` on the Trading overview lists every
+  quarantined intent with Repair and note-gated Dismiss actions and a
+  restart hint; it is fetch-based, so it works while websockets are closed in
+  recovery mode. API client `api/placementRecovery.ts`, composable
+  `usePlacementRecovery.ts`, types in `types/placementRecovery.ts`, vitest
+  spec `tests-vitest/placement-recovery-card.test.ts` (9 tests) with the
+  component and composable ratcheted into the coverage guard.
+- Tests: `backend/tests/test_placement_repair.py` (24 tests: listing,
+  release transitions, every repair evidence mapping, dismissal audit,
+  conflict/not-found/invalid errors, accumulation routing, lookup-only
+  guard), plus startup-mode and middleware-gate tests in
+  `backend/tests/test_app_startup.py`.
+- The backup-classification `quarantined_intents` finding's `next_action`
+  copy now points at the Placement recovery card (its 2026-11-08 follow-up
+  is resolved).
+- Docs: `docs/operations.md` "Startup Recovery", `docs/api.md` Orders
+  section, and the 6.4.0.0 changelog entry.
+
+**Immediate-unlock procedure for a locked instance (before the fixed
+build):** query `placement_intents` for the `operation_id` from the startup
+error, inspect that order's state on the exchange under the configured
+credentials, and only then either upgrade and use the card, or move the row
+to a verified terminal state (`state`, `reason_code`, `error_message`,
+`completed_at`) — see `docs/operations.md` "Startup Recovery".
+
+**Priority:** P2
 
 ### Split service/orders.py into the dca/ package and a mode-neutral facade
 
@@ -445,10 +502,10 @@ been written).
   no-force-restore statement in `docs/operations.md` "Backup And Restore",
   and the 6.4.0.0 changelog entry.
 
-**Follow-up:** Once "Add an operator repair path for quarantined classic-DCA
-placement intents" ships, point the `quarantined_intents` finding's
-`next_action` copy at that repair endpoint (copy update ships in that
-changeset).
+**Follow-up:** Resolved 2026-11-09 with the completed "Add an operator repair
+path for quarantined classic-DCA placement intents" entry: the
+`quarantined_intents` finding's `next_action` copy now points at the
+dashboard's Placement recovery card.
 
 **Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/backup-classification-replan-20261108.md`
 

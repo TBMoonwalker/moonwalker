@@ -412,8 +412,10 @@ class BackupService:
                             "explicit repair before trading can use them.",
                             detail={"count": len(quarantined_intents)},
                             next_action=(
-                                'See docs/operations.md, "Startup Recovery", '
-                                "for the repair flow."
+                                'See docs/operations.md, "Startup Recovery". '
+                                "In the dashboard, resolve each intent with "
+                                "the placement recovery card (repair or "
+                                "dismiss), then restart Moonwalker."
                             ),
                         )
                     )

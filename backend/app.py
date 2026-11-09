@@ -77,6 +77,7 @@ class RuntimeState:
     autopilot_memory_service: AutopilotMemoryService | None = None
     signal_plugin: Signal | None = None
     background_tasks: list[asyncio.Task[Any]] = field(default_factory=list)
+    recovery_mode: str | None = None
 
 
 runtime_state = RuntimeState()
@@ -91,13 +92,26 @@ def _repair_only() -> bool:
     )
 
 
-class AccumulationRepairOnlyMiddleware(ASGIMiddleware):
-    """Keep HTTP recovery access separate from every trading and config route."""
+def _placement_recovery_action_path(path: str) -> bool:
+    """Match the explicit repair/dismiss action on one quarantined intent."""
+    return path.startswith("/orders/placement-recovery/") and (
+        path.endswith("/repair") or path.endswith("/dismiss")
+    )
+
+
+class RecoveryOnlyMiddleware(ASGIMiddleware):
+    """Keep restricted-recovery HTTP access separate from trading routes.
+
+    Two recovery modes share this gate: accumulation-only recovery
+    (``/accumulation/repair``) and placement-intent recovery
+    (``/orders/placement-recovery``). Trading workers stay stopped in both,
+    and configuration writes remain unavailable.
+    """
 
     async def handle(
         self, scope: Scope, receive: Receive, send: Send, next_app: ASGIApp
     ) -> None:
-        if not _repair_only():
+        if runtime_state.recovery_mode is None:
             await next_app(scope, receive, send)
             return
         if scope["type"] == "websocket":
@@ -111,20 +125,28 @@ class AccumulationRepairOnlyMiddleware(ASGIMiddleware):
             "/",
             "/index.html",
             "/config/all",
-            "/accumulation/activations",
-            "/accumulation/activation",
-            "/accumulation/strategies",
+            "/orders/placement-recovery",
         }
+        repairs = set()
+        if runtime_state.recovery_mode == "accumulation":
+            reads.update(
+                {
+                    "/accumulation/activations",
+                    "/accumulation/activation",
+                    "/accumulation/strategies",
+                }
+            )
+            repairs.add("/accumulation/repair")
         if (
             method in {"GET", "HEAD"}
             and (path in reads or path.startswith(("/static/", "/assets/")))
             or method == "POST"
-            and path == "/accumulation/repair"
+            and (path in repairs or _placement_recovery_action_path(path))
             or method == "OPTIONS"
         ):
             await next_app(scope, receive, send)
             return
-        body = b'{"error":"Recovery only: reconcile quarantined accumulation orders, then restart. Trading and configuration changes are unavailable.","code":"recovery_only"}'
+        body = b'{"error":"Recovery only: repair the outstanding exchange work, then restart. Trading and configuration changes are unavailable.","code":"recovery_only"}'
         await send(
             {
                 "type": "http.response.start",
@@ -229,20 +251,38 @@ async def startup() -> None:
             )
         if not reconciliation.ready or not accumulation_ready:
             if _repair_only():
+                runtime_state.recovery_mode = "accumulation"
+            elif (
+                not reconciliation.ready
+                and reconciliation.action_required
+                and reconciliation.remaining == 0
+            ):
+                # Only quarantined classic-DCA placement intents block: serve
+                # the placement recovery endpoints with every trading worker
+                # stopped, instead of exiting with no operator access.
+                runtime_state.recovery_mode = "placement"
+            if runtime_state.recovery_mode is not None:
                 runtime_state.controller_services = build_runtime_services(
                     orders=runtime_state.placement_orders,
                     accumulation=runtime_state.accumulation_runtime,
                 )
                 activate_runtime_services(runtime_state.controller_services)
-                logging.error(
-                    "Serving accumulation recovery only; all trading workers remain stopped. Restart after explicit repair."
-                )
+                if runtime_state.recovery_mode == "accumulation":
+                    logging.error(
+                        "Serving accumulation recovery only; all trading workers remain stopped. Restart after explicit repair."
+                    )
+                else:
+                    logging.error(
+                        "Serving placement intent recovery only; all trading workers remain stopped. Repair or dismiss every quarantined intent, then restart."
+                    )
                 return
             if not reconciliation.ready:
                 operations = ", ".join(reconciliation.action_required)
                 raise RuntimeError(
                     "Exchange placement reconciliation requires operator action "
-                    f"before trading can start: {operations}"
+                    f"before trading can start: {operations}. The dashboard's "
+                    "placement recovery card offers a repair or explicit "
+                    "dismissal for each quarantined intent."
                 )
             raise RuntimeError(
                 "Accumulation recovery requires operator action before trading starts."
@@ -480,8 +520,8 @@ async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
     """Own runtime tasks and services for exactly one application lifespan."""
     try:
         await startup()
-        if _repair_only():
-            # The HTTP server owns the repair session; no signal, watcher,
+        if runtime_state.recovery_mode is not None:
+            # The HTTP server owns the recovery session; no signal, watcher,
             # command worker, Autopilot or liquidation task is started.
             yield
             return
@@ -586,7 +626,7 @@ app = Litestar(
         allow_headers=["*"],
     ),
     middleware=[
-        AccumulationRepairOnlyMiddleware(),
+        RecoveryOnlyMiddleware(),
         TrustedLanHttpMiddleware(
             allowed_origins=ALLOWED_ORIGINS,
             allowed_hosts=ALLOWED_HOSTS,

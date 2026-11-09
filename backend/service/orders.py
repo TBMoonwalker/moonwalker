@@ -26,6 +26,7 @@ from service.placement_reconciliation import (
     RecoverAccumulation,
 )
 from service.placement_recovery import PlacementRecoveryHandler
+from service.placement_repair import PlacementRepairService
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
 
@@ -115,6 +116,14 @@ class Orders:
             recovery.resume,
             self.placement_intents,
             accumulation_recovery=self.accumulation_recovery,
+        )
+
+    def build_placement_repair(self) -> PlacementRepairService:
+        """Build the operator repair service over the shared recovery path."""
+        return PlacementRepairService(
+            exchange=self.exchange,
+            intents=self.placement_intents,
+            resume_placement=self._build_placement_reconciler().resume_placement,
         )
 
     async def arm_tp_limit_order(self, order: dict, config: dict) -> bool:

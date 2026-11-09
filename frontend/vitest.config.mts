@@ -28,6 +28,7 @@ export default defineConfig({
       reportsDirectory: './coverage/frontend',
       include: [
         'src/components/Heatmap.vue',
+        'src/components/PlacementRecoveryCard.vue',
         'src/components/RecoveryDcaStatus.vue',
         'src/control-center/blockers.ts',
         'src/control-center/readiness.ts',
@@ -39,6 +40,7 @@ export default defineConfig({
         'src/helpers/tradeLifecycle.ts',
         'src/composables/useConfigBackupRestore.ts',
         'src/composables/useStrategyBuilderWorkspace.ts',
+        'src/composables/usePlacementRecovery.ts',
         'src/composables/useViewport.ts',
       ],
       thresholds: {
@@ -46,6 +48,12 @@ export default defineConfig({
         branches: 72,
         functions: 89,
         lines: 84,
+        'src/components/PlacementRecoveryCard.vue': {
+          statements: 100,
+          branches: 92,
+          functions: 100,
+          lines: 100,
+        },
         'src/components/RecoveryDcaStatus.vue': {
           statements: 90,
           branches: 80,
@@ -93,6 +101,12 @@ export default defineConfig({
           branches: 82,
           functions: 100,
           lines: 95,
+        },
+        'src/composables/usePlacementRecovery.ts': {
+          statements: 93,
+          branches: 56,
+          functions: 100,
+          lines: 98,
         },
         'src/composables/useViewport.ts': {
           statements: 85,

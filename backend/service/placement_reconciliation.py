@@ -42,6 +42,7 @@ class PlacementReconciliationSummary:
     quarantined: int
     ready: bool
     action_required: tuple[str, ...]
+    remaining: int = 0
 
 
 class PlacementReconciler:
@@ -87,6 +88,7 @@ class PlacementReconciler:
             quarantined=len(action_required_rows),
             ready=not action_required and not remaining,
             action_required=action_required,
+            remaining=len(remaining),
         )
 
     async def reconcile_operation(

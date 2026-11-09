@@ -560,6 +560,90 @@ class PlacementIntentService:
         await intent.save(update_fields=["reconciliation_attempts", "updated_at"])
         return intent
 
+    async def release_quarantine(
+        self,
+        operation_id: str | None,
+        target: PlacementIntentState | str,
+        *,
+        reason_code: str,
+        error_message: str | None = None,
+        exchange_order_id: str | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> Any:
+        """Apply one explicit operator exit from quarantine to a terminal state.
+
+        Quarantine has no other outgoing transition: restarts and startup
+        reconciliation never move a quarantined row, so only this audited
+        path can return the installation to trading readiness.
+
+        Args:
+            operation_id: Durable identity of the quarantined operation.
+            target: Terminal disposition (completed or rejected).
+            reason_code: Operator-facing reason for the disposition.
+            error_message: Optional note recorded on the row.
+            exchange_order_id: Optional exchange identity to attach.
+            result: Optional terminal evidence payload to persist.
+
+        Returns:
+            The updated durable operation.
+
+        Raises:
+            ValueError: When the id is missing, the row is not quarantined,
+                or the target is not a terminal disposition.
+        """
+        normalized = str(operation_id or "").strip()
+        if not normalized:
+            raise ValueError(
+                "A durable operation id is required to release quarantine."
+            )
+        target_state = str(target)
+        if target_state not in {
+            PlacementIntentState.COMPLETED.value,
+            PlacementIntentState.REJECTED.value,
+        }:
+            raise ValueError(
+                "Quarantine release requires a terminal disposition "
+                f"(completed or rejected), got {target_state}."
+            )
+
+        async with self._lock:
+
+            async def _release() -> Any:
+                intent = await model.PlacementIntent.get(operation_id=normalized)
+                current_state = str(intent.state)
+                if current_state not in {
+                    PlacementIntentState.QUARANTINED.value,
+                    PlacementIntentState.RESTORED_QUARANTINED.value,
+                }:
+                    raise ValueError(
+                        f"Cannot release placement {normalized} from state "
+                        f"{current_state}; only quarantined rows are releasable."
+                    )
+                intent.state = target_state
+                update_fields = ["state", "updated_at"]
+                if exchange_order_id:
+                    intent.exchange_order_id = str(exchange_order_id)
+                    update_fields.append("exchange_order_id")
+                if result is not None:
+                    intent.result_json = serialize_placement_payload(result)
+                    update_fields.append("result_json")
+                if reason_code:
+                    intent.reason_code = str(reason_code)
+                    update_fields.append("reason_code")
+                if error_message is not None:
+                    intent.error_message = str(error_message)
+                    update_fields.append("error_message")
+                intent.completed_at = datetime.now(timezone.utc)
+                update_fields.append("completed_at")
+                await intent.save(update_fields=update_fields)
+                return intent
+
+            return await run_sqlite_write_with_retry(
+                _release,
+                f"releasing quarantined placement intent {normalized} "
+                f"to {target_state}",
+            )
+
     @staticmethod
     async def list_nonterminal() -> list[Any]:
         """Return all operations that startup must reconcile or quarantine."""

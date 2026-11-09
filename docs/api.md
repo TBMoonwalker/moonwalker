@@ -384,6 +384,24 @@ All mutating order endpoints use `POST`.
 | `POST` | `/orders/buy/{symbol}/{ordersize}` | Trigger a manual buy / additional safety order. |
 | `POST` | `/orders/stop/{symbol}` | Close a DCA trade's ledger at its latest tracked market price, without selling coins. |
 | `POST` | `/orders/buy/manual` | Append a manual buy row without placing an exchange order. |
+| `GET` | `/orders/placement-recovery` | List quarantined placement intents that keep the startup gate closed. |
+| `POST` | `/orders/placement-recovery/{operation_id}/repair` | Look one quarantined intent up on the exchange and apply its confirmed terminal state. |
+| `POST` | `/orders/placement-recovery/{operation_id}/dismiss` | Record an explicit operator dismissal of one quarantined intent. |
+
+Placement recovery is the operator exit for quarantined classic-DCA placement
+intents. It stays reachable while the startup gate is closed (see
+[Startup Recovery](operations.md#startup-recovery)); every other trading and
+configuration route is blocked in that mode. Repair is lookup-only: it never
+submits, cancels, or otherwise changes exchange state, and inconclusive
+evidence leaves the intent quarantined. Dismissal records a terminal
+disposition with the operator's note as the audit trail.
+
+All three endpoints answer with `{"operation_id", "status", "state",
+"message"}` for the action endpoints (`status` is `completed`, `rejected`,
+`unchanged`, or `dismissed`) and `{"intents": [...]}` for the list. Errors use
+`404` (`not_found`), `409` (`conflict`, including intents owned by the
+accumulation route), or `400` (`invalid_request`, including a dismissal
+without a note). Dismissal requires a JSON body `{"note": "..."}`.
 
 The sell, buy, and stop endpoints retain their legacy `result` field and also
 return a typed `mutation` object. Its `status` is one of `applied`,

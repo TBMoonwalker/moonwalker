@@ -12,6 +12,7 @@ from service.delisting_protection import DelistingProtectionService
 from service.exchange import Exchange
 from service.log_viewer import LogViewerService
 from service.orders import Orders
+from service.placement_repair import PlacementRepairService
 from service.statistic import Statistic
 from service.trade_replay_indicators import TradeReplayIndicatorService
 from service.trades import Trades
@@ -48,6 +49,7 @@ class RuntimeServices:
     trading_controls: TradingControlsService
     trade_replay_indicators: TradeReplayIndicatorService
     delisting_protection: DelistingProtectionService
+    placement_repair: PlacementRepairService
     accumulation: AccumulationRuntime | None = None
 
     async def shutdown(self) -> None:
@@ -103,6 +105,7 @@ def build_runtime_services(
         delisting_protection=(
             delisting_protection or DelistingProtectionService.shared()
         ),
+        placement_repair=orders_service.build_placement_repair(),
         accumulation=accumulation,
     )
 
@@ -226,6 +229,12 @@ def runtime_service_proxy(
 def runtime_service_proxy(
     service_name: Literal["delisting_protection"],
 ) -> DelistingProtectionService: ...
+
+
+@overload
+def runtime_service_proxy(
+    service_name: Literal["placement_repair"],
+) -> PlacementRepairService: ...
 
 
 def runtime_service_proxy(service_name: str) -> Any:

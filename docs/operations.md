@@ -367,6 +367,23 @@ If only paused, quarantined accumulation obligations remain, startup can instead
 serve restricted recovery access with trading workers stopped. See the
 [accumulation recovery guide](howto-recover-accumulation.md#recover-after-restore-or-upgrade).
 
+If only quarantined classic-DCA placement intents remain (with no other
+nonterminal exchange work), startup serves the restricted recovery access for
+placement intents instead of exiting. The dashboard's Placement recovery card
+lists every quarantined intent while all trading workers stay stopped, and
+each intent can be resolved with an operator action:
+
+- **Repair** looks the order up under the currently configured exchange
+  credentials and applies the confirmed terminal state through the same
+  recovery path startup reconciliation uses. Nothing is submitted, cancelled,
+  or otherwise changed on the exchange. Inconclusive evidence leaves the
+  intent quarantined so the operator can retry or dismiss it.
+- **Dismiss** records an explicit operator decision, with a required note
+  stored on the row as the audit trail, as a terminal disposition without
+  touching the exchange.
+
+Once every intent is resolved, restart Moonwalker to clear the startup gate.
+
 An accepted buy acknowledgement can omit fill details, especially for a capped
 IOC safety order. Moonwalker records that acceptance and looks up the existing
 order during startup; it does not submit another buy. Durable buy requests retain

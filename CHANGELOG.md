@@ -31,6 +31,22 @@ All notable changes to Moonwalker are documented in this file.
   as blocking and their restore button is disabled;
   there is no force-restore path. Restore behavior itself is unchanged.
   See `POST /config/backup/classify` in the API reference.
+- Operator repair path for quarantined classic-DCA placement intents: an
+  instance whose startup gate is blocked by quarantined intents alone (no
+  other nonterminal exchange work) now serves a restricted recovery mode
+  instead of exiting with no operator access. The dashboard's Placement
+  recovery card on the Trading overview lists every quarantined intent;
+  **Repair** looks the order up on the exchange under the configured
+  credentials and applies the confirmed terminal state locally (lookup-only —
+  it never submits, cancels, or otherwise changes exchange state, and
+  inconclusive evidence leaves the intent quarantined), and **Dismiss**
+  records an explicit operator decision with a required note as a terminal
+  disposition. Restart Moonwalker after every intent is resolved to clear the
+  gate. New endpoints: `GET /orders/placement-recovery`, `POST
+  /orders/placement-recovery/{operation_id}/repair`, `POST
+  /orders/placement-recovery/{operation_id}/dismiss`.
+- `docs/operations.md` "Startup Recovery" documents the placement recovery
+  mode and the safe manual procedure for instances running an unfixed build.
 
 ### Changed
 
