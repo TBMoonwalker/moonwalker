@@ -7,14 +7,6 @@ used by the runtime service graph and the repair-only startup path.
 """
 
 import helper
-from service.dca.finalization import (
-    build_tp_limit_sell_payload,
-    finalize_buy_order,
-    finalize_completed_sell,
-    has_valid_buy_fill,
-    is_sold_check_status,
-    persist_reconciled_limit_fallback,
-)
 from service.dca.order_lifecycle import (
     DcaOrderLifecycle,
     build_default_order_collaborators,
@@ -25,7 +17,6 @@ from service.placement_reconciliation import (
     PlacementReconciliationSummary,
     RecoverAccumulation,
 )
-from service.placement_recovery import PlacementRecoveryHandler
 from service.placement_repair import PlacementRepairService
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
@@ -78,43 +69,11 @@ class Orders:
 
     def _build_placement_reconciler(self) -> PlacementReconciler:
         """Build recovery callbacks for startup and accepted runtime buys."""
-        recovery = PlacementRecoveryHandler(
-            exchange=self.exchange,
-            trades=self.trades,
-            validate_buy=has_valid_buy_fill,
-            validate_sell=is_sold_check_status,
-            finalize_buy=lambda status, config, **kwargs: finalize_buy_order(
-                status,
-                config,
-                dependencies=self.dca.finalization,
-                **kwargs,
-            ),
-            finalize_sell=lambda status, config, **kwargs: finalize_completed_sell(
-                status,
-                config,
-                dependencies=self.dca.finalization,
-                **kwargs,
-            ),
-            build_limit_sell_payload=lambda trades, evidence: (
-                build_tp_limit_sell_payload(
-                    trades,
-                    evidence,
-                    dependencies=self.dca.finalization,
-                )
-            ),
-            persist_limit_fallback=lambda limit_status, config, operation_id: (
-                persist_reconciled_limit_fallback(
-                    limit_status,
-                    config,
-                    operation_id,
-                    dependencies=self.dca.finalization,
-                )
-            ),
-        )
+        recovery = self.dca.build_recovery_handler()
         return PlacementReconciler(
-            self.exchange,
+            self.dca.exchange,
             recovery.resume,
-            self.placement_intents,
+            self.dca.placement_intents,
             accumulation_recovery=self.accumulation_recovery,
         )
 

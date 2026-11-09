@@ -168,15 +168,13 @@ class DcaOrderLifecycle:
             utils=self.utils,
         )
 
-    def _build_placement_reconciler(self) -> PlacementReconciler:
-        """Build the accepted-buy recovery reconciler for the bybit branch."""
-        if self.reconciler_factory is not None:
-            return self.reconciler_factory()
-        return self._build_default_placement_reconciler()
+    def build_recovery_handler(self) -> PlacementRecoveryHandler:
+        """Build the DCA recovery handler with the call-time finalization context.
 
-    def _build_default_placement_reconciler(self) -> PlacementReconciler:
-        """Build a recovery reconciler without the accumulation seam."""
-        recovery = PlacementRecoveryHandler(
+        Single owner of the recovery callback wiring: the bybit default reconciler
+        and the root placement-recovery entry both compose this handler.
+        """
+        return PlacementRecoveryHandler(
             exchange=self.exchange,
             trades=self.trades,
             validate_buy=has_valid_buy_fill,
@@ -209,6 +207,16 @@ class DcaOrderLifecycle:
                 )
             ),
         )
+
+    def _build_placement_reconciler(self) -> PlacementReconciler:
+        """Build the accepted-buy recovery reconciler for the bybit branch."""
+        if self.reconciler_factory is not None:
+            return self.reconciler_factory()
+        return self._build_default_placement_reconciler()
+
+    def _build_default_placement_reconciler(self) -> PlacementReconciler:
+        """Build a recovery reconciler without the accumulation seam."""
+        recovery = self.build_recovery_handler()
         return PlacementReconciler(
             self.exchange,
             recovery.resume,
