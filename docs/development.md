@@ -25,7 +25,9 @@ For the operator-facing behavior, see [safety-order sizing](dynamic-so.md),
 ## Maintained design notes
 
 - [Dashboard history loading](designs/delta-loading.md): browser caching,
-  full-state versus paginated streams, and proposed server optimizations.
+  the implemented server-side timeline cache with its evaluation, the
+  decision against the proposed incremental fetch, and the remaining
+  proposal for a configurable snapshot cadence.
 - [Denying future entries](designs/denylist-symbol-from-open-trade.md):
   entry-only semantics, server-side append, and full-form replacement limits.
 - [Product record](../PRODUCT.md) and [design system](../DESIGN.md):

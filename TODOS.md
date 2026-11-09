@@ -87,21 +87,6 @@ confirmed it: the full frontend CI passed unmodified, and the typescript
 
 **Priority:** P3
 
-## Dashboard history
-
-### Evaluate server caching and incremental timeline loading
-
-**Status:** Proposed; browser caching and profit-tab persistence are implemented.
-
-**What:** Measure repeated timeline resampling under concurrent dashboard use.
-Consider a short-lived server cache with snapshot-write invalidation first,
-then an additive delta cursor only if measurements justify it. Preserve the
-existing full response and verify bucket updates, disconnect recovery, and
-retention cleanup. Configurable snapshot cadence is a separate optional step.
-
-**Design:** [Dashboard history loading](docs/designs/delta-loading.md).
-Open trades remain full-state and closed history remains paginated.
-
 ## Control Center verification
 
 ### Verify remaining rendered accessibility observations
@@ -152,6 +137,66 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Evaluate server caching and incremental timeline loading
+
+**Status:** Completed 2026-11-09 as three CI-green code commits on
+`fixed-todos` (perf, tests, harness) plus the docs commit.
+
+**Plan of record:**
+`~/.gstack/projects/TBMoonwalker-moonwalker/timeline-server-cache-plan-20261109.md`
+
+**What was measured:** the new `scripts/benchmark_timeline.py` harness
+seeds throwaway databases at the real 60-second snapshot density
+(16 d / ~23k rows like the current live instance, 1 y / ~525k rows steady
+state, 2 y / ~1.05M rows) plus a `sqlite3` backup copy of the live
+database, and runs sequential, 4/8/16-concurrent, and 16-client burst
+scenarios. At the steady-state 1-year size the uncached endpoint resampled
+on every fetch: p50 4.4 s per fetch, and 16 concurrent clients queued 16
+resamples with p50 32.1 s / p95 64.8 s per fetch. The response payload was
+already bounded (206 points, ~17.7 KB JSON), so the cost was server CPU and
+SQLite I/O, not bandwidth.
+
+**What shipped:**
+- `Statistic.get_profit_overall_timeline` caches the resampled timeline for
+  one snapshot interval (60 s): single-flight rebuild (lock plus
+  double-checked expiry), immutable cached value returned as a per-fetch
+  list copy, and query errors left uncached.
+- Every `UpnlHistory` write invalidates the cache process-wide: snapshot
+  writes happen in `_get_profit_base` from the controller graph, the DCA
+  engine, and the signal plugins (each its own `Statistic` instance), so a
+  shared data generation advances on any write and the next fetch reflects
+  the new bucket immediately.
+- Retention cleanup fires a new `Housekeeper.on_upnl_history_changed`
+  hook, wired by `app.py` to `statistic.invalidate_timeline_cache`.
+- The endpoint's path, arguments, response shape, and the per-request 409
+  unverified-valuation guard are unchanged; disconnect recovery is
+  unchanged (stateless endpoint; the client store already treats a failed
+  refresh as unverified and retries).
+- After the cache: the same scenarios resample once per window (16→1 and
+  32→1 resamples; warm fetches are sub-millisecond cache hits) and the
+  worst concurrent wait drops from 64.8 s to 5.9 s. Full before/after
+  reports: `~/.gstack/projects/TBMoonwalker-moonwalker/benchmark-reports/`
+  (`2026-11-09T191632Z-timeline-server.json` before,
+  `2026-11-09T192949Z-timeline-server.json` after).
+
+**Decision:** the proposed P2 incremental delta cursor is not justified
+(measurement evidence in the design doc) — no cursor state and no second
+response shape; the no-argument endpoint remains the sole contract. P3
+(configurable snapshot cadence) remains a proposal in
+[Dashboard history loading](docs/designs/delta-loading.md). Open trades
+remain full-state and closed history remains paginated.
+
+**Verification:** 10 new unit tests in
+`backend/tests/test_statistic_timeline_cache.py` (cache hit, per-fetch
+copy, same- and cross-instance write invalidation, TTL expiry,
+single-flight, retention hook with and without deletions, uncached query
+errors, cached/fresh-build equality) plus the endpoint and startup suites;
+full CI green (`cd scripts && ./ci.sh`) — 2,292 backend tests, 374
+frontend tests, type checks, lint, and coverage floors. No API, config, or
+schema change.
+
+**Priority:** P3
 
 ### Remove the service/orders.py compatibility facade
 

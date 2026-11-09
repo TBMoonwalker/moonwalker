@@ -71,6 +71,14 @@ All notable changes to Moonwalker are documented in this file.
   plugins now use the DCA lifecycle directly. The DCA recovery-handler
   wiring is owned once on `DcaOrderLifecycle.build_recovery_handler()`.
   Internal refactor — no API, config, schema, or log-message change.
+- Cache the resampled profit-overall timeline on the server for one snapshot
+  interval (60 s): concurrent dashboard clients now share a single rebuild
+  per window instead of each re-reading and re-resampling the full 12-month
+  window, and a newly stored snapshot (from any service instance) or a
+  retention cleanup drops the cache so the next fetch reflects it. The
+  endpoint's path, arguments, and response are unchanged;
+  `docs/designs/delta-loading.md` records the evaluation and the decision
+  against the proposed incremental fetch.
 
 ### Fixed
 
