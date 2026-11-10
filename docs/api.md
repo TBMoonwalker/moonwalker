@@ -37,8 +37,8 @@ runtime and multiple concurrent dashboard clients.
 Configuration editors must read `config_revision` from `GET /config/all` and
 send it as the decimal `X-Moonwalker-Config-Revision` header on either write
 endpoint. Successful writes return the new `config_revision`. A missing, invalid
-or stale revision returns HTTP 409; reload the form and reconcile changes before
-retrying. Older API clients must be updated to send the header. Configuration
+or stale revision returns HTTP 409; reload the form and re-apply the pending
+edits before retrying. Older API clients must be updated to send the header. Configuration
 restores and operational configuration changes also invalidate older revisions.
 
 Notes:
@@ -73,10 +73,13 @@ Notes:
    `{"confirm": true}`. Pausing blocks new exposure but does not block protective
   exits for existing positions.
 - `POST /config/denylist/deny` expects a JSON body like
-   `{"symbol": "FO0/USDT"}` and returns the resulting `pair_denylist` plus a
-   `denied` marker. The append de-duplicates the base token and writes under a
-  global config write lock so concurrent dashboard clients cannot clobber each
-  other's denylists. Reversal is done by editing `pair_denylist`.
+   `{"symbol": "FO0/USDT"}` and returns the resulting `pair_denylist`, a
+   `denied` marker, and the advanced `config_revision`. The append de-duplicates
+   the base token and writes under a global config write lock so concurrent
+  dashboard clients cannot clobber each other's denylists. Each append advances
+  the config revision, so a form save that predates it is rejected with 409
+  instead of overwriting the new entry. Reversal is done by editing
+  `pair_denylist` in a freshly loaded form.
 - `POST /config/backup/restore` expects a JSON body with `backup`,
   `confirm: true`, and optional `restore_trade_data`. Restore drains active
   exchange-order work, rejects new order work until replacement completes, and

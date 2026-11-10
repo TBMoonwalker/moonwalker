@@ -439,3 +439,39 @@ test('ensureFresh resolves with the held snapshot when the freshness check canno
         1,
     )
 })
+
+test('shared config snapshot store accepts deny-origin invalidations from other tabs', () => {
+    const snapshotStore = useSharedConfigSnapshot()
+    snapshotStore.applySnapshot(
+        { dry_run: true, pair_denylist: '' },
+        '2026-03-27T09:00:00Z',
+    )
+
+    FakeBroadcastChannel.instances[0].emit({
+        at: 64,
+        id: 'external-deny-1',
+        origin: 'deny',
+        senderId: 'other-tab',
+        updatedAt: '2026-03-27T09:10:00Z',
+    })
+
+    assert.equal(snapshotStore.lastExternalInvalidationOrigin.value, 'deny')
+    assert.equal(snapshotStore.externalInvalidationToken.value, 1)
+    assert.equal(snapshotStore.hasKnownNewerSnapshot.value, true)
+})
+
+test('shared config snapshot store emits deny local invalidation over BroadcastChannel', () => {
+    const snapshotStore = useSharedConfigSnapshot()
+    snapshotStore.applySnapshot(
+        { dry_run: true, config_updated_at: '2026-03-27T09:00:00Z' },
+        '2026-03-27T09:00:00Z',
+    )
+
+    snapshotStore.emitLocalInvalidation('deny')
+
+    assert.equal(FakeBroadcastChannel.instances[0].messages.length, 1)
+    const message = FakeBroadcastChannel.instances[0].messages[0]
+    assert.equal(message.origin, 'deny')
+    assert.equal(typeof message.id, 'string')
+    assert.equal(typeof message.senderId, 'string')
+})

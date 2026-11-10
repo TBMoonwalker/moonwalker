@@ -102,12 +102,26 @@ The old theme-ownership concern is already addressed by the shared theme store.
 
 ### Review stale full-form saves against concurrent denylist appends
 
-**Status:** Design follow-up; atomic append is implemented.
+**Status:** Resolved (2026-11-09); the server-side revision check is
+implemented and the stale-full-form scenario is covered by regression tests.
 
-**What:** The append endpoint preserves concurrent appends, but full config
-saves replace the list. Verify stale-form conflict handling and decide whether
-server-side revision checks are needed to avoid silently losing a newer deny.
-Preserve the ability to intentionally remove tokens through configuration.
+**What:** Verified that a deny append advances the config revision in the same
+transaction as its write, so a full config save based on an older generation is
+rejected with HTTP 409 and the newer deny survives; the dashboard shows a
+stale-configuration banner and the operator reloads and re-applies edits.
+Intentional token removal remains possible through a freshly loaded form
+(whole-list replacement). The deny endpoint returns the advanced
+`config_revision`, and the open-trades deny action broadcasts a `deny`
+invalidation so other tabs notice immediately. Regression coverage:
+`backend/tests/test_denylist_append.py`
+(`test_stale_full_form_save_cannot_lose_concurrent_deny`),
+`backend/tests/test_denylist_deny_endpoint.py`, and the two-client E2E flow
+in `frontend/tests-e2e/control-center.spec.ts`
+("a deny append rejects the stale form save until the operator reloads").
+
+**Decision:** Keep the revision check as the only conflict mechanism; no
+per-field merge on 409. Re-applying unsaved draft edits onto a fresh snapshot
+after a rejected save is deferred as a UX enhancement.
 
 **Design:** [Denylist semantics](docs/designs/denylist-symbol-from-open-trade.md).
 
@@ -135,6 +149,29 @@ the 2026-09-13 pre-landing review after deferred findings:
 **Deferred from:** pre-landing review on `feature/code-optimizations` (v4.7.0.0).
 The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
+
+## Frontend E2E
+
+### Repair the two consistently failing Playwright specs
+
+**Status:** Recorded 2026-11-10 while verifying the stale full-form save
+flow; pre-existing and unrelated to that change.
+
+**What:** Two E2E specs fail on a clean checkout (reproduced on HEAD
+`1c947b2`, chromium; both fail in the full `MOONWALKER_RUN_E2E=1` suite
+across every browser project):
+- `tests-e2e/background-recovery.spec.ts:5` "overview waits for new
+  snapshots and rejects an old sell confirmation" — the no-order-call
+  assertion (`expect(orders).toBe(0)`) receives 1 after the confirm click.
+- `tests-e2e/accumulation.spec.ts:11` "reviews an exact inventory
+  declaration without adding it to order history" — the same
+  order-history counter class of failure (chromium variants).
+`background-recovery.spec.ts:102` and `accumulation.spec.ts:237` have also
+failed once each in full-suite runs but pass in targeted chromium runs, so
+treat them as flaky until proven otherwise.
+
+**Why:** They block a clean `MOONWALKER_RUN_E2E=1` run and mask real E2E
+regressions; root cause is not yet diagnosed.
 
 ## Completed
 

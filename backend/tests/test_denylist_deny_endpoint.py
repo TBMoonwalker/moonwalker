@@ -46,6 +46,27 @@ async def test_deny_symbol_endpoint_appends_token(
     assert result["status"] == "denied"
     assert result["denied"] == "FO0/USDT"
     assert "FO0" in result["pair_denylist"]
+    # The response carries the generation advanced by the append so other
+    # dashboard clients can detect the invalidation immediately.
+    assert result["config_revision"] == 1
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_deny_symbol_endpoint_advances_revision_on_each_append(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    await _make_instance(tmp_path, monkeypatch)
+
+    first = await deny_symbol.fn(DenySymbolRequest(symbol="FO0/USDT"))
+    second = await deny_symbol.fn(DenySymbolRequest(symbol="ETH"))
+
+    assert first["config_revision"] == 1
+    assert second["config_revision"] == 2
+    assert "FO0" in second["pair_denylist"]
+    assert "ETH" in second["pair_denylist"]
 
     await Tortoise.close_connections()
 

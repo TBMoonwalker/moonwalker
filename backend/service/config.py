@@ -693,28 +693,6 @@ class Config:
             )
             return tokens
 
-    async def merge_denylist_tokens(self, tokens: list[str]) -> list[str]:
-        """Atomically replace the pair_denylist with a de-duplicated token list.
-
-        Used when a client submits a full config form. The list is persisted under
-            the same write lock as appends to keep the denylist consistent.
-        """
-        lock = await self._acquire_write_lock()
-        async with lock:
-            ordered: list[str] = []
-            seen: set[str] = set()
-            for raw_token in tokens:
-                base_token = to_base_token(raw_token)
-                if not base_token or base_token in seen:
-                    continue
-                seen.add(base_token)
-                ordered.append(base_token)
-            serialized = serialize_denylist_tokens(ordered)
-            await self._set_locked(
-                "pair_denylist", {"value": serialized, "type": "str"}
-            )
-            return ordered
-
     def subscribe(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Subscribe a callback function to configuration changes.
 

@@ -17,8 +17,11 @@ requests from different dashboard clients from overwriting each other.
 
 Full configuration saves remain whole-list replacements. Generic configuration
 writes require the revision from the loaded snapshot. A denylist append advances
-that revision, so an older form save is rejected instead of overwriting the new
-entry; reload and reconcile the draft before retrying.
+that revision, so a stale form save is rejected with HTTP 409 instead of
+overwriting the new entry; the editor shows a stale-configuration banner and the
+operator reloads the form and re-applies their edits. Intentional removals are
+unaffected: a form loaded after the append can still remove any token from the
+denylist.
 
 The authoritative implementation is
 [Config](../../backend/service/config.py), with the request handler in
