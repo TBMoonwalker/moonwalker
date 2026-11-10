@@ -84,6 +84,19 @@ class ScenarioResult:
         }
 
 
+def stored_timestamp(value: datetime) -> str:
+    """Format ``value`` exactly as Tortoise persists it to ``upnl_history``.
+
+    Space-separated, ``+00:00`` suffix, fractional seconds omitted only
+    when the microsecond is zero. The pre-bucketed rebuild compares
+    bounds against these strings lexicographically, so the seed must
+    match the production storage format bit-for-bit.
+    """
+    if value.microsecond:
+        return value.strftime("%Y-%m-%d %H:%M:%S.%f") + "+00:00"
+    return value.strftime("%Y-%m-%d %H:%M:%S") + "+00:00"
+
+
 def seed_database(db_path: Path, days: int, end: datetime) -> int:
     """Seed 60-second uPNL snapshots ending at ``end`` into ``db_path``."""
     row_count = int(days * 86400 // SNAPSHOT_INTERVAL_SECONDS)
@@ -108,9 +121,9 @@ def seed_database(db_path: Path, days: int, end: datetime) -> int:
         profit = 0.0
         rows: list[tuple[str, float, float, float, int]] = []
         for offset in range(row_count):
-            timestamp = (
+            timestamp = stored_timestamp(
                 start + timedelta(seconds=offset * SNAPSHOT_INTERVAL_SECONDS)
-            ).isoformat()
+            )
             profit += (offset % 7) - 3
             rows.append(
                 (timestamp, profit / 10.0, profit, 4200.0 + (offset % 13) * 10.0, 1)
@@ -155,25 +168,25 @@ async def init_database(db_path: Path) -> None:
 
 
 class BuildCounter:
-    """Count resample builds across the default thread pool."""
+    """Count timeline rebuilds across the scenarios."""
 
     def __init__(self) -> None:
         self.count = 0
 
 
 def instrument_builds(statistic: Statistic, counter: BuildCounter) -> None:
-    """Wrap the build so every resample increments ``counter``.
+    """Wrap the rebuild so every timeline build increments ``counter``.
 
-    The wrapper must stay synchronous: the service runs the build through
-    ``asyncio.to_thread`` and expects a plain function.
+    The wrapper must stay asynchronous: the service awaits the rebuild
+    directly on the event loop.
     """
-    original = statistic._build_profit_overall_timeline_sync
+    original = statistic._fetch_profit_overall_timeline
 
-    def counting(*args: Any) -> Any:
+    async def counting(now: Any) -> Any:
         counter.count += 1
-        return original(*args)
+        return await original(now)
 
-    statistic._build_profit_overall_timeline_sync = counting  # type: ignore[method-assign]
+    statistic._fetch_profit_overall_timeline = counting  # type: ignore[method-assign]
 
 
 async def run_sequential(statistic: Statistic) -> ScenarioResult:
