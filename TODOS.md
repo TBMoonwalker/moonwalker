@@ -98,33 +98,6 @@ claim that the current UI has these defects.
 and the intentional scope of compact table typography against DESIGN.md.
 The old theme-ownership concern is already addressed by the shared theme store.
 
-## Denylist concurrency
-
-### Review stale full-form saves against concurrent denylist appends
-
-**Status:** Resolved (2026-11-09); the server-side revision check is
-implemented and the stale-full-form scenario is covered by regression tests.
-
-**What:** Verified that a deny append advances the config revision in the same
-transaction as its write, so a full config save based on an older generation is
-rejected with HTTP 409 and the newer deny survives; the dashboard shows a
-stale-configuration banner and the operator reloads and re-applies edits.
-Intentional token removal remains possible through a freshly loaded form
-(whole-list replacement). The deny endpoint returns the advanced
-`config_revision`, and the open-trades deny action broadcasts a `deny`
-invalidation so other tabs notice immediately. Regression coverage:
-`backend/tests/test_denylist_append.py`
-(`test_stale_full_form_save_cannot_lose_concurrent_deny`),
-`backend/tests/test_denylist_deny_endpoint.py`, and the two-client E2E flow
-in `frontend/tests-e2e/control-center.spec.ts`
-("a deny append rejects the stale form save until the operator reloads").
-
-**Decision:** Keep the revision check as the only conflict mechanism; no
-per-field merge on 409. Re-applying unsaved draft edits onto a fresh snapshot
-after a rejected save is deferred as a UX enhancement.
-
-**Design:** [Denylist semantics](docs/designs/denylist-symbol-from-open-trade.md).
-
 ## Frontend staging guard
 
 ### Harden the frontend-staging guard against partial and masked-out failures
@@ -178,6 +151,32 @@ non-blocking.
 **Note:** the firefox/webkit projects need `npx playwright install`
 (browser builds are not on every machine); once installed, all projects
 pass.
+
+### Review stale full-form saves against concurrent denylist appends
+
+**Status:** Completed 2026-11-10 as commit `40eb50a` on `fixed-todos`;
+the server-side revision check was already implemented and is now verified
+end to end by regression tests and a two-client E2E spec.
+
+**What:** Verified that a deny append advances the config revision in the same
+transaction as its write, so a full config save based on an older generation is
+rejected with HTTP 409 and the newer deny survives; the dashboard shows a
+stale-configuration banner and the operator reloads and re-applies edits.
+Intentional token removal remains possible through a freshly loaded form
+(whole-list replacement). The deny endpoint returns the advanced
+`config_revision`, and the open-trades deny action broadcasts a `deny`
+invalidation so other tabs notice immediately. Regression coverage:
+`backend/tests/test_denylist_append.py`
+(`test_stale_full_form_save_cannot_lose_concurrent_deny`),
+`backend/tests/test_denylist_deny_endpoint.py`, and the two-client E2E flow
+in `frontend/tests-e2e/control-center.spec.ts`
+("a deny append rejects the stale form save until the operator reloads").
+
+**Decision:** Keep the revision check as the only conflict mechanism; no
+per-field merge on 409. Re-applying unsaved draft edits onto a fresh snapshot
+after a rejected save is deferred as a UX enhancement.
+
+**Design:** [Denylist semantics](docs/designs/denylist-symbol-from-open-trade.md).
 
 ### Evaluate server caching and incremental timeline loading
 
