@@ -18,19 +18,19 @@ class _FakeOrmError(BaseORMException):
 
 
 def _instrument_builds(statistic: Statistic) -> list[int]:
-    """Return a counter incremented on every timeline resample build.
+    """Return a counter incremented on every timeline rebuild.
 
-    The wrapper must stay synchronous: the service runs the build through
-    ``asyncio.to_thread`` and expects a plain function.
+    The wrapper must stay asynchronous: the service awaits the rebuild
+    directly on the event loop.
     """
     builds: list[int] = [0]
-    original = statistic._build_profit_overall_timeline_sync
+    original = statistic._fetch_profit_overall_timeline
 
-    def counting(*args: Any) -> Any:
+    async def counting(now: datetime) -> Any:
         builds[0] += 1
-        return original(*args)
+        return await original(now)
 
-    statistic._build_profit_overall_timeline_sync = counting
+    statistic._fetch_profit_overall_timeline = counting  # type: ignore[method-assign]
     return builds
 
 
@@ -252,10 +252,16 @@ async def test_timeline_query_error_is_not_cached(tmp_path, monkeypatch) -> None
     try:
         statistic = Statistic()
 
-        def broken_filter(**_kwargs: Any) -> Any:
-            raise _FakeOrmError("database unavailable")
+        class _BrokenConnection:
+            async def execute_query(self, *_args: Any, **_kwargs: Any) -> Any:
+                raise _FakeOrmError("database unavailable")
 
-        monkeypatch.setattr(model.UpnlHistory, "filter", broken_filter)
+        class _BrokenTortoise:
+            @staticmethod
+            def get_connection(_alias: str) -> Any:
+                return _BrokenConnection()
+
+        monkeypatch.setattr("service.statistic.Tortoise", _BrokenTortoise)
 
         assert await statistic.get_profit_overall_timeline() == []
         assert await statistic.get_profit_overall_timeline() == []

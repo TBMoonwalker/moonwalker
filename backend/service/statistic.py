@@ -20,6 +20,7 @@ from service.realized_trades import (
     realized_closed_trades,
 )
 from service.trades import Trades
+from tortoise import Tortoise
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
 
@@ -35,6 +36,27 @@ TIMELINE_CACHE_TTL_SECONDS = 60
 # snapshot, so a cached timeline is only valid while this generation is
 # unchanged; it advances once per stored snapshot.
 _timeline_generation = 0
+
+# Resolution of the adaptive timeline grid, in seconds, newest slice first.
+# The year slice uses Monday-anchored weeks: pandas ``resample("1W")`` bins
+# start on Monday and carry the label of the Sunday midnight inside the bin,
+# so the year-slice label sits six days after the bucket start.
+_TIMELINE_DAY_BUCKET_SECONDS = 15 * 60
+_TIMELINE_WEEK_BUCKET_SECONDS = 4 * 3600
+_TIMELINE_MONTH_BUCKET_SECONDS = 24 * 3600
+_TIMELINE_YEAR_BUCKET_SECONDS = 7 * 24 * 3600
+# 1970-01-05 00:00:00 UTC: the first Monday after the Unix epoch, the grid
+# anchor for the Monday-anchored year-slice weeks.
+_TIMELINE_YEAR_GRID_EPOCH_OFFSET = 4 * 24 * 3600
+_TIMELINE_YEAR_LABEL_OFFSET_DAYS = 6
+# One verified snapshot per resample bucket: the last row of the bucket,
+# resolved with an index seek on ``timestamp`` instead of a full scan.
+_TIMELINE_BUCKET_QUERY = (
+    "SELECT profit_overall, funds_locked FROM upnl_history"
+    " WHERE performance_verified = 1"
+    " AND timestamp >= ? AND timestamp < ?"
+    " ORDER BY timestamp DESC, id DESC LIMIT 1"
+)
 
 
 def _advance_timeline_generation() -> None:
@@ -213,59 +235,159 @@ class Statistic:
         return profit_data
 
     @staticmethod
-    def _build_profit_overall_timeline_sync(
-        rows: list[tuple[Any, Any, Any]],
-        now: datetime,
-        timeline_horizons: dict[str, timedelta],
-    ) -> list[dict[str, Any]]:
-        """Build resampled profit timeline synchronously from raw rows."""
-        df = pd.DataFrame(
-            rows,
-            columns=["timestamp", "profit_overall", "funds_locked"],
+    def _stored_timestamp_literal(value: datetime) -> str:
+        """Format a UTC instant exactly as it is stored in ``UpnlHistory``.
+
+        Tortoise persists aware datetimes through ``isoformat()``, which
+        omits the fractional seconds when the microsecond is zero. Query
+        bounds must follow the same rule: with that rule, lexicographic
+        order of the stored strings equals chronological order for every
+        stored row (the ``+00:00`` terminator sorts before any
+        ``.ffffff`` fractional continuation, which is chronologically
+        correct because both denote the same or later instants).
+        """
+        if value.microsecond:
+            return value.strftime("%Y-%m-%d %H:%M:%S.%f+00:00")
+        return value.strftime("%Y-%m-%d %H:%M:%S+00:00")
+
+    @staticmethod
+    def _floor_to_bucket_grid(
+        value: datetime, bucket_seconds: int, grid_epoch_offset: int
+    ) -> datetime:
+        """Floor ``value`` onto the bucket grid anchored at the epoch offset."""
+        epoch = int(value.timestamp())
+        floored = grid_epoch_offset + (
+            (epoch - grid_epoch_offset) // bucket_seconds * bucket_seconds
         )
-        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-        df = df.set_index("timestamp")
-        df = df[~df.index.duplicated(keep="last")]
+        return datetime.fromtimestamp(floored, tz=timezone.utc)
 
-        year_start = now - timeline_horizons["year"]
-        day_start = now - timeline_horizons["day"]
-        week_start = now - timeline_horizons["week"]
-        month_start = now - timeline_horizons["month"]
+    async def _fetch_slice_timeline(
+        self,
+        slice_rank: int,
+        slice_start: datetime,
+        slice_end: datetime | None,
+        generation_end: datetime,
+        bucket_seconds: int,
+        grid_epoch_offset: int,
+        label_offset: timedelta,
+        data_min: datetime,
+        data_max: datetime,
+        best: dict[str, tuple[int, float, float]],
+    ) -> None:
+        """Store the last snapshot of every bucket of one slice in ``best``.
 
-        frames: list[pd.DataFrame] = []
+        ``slice_rank`` breaks label collisions in favour of the newer slice
+        (matching the original merge order), ``slice_end`` bounds the rows
+        the slice may read (the day slice is unbounded), and
+        ``generation_end`` stops the bucket grid - for the day slice it is
+        one bucket past ``now`` so a snapshot written while the rebuild
+        runs still lands in an emitted bucket.
+        """
+        connection = Tortoise.get_connection("default")
+        step = timedelta(seconds=bucket_seconds)
+        e = self._floor_to_bucket_grid(slice_start, bucket_seconds, grid_epoch_offset)
+        while e < generation_end:
+            upper = e + step
+            if slice_end is not None:
+                upper = min(upper, slice_end)
+            if upper > data_min and e <= data_max:
+                lower = max(e, slice_start)
+                _, rows = await connection.execute_query(
+                    _TIMELINE_BUCKET_QUERY,
+                    [
+                        self._stored_timestamp_literal(lower),
+                        self._stored_timestamp_literal(upper),
+                    ],
+                )
+                if rows:
+                    profit, funds = rows[0]
+                    label = (e + label_offset).strftime("%Y-%m-%d %H:%M:%S")
+                    current = best.get(label)
+                    if current is None or slice_rank >= current[0]:
+                        best[label] = (slice_rank, float(profit), float(funds))
+            e += step
 
-        year_slice = df[(df.index >= year_start) & (df.index < month_start)]
-        if not year_slice.empty:
-            frames.append(year_slice.resample("1W").last().dropna())
+    async def _fetch_profit_overall_timeline(
+        self, now: datetime
+    ) -> list[dict[str, Any]]:
+        """Rebuild the profit timeline without scanning the full history.
 
-        month_slice = df[(df.index >= month_start) & (df.index < week_start)]
-        if not month_slice.empty:
-            frames.append(month_slice.resample("1D").last().dropna())
-
-        week_slice = df[(df.index >= week_start) & (df.index < day_start)]
-        if not week_slice.empty:
-            frames.append(week_slice.resample("4h").last().dropna())
-
-        day_slice = df[df.index >= day_start]
-        if not day_slice.empty:
-            frames.append(day_slice.resample("15min").last().dropna())
-
-        if not frames:
+        Every bucket of the adaptive grid (15min day, 4h week, 1d month,
+        Monday-anchored 1w year) is resolved with a single ``LIMIT 1``
+        index seek for its last verified snapshot - the exact value the
+        original pandas ``resample(...).last()`` pipeline emitted for that
+        bucket - so a cold rebuild reads a few hundred rows instead of a
+        year of snapshots. The per-slice points are merged with
+        later-slice precedence, mirroring the original
+        ``concat``/``sort_index``/``dedup(keep="last")`` order, keeping the
+        output point-for-point identical.
+        """
+        horizons = self.timeline_horizons
+        day_start = now - horizons["day"]
+        week_start = now - horizons["week"]
+        month_start = now - horizons["month"]
+        _, range_rows = await Tortoise.get_connection("default").execute_query(
+            "SELECT MIN(timestamp), MAX(timestamp) FROM upnl_history"
+            " WHERE performance_verified = 1"
+        )
+        data_min, data_max = range_rows[0]
+        if data_max is None:
             return []
-
-        merged = pd.concat(frames).sort_index()
-        merged = merged[~merged.index.duplicated(keep="last")]
-
-        timeline: list[dict[str, Any]] = []
-        for timestamp, row in merged.iterrows():
-            timeline.append(
-                {
-                    "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                    "profit_overall": float(row["profit_overall"]),
-                    "funds_locked": float(row["funds_locked"]),
-                }
-            )
-        return timeline
+        data_min_dt = datetime.fromisoformat(data_min)
+        data_max_dt = datetime.fromisoformat(data_max)
+        best: dict[str, tuple[int, float, float]] = {}
+        await self._fetch_slice_timeline(
+            slice_rank=0,
+            slice_start=now - horizons["year"],
+            slice_end=month_start,
+            generation_end=month_start,
+            bucket_seconds=_TIMELINE_YEAR_BUCKET_SECONDS,
+            grid_epoch_offset=_TIMELINE_YEAR_GRID_EPOCH_OFFSET,
+            label_offset=timedelta(days=_TIMELINE_YEAR_LABEL_OFFSET_DAYS),
+            data_min=data_min_dt,
+            data_max=data_max_dt,
+            best=best,
+        )
+        await self._fetch_slice_timeline(
+            slice_rank=1,
+            slice_start=month_start,
+            slice_end=week_start,
+            generation_end=week_start,
+            bucket_seconds=_TIMELINE_MONTH_BUCKET_SECONDS,
+            grid_epoch_offset=0,
+            label_offset=timedelta(0),
+            data_min=data_min_dt,
+            data_max=data_max_dt,
+            best=best,
+        )
+        await self._fetch_slice_timeline(
+            slice_rank=2,
+            slice_start=week_start,
+            slice_end=day_start,
+            generation_end=day_start,
+            bucket_seconds=_TIMELINE_WEEK_BUCKET_SECONDS,
+            grid_epoch_offset=0,
+            label_offset=timedelta(0),
+            data_min=data_min_dt,
+            data_max=data_max_dt,
+            best=best,
+        )
+        await self._fetch_slice_timeline(
+            slice_rank=3,
+            slice_start=day_start,
+            slice_end=None,
+            generation_end=now + timedelta(seconds=_TIMELINE_DAY_BUCKET_SECONDS),
+            bucket_seconds=_TIMELINE_DAY_BUCKET_SECONDS,
+            grid_epoch_offset=0,
+            label_offset=timedelta(0),
+            data_min=data_min_dt,
+            data_max=data_max_dt,
+            best=best,
+        )
+        return [
+            {"timestamp": label, "profit_overall": profit, "funds_locked": funds}
+            for label, (_, profit, funds) in sorted(best.items())
+        ]
 
     async def get_profits_overall(
         self, timestamp: int | None, period: str = "daily"
@@ -651,11 +773,15 @@ class Statistic:
         - month: 1d
         - year: 1w
 
-        The resampled timeline is cached for ``TIMELINE_CACHE_TTL_SECONDS``
-        and invalidated when any Statistic instance stores a new snapshot or
-        old history is pruned, so concurrent dashboard clients share one
-        rebuild per window. The cached value is treated as immutable;
-        callers receive a copy of the point list.
+        Each rebuild resolves one snapshot per resample bucket with
+        indexed ``LIMIT 1`` seeks (``_fetch_profit_overall_timeline``), so
+        a cold rebuild stays in the tens of milliseconds even for a full
+        year of snapshots. The result is cached for
+        ``TIMELINE_CACHE_TTL_SECONDS`` and invalidated when any Statistic
+        instance stores a new snapshot or old history is pruned, so
+        concurrent dashboard clients share one rebuild per window. The
+        cached value is treated as immutable; callers receive a copy of
+        the point list.
         """
         cached = self._timeline_cache
         if self._timeline_cache_valid(cached):
@@ -665,24 +791,8 @@ class Statistic:
             if self._timeline_cache_valid(cached):
                 return list(cached[2])
             now = datetime.now(timezone.utc)
-            year_start = now - self.timeline_horizons["year"]
             try:
-                rows = (
-                    await model.UpnlHistory.filter(
-                        timestamp__gte=year_start, performance_verified=True
-                    )
-                    .order_by("timestamp")
-                    .values_list("timestamp", "profit_overall", "funds_locked")
-                )
-                if rows:
-                    timeline = await asyncio.to_thread(
-                        self._build_profit_overall_timeline_sync,
-                        rows,
-                        now,
-                        self.timeline_horizons,
-                    )
-                else:
-                    timeline = []
+                timeline = await self._fetch_profit_overall_timeline(now)
             except BaseORMException as e:
                 # Broad catch to keep stats endpoints responsive. Errors are
                 # not cached, so a healthy follow-up fetch re-queries.
