@@ -292,9 +292,12 @@ picked up the code (deployment restart at 15:01:21 by deployment clock,
   was a post-restart watcher history backfill (ticker insert batch)
   holding the single SQLite connection — transient, data-dependent, and
   not the timeline rebuild.
-- The standby→active switch exercises the identical path (one cold
-  rebuild for the first fetch after expiry) and was not toggled on the
-  live bot.
+- The standby→active switch was toggled for real (instance runs in
+  dry-run; paused for ~45 s): the resume POST took 77 ms, every request
+  in the switch window stayed under 120 ms, no request over 300 ms, and
+  the timeline was not even re-fetched (client TTL still fresh). The
+  worst-case combo — switch plus an expired timeline cache — was
+  measured separately: 441 ms cold rebuild, still sub-second.
 
 **Priority:** P3
 
