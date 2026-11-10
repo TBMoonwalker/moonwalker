@@ -234,7 +234,18 @@ single-flight, retention hook with and without deletions, uncached query
 errors, cached/fresh-build equality) plus the endpoint and startup suites;
 full CI green (`cd scripts && ./ci.sh`) — 2,292 backend tests, 374
 frontend tests, type checks, lint, and coverage floors. No API, config, or
-schema change.
+schema change. Live-instance check 2026-11-10 against the running
+deployment (http://192.168.6.5:8160): cold fetch ~6 s vs cached fetches
+~0.1–0.5 s; 16 concurrent fetches all served in <0.7 s (one rebuild, not
+16); with the bot flat, a profit-WebSocket connection (dashboard-client
+behavior) drove the 60-second snapshot gate, and the new snapshot value
+appeared on the next timeline fetch inside the previous build's TTL window
+— write invalidation observed, bucket updates confirmed. Retention-cleanup
+invalidation is unit-verified (24-hour housekeeper cycle, not triggerable
+on demand). The check also surfaced an environmental observation, not a
+defect in this change: the deployment host's clock appears ~1 hour behind
+this machine (stored row timestamps lag wall-clock fetch times by
+~48–63 minutes), so its NTP configuration is worth a look.
 
 **Priority:** P3
 
