@@ -55,9 +55,10 @@ The response is therefore cached in the `Statistic` service
 (`backend/service/statistic.py`, `TIMELINE_CACHE_TTL_SECONDS = 60`):
 
 - **Single-flight rebuild.** A lock plus a double-checked expiry makes any
-  number of concurrent clients share one rebuild per window. The rebuild
-  (window read + pandas resample) runs in a worker thread, and at most one
-  such build is in flight at a time.
+  number of concurrent clients share one rebuild per window. The rebuild is
+  an indexed bucket walk (see [P1.5](#p15-cheap-rebuild--pre-bucketing-in-sql-implemented))
+  that runs natively on the event loop, so a cold rebuild no longer holds
+  the GIL in a worker thread and no longer stalls unrelated requests.
 - **Invalidation on every stored snapshot.** Snapshot writes happen in
   `Statistic._get_profit_base`, which is reached from the controller graph,
   the DCA engine, and the signal plugins — each with its own `Statistic`
@@ -84,6 +85,65 @@ The response is therefore cached in the `Statistic` service
   recovery is unchanged: the endpoint is stateless, and the client store
   already treats a failed refresh as unverified and retries.
 
+## P1.5: cheap rebuild — pre-bucketing in SQL (implemented)
+
+The P1 cache removed repeated resampling, but a single dashboard client
+that reloads (or switches from standby to active) always hits the expired
+TTL and triggers one full rebuild. On the live instance (~370k snapshots,
+~8.5 months of history) that cold rebuild took ~6.4 s, and — because the
+pandas resample ran in a worker thread holding the GIL — the event loop
+starved for the same duration, stalling every concurrent boot request
+(`/config/all` and `/accumulation/strategies` measured ~6.2 s on the
+reloaded page). The fix makes the rebuild itself cheap instead of
+refreshing it in the background.
+
+The resample is deterministic: each adaptive bucket emits the last row in
+the bucket, nothing else. So the rebuild no longer loads the whole 12-month
+window and resamples it in pandas. It computes the bucket grid in Python
+and resolves every bucket with one indexed `LIMIT 1` seek:
+
+```sql
+SELECT profit_overall, funds_locked FROM upnl_history
+WHERE performance_verified = 1
+  AND timestamp >= ? AND timestamp < ?
+ORDER BY timestamp DESC, id DESC LIMIT 1
+```
+
+`backend/service/statistic.py` (`_fetch_profit_overall_timeline`):
+
+- **Grid.** day: 15 min, week: 4 h, month: 1 d, year: Monday-anchored
+  weeks — the same bins as before. The year slice labels each bucket with
+  the Sunday midnight inside it (pandas `resample("1W")` semantics,
+  verified empirically: Monday-start bin, Sunday label).
+- **Winner.** `ORDER BY timestamp DESC, id DESC LIMIT 1` returns the last
+  row of the bucket, exactly the value `resample(...).last()` after
+  exact-timestamp dedup produced.
+- **Merge.** A bucket label that appears in two slices (for example a
+  Sunday-midnight week label and a day label on the same instant) keeps the
+  newer slice's value, mirroring the original
+  `concat`/`sort_index`/`dedup(keep="last")` order.
+- **Boundaries.** Query bounds are formatted exactly like the stored
+  strings — space-separated, ``+00:00`` suffix, fractional seconds
+  omitted only when the microsecond is zero, the form Tortoise persists
+  — which makes lexicographic string comparison chronologically exact
+  against every stored row.
+- **Cost.** A MIN/MAX preflight skips buckets outside the data range; a
+  full-year rebuild issues ~220 tiny index seeks and reads ~220 rows
+  instead of ~370k, natively on the event loop (no `asyncio.to_thread`, no
+  GIL starvation of concurrent requests).
+
+The pandas reference pipeline was differential-tested, not merely
+migrated: `backend/tests/test_statistic_timeline_prewin.py` seeds
+adversarial fixtures (exact bucket and slice boundaries, sub-second and
+identical-timestamp duplicates, week-straddle label collisions, unverified
+rows, sparse history, empty history) plus a full year of 60-second
+snapshots at the production cadence — every bucket of every resolution
+filled — and asserts the bucket walk's output is point-for-point
+identical to the original full-history resample for both aligned and
+sub-second-offset rebuild times. The endpoint's path, arguments, and
+response shape are unchanged, the 409 unverified-valuation guard stays
+per-request, and the cache/invalidation behavior of P1 is unchanged.
+
 ## Evaluation
 
 `scripts/benchmark_timeline.py` seeds throwaway databases at the real
@@ -92,10 +152,15 @@ current live instance), 1 year (~525k rows, steady state), and 2 years
 (~1.05M rows, retention beyond the 12-month window) — plus a `sqlite3`
 backup copy of the live database, and runs: six sequential fetches, 4/8/16
 simultaneous cold fetches, and a burst of 16 clients staggered over ~40 s
-with two fetches each. Full reports:
+with two fetches each. The seeds use the production storage format
+(space-separated, `+00:00`), because the P1.5 bucket walk compares bounds
+lexicographically against the stored strings. Full reports:
 `~/.gstack/projects/TBMoonwalker-moonwalker/benchmark-reports/`
 (`*timeline-server*.json`, before = commit 9a005fa, after = the cache
-changes).
+changes, `*T141830Z*` and later = the pre-bucketed rebuild; the
+`*T131614Z*`/`*T132605Z*` reports were seeded with `T`-separated
+timestamp strings that never occur in production storage and are
+superseded).
 
 Uncached (before), steady-state 1-year database (525,600 rows):
 
@@ -125,6 +190,24 @@ sub-millisecond cache hits, and the worst concurrent wait drops from
 64.8 s to 5.9 s — the shared single-flight rebuild itself. The steady
 state with an active bot is one rebuild per snapshot interval, served to
 all clients that fetch in that window.
+
+With the pre-bucketed rebuild (P1.5), the same scenarios:
+
+| Scenario | Database | Fetches | Rebuilds | p50 | p95 |
+|---|---|---:|---:|---:|---:|
+| Sequential (6) | 1y (525,600 rows) | 6 | 1 | <1 ms (warm) | 36 ms (cold first fetch) |
+| Concurrent 4 | 1y | 4 | 1 | 36 ms | 36 ms |
+| Concurrent 16 | 1y | 16 | 1 | 38 ms | 38 ms |
+| Burst (16 clients, 32 fetches) | 2y (1,051,200 rows) | 32 | 1 | <1 ms (warm) | 62 ms (first cold client) |
+| Sequential (6) | live copy (12,507 rows) | 6 | 1 | <1 ms (warm) | 7.8 ms (cold first fetch) |
+| Concurrent 16 | live copy | 16 | 1 | 11.2 ms | 11.4 ms |
+
+The cold rebuild — the path a single client's reload or standby→active
+switch always hits — drops from 2.9–5.9 s to ≤38 ms at steady-state size
+and ≤70 ms on the 2-year database (twice the live row count), roughly
+100×. Because the rebuild now runs natively on the event loop, the
+concurrent boot requests that previously queued behind the worker-thread
+resample are no longer stalled by it.
 
 ## P2: incremental timeline fetch (decision: not justified)
 

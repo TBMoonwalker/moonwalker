@@ -181,7 +181,9 @@ after a rejected save is deferred as a UX enhancement.
 ### Evaluate server caching and incremental timeline loading
 
 **Status:** Completed 2026-11-09 as three CI-green code commits on
-`fixed-todos` (perf, tests, harness) plus the docs commit.
+`fixed-todos` (perf, tests, harness) plus the docs commit. Follow-up
+P1.5 (2026-11-10) then made the cold rebuild itself cheap, so a reload no
+longer stalls — see below.
 
 **Plan of record:**
 `~/.gstack/projects/TBMoonwalker-moonwalker/timeline-server-cache-plan-20261109.md`
@@ -220,6 +222,33 @@ SQLite I/O, not bandwidth.
   (`2026-11-09T191632Z-timeline-server.json` before,
   `2026-11-09T192949Z-timeline-server.json` after).
 
+**Follow-up (2026-11-10, P1.5 — cheap rebuild):** the live check above
+proved the cache, but a single client's reload (or standby→active switch)
+still hit the expired TTL and triggered one full rebuild: ~6.4 s on the
+370k-row deployment database, and — because the worker-thread pandas
+resample held the GIL — every concurrent boot request stalled behind it
+(`/config/all` and `/accumulation/strategies` measured ~6.2 s on the
+reloaded page). The rebuild now computes the adaptive bucket grid in
+Python and resolves every bucket with one indexed `LIMIT 1` seek on the
+snapshot timestamp (`Statistic._fetch_profit_overall_timeline`), reading
+~220 rows instead of the full year of snapshots; it runs natively on the
+event loop, so no worker-thread GIL starvation remains. The output is
+point-for-point identical to the old full-resample path: the pandas
+pipeline is kept in `backend/tests/test_statistic_timeline_prewin.py` as a
+differential oracle (adversarial bucket/slice boundaries, sub-second and
+identical-timestamp duplicates, week-straddle label collisions, unverified
+rows, sparse and empty fixtures, a full year of 60-second snapshots with
+every bucket of every slice filled, aligned and sub-second-offset rebuild
+times). Cold rebuild at 1-year scale (525k rows): 2.9–5.9 s → ≤38 ms; at
+2-year scale (1.05M rows): ≤70 ms; concurrent-16 worst wait: 5.9 s →
+38 ms (`2026-11-10T141830Z-timeline-server.json`). The benchmark harness
+had been seeding `T`-separated timestamp strings (`isoformat`) that never
+occur in production storage, which the lexicographic bucket bounds read
+wrongly; the seed now writes the production format (space separator,
+`+00:00`), and the corrected runs restore the expected point counts
+(144/205/205 vs the pre-change 144/206/205). Endpoint contract, 409
+guard, and cache semantics are unchanged.
+
 **Decision:** the proposed P2 incremental delta cursor is not justified
 (measurement evidence in the design doc) — no cursor state and no second
 response shape; the no-argument endpoint remains the sole contract. P3
@@ -245,7 +274,11 @@ invalidation is unit-verified (24-hour housekeeper cycle, not triggerable
 on demand). The check also surfaced an environmental observation, not a
 defect in this change: the deployment host's clock appears ~1 hour behind
 this machine (stored row timestamps lag wall-clock fetch times by
-~48–63 minutes), so its NTP configuration is worth a look.
+~48–63 minutes), so its NTP configuration is worth a look. The P1.5
+follow-up's reload scenario still needs a live re-check on that deployment
+(cold reload should drop from ~6 s to well under 1 s, and the concurrent
+boot requests should no longer stall) once the host picks up this code;
+the differential tests and benchmark above are the stand-in evidence.
 
 **Priority:** P3
 

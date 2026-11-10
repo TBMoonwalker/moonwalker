@@ -76,9 +76,15 @@ All notable changes to Moonwalker are documented in this file.
   per window instead of each re-reading and re-resampling the full 12-month
   window, and a newly stored snapshot (from any service instance) or a
   retention cleanup drops the cache so the next fetch reflects it. The
-  endpoint's path, arguments, and response are unchanged;
-  `docs/designs/delta-loading.md` records the evaluation and the decision
-  against the proposed incremental fetch.
+  rebuild itself resolves every adaptive bucket (15min/4h/1d/Monday-anchored
+  week) with an indexed `LIMIT 1` seek on the snapshot timestamp instead of
+  scanning and resampling the whole year of snapshots in pandas, so a cold
+  rebuild — the path a single client's page reload or standby→active switch
+  always hits — takes tens of milliseconds even on a two-year database and
+  no longer stalls unrelated requests while it runs. The endpoint's path,
+  arguments, and response are unchanged;
+  `docs/designs/delta-loading.md` records the evaluation, the rebuild
+  benchmarks, and the decision against the proposed incremental fetch.
 
 ### Fixed
 
