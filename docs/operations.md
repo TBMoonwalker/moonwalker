@@ -39,6 +39,13 @@ requirements installation step before launching `backend/app.py` directly.
 Starting `backend/app.py` from an existing virtual environment bypasses
 dependency synchronization after an upgrade.
 
+An incomplete frontend stage is refused before the app starts: `./run.sh start`
+verifies that the staged entrypoint references only assets that are present in
+`backend/static`, and startup logs an error when the stage is missing or
+partial. While the stage is incomplete, dashboard routes answer HTTP 500 with
+a JSON body (`{"detail": ...}`) that names the gap and the `./run.sh start`
+remedy instead of serving a blank page.
+
 ## Minimum supported version
 
 Moonwalker declares a minimum supported version (MSV). Legacy migration and

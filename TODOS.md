@@ -87,32 +87,48 @@ confirmed it: the full frontend CI passed unmodified, and the typescript
 
 **Priority:** P3
 
-## Frontend staging guard
+## Completed
 
 ### Harden the frontend-staging guard against partial and masked-out failures
 
+**Status:** Completed 2026-11-10 as one CI-green changeset. Plan of record:
+`~/.gstack/projects/TBMoonwalker-moonwalker/frontend-staging-guard-hardening-plan-20261110.md`
+(decisions D1–D7). Closes all three findings deferred from the 2026-09-13
+pre-landing review of `feature/code-optimizations` (v4.7.0.0).
+
+**What shipped:**
+- New stdlib-only `backend/staging_check.py` extracts the `/assets/...`
+  references the staged `index.html` makes (module, modulepreload, stylesheet)
+  and reports which are absent from `backend/static`. Only bootstrap-critical
+  asset references are verified — the entrypoint is trusted build output, and
+  the pre-existing cosmetic `/favicon.ico` staging gap is deliberately out of
+  scope.
+- **F1:** `frontend_staging_warning()` is now two-tier — a missing entrypoint
+  keeps its original message, and a partial stage (entrypoint present,
+  referenced bundle missing) returns a "Frontend partially staged" message
+  naming every missing asset. `./run.sh start` refuses to start on a partial
+  stage via the new stdlib-only `scripts/verify_frontend_staging.py` (run
+  under the bootstrap python, since the venv does not exist yet at that
+  point).
+- **F2:** the SPA fallback no longer raises `HTTPException` (whose detail
+  Litestar masks into a generic 500 body); it returns a controlled 500 JSON
+  response (`{"detail": ...}`), so the actionable "run ./run.sh start" message
+  reaches the browser for both failure modes, and a partial stage no longer
+  answers 200 with a blank page.
+- **F3:** `app.py` startup probes the stage through `asyncio.to_thread`,
+  matching the request path; the probe helper stays synchronous.
+- Tests: new `backend/tests/test_staging_check.py` (extraction, dedup,
+  non-asset reference exclusion, root-escape edge) and the extended
+  `backend/tests/test_frontend_staging_warning.py` (partial-stage guard,
+  HTTP-level `TestClient` assertions on the controlled 500 body for both
+  failure modes, fully-staged 200 contract). `test_app_startup.py` passes
+  unmodified.
+
+**Verification:** full CI green (`cd scripts && ./ci.sh`); a manual `run.sh`
+partial-stage simulation aborts with the actionable message. No API, config,
+or schema change.
+
 **Priority:** P1
-
-**What:** The new frontend-staging guard (shipped v4.7.0.0) was left as-is at
-the 2026-09-13 pre-landing review after deferred findings:
-- **F1 (P2):** a partial deploy (entrypoint `index.html` present but a referenced
-  JS bundle missing) passes both `frontend_staging_warning()` and the
-  `run.sh` stage check, so a dead dashboard returns HTTP 200. The underlying
-  deploy gap predates this branch; the guard should verify the bundles the
-  entrypoint references and carry a partial-deploy regression test.
-- **F2 (P2):** Litestar masks `HTTPException.detail` to a generic
-  "Internal Server Error" body, so the actionable "run ./run.sh start" message
-  the guard was built to surface never reaches the browser. Replace the 500
-  raise with a controlled error body and assert its HTTP response.
-- **F3 (P3):** `app.py` startup calls `frontend_staging_warning()` with a
-  synchronous `Path.is_file()` on the event loop before the timing wrapper;
-  move the probe off the loop to match the request path.
-
-**Deferred from:** pre-landing review on `feature/code-optimizations` (v4.7.0.0).
-The guard is strictly an improvement over the previous bare 500; hardening is
-non-blocking.
-
-## Completed
 
 ### Verify remaining rendered accessibility observations
 

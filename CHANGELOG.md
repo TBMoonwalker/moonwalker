@@ -113,6 +113,16 @@ All notable changes to Moonwalker are documented in this file.
   entry-filter strategy, so a deal that never placed a safety order lost its
   strategy metadata (and its overlays) the moment it closed. Deals already
   closed keep the unavailable notice.
+- The frontend-staging guard now detects partially staged builds: when the
+  staged `index.html` is present but a bundle it references is missing from
+  `backend/static`, startup logs an actionable error, `./run.sh start` refuses
+  to start the service, and dashboard routes answer HTTP 500 with a JSON
+  `detail` naming the missing assets and the `./run.sh start` remedy —
+  previously such a stage passed every check and served a 200 that rendered a
+  blank page. The not-staged error is now a controlled response, so the
+  actionable message reaches the browser instead of being masked into
+  Litestar's generic 500 body, and the startup staging probe no longer stats
+  the filesystem on the event loop.
 
 ## [6.3.0.0] - 2026-11-07
 
