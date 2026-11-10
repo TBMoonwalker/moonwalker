@@ -200,7 +200,7 @@ async def startup() -> None:
     """Initialize core services before the lifespan starts runtime tasks."""
     started_at = time.perf_counter()
     logging.info("Moonwalker startup sequence started.")
-    staging_warning = frontend_staging_warning()
+    staging_warning = await asyncio.to_thread(frontend_staging_warning)
     if staging_warning is not None:
         logging.error(
             "Frontend not staged; the web dashboard will be unavailable: %s",

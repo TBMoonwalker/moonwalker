@@ -172,6 +172,17 @@ start_services() {
         exit 1
     fi
 
+    # A partial stage (entrypoint present, referenced bundle missing) would
+    # serve a 200 that renders a blank page. The check runs under the
+    # bootstrap python because the virtualenv does not exist yet at this
+    # point; the script is stdlib-only by contract.
+    if ! PYTHONPATH=backend "$bootstrap_python" scripts/verify_frontend_staging.py \
+        backend/templates/index.html backend/static; then
+        echo "❌ SPA entrypoint references missing staged assets (partial stage)."
+        echo "   The dashboard would load but fail to bootstrap. Re-run './run.sh start'."
+        exit 1
+    fi
+
     echo "🐍 Building a verified Python environment..."
     echo "   Using $bootstrap_python"
     if [ -L .venv ]; then
@@ -268,6 +279,7 @@ while [ $# -gt 0 ]; do
             fi
             if ! [[ "$2" =~ ^[0-9]+$ ]] || [ "$2" -lt 1 ] || [ "$2" -gt 65535 ]; then
                 echo "❌ Invalid port: $2 (expected 1-65535)"
+                usage
                 exit 1
             fi
             port="$2"
@@ -277,6 +289,7 @@ while [ $# -gt 0 ]; do
             port_value="${1#*=}"
             if ! [[ "$port_value" =~ ^[0-9]+$ ]] || [ "$port_value" -lt 1 ] || [ "$port_value" -gt 65535 ]; then
                 echo "❌ Invalid port: $port_value (expected 1-65535)"
+                usage
                 exit 1
             fi
             port="$port_value"
