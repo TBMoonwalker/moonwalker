@@ -274,11 +274,27 @@ invalidation is unit-verified (24-hour housekeeper cycle, not triggerable
 on demand). The check also surfaced an environmental observation, not a
 defect in this change: the deployment host's clock appears ~1 hour behind
 this machine (stored row timestamps lag wall-clock fetch times by
-~48–63 minutes), so its NTP configuration is worth a look. The P1.5
-follow-up's reload scenario still needs a live re-check on that deployment
-(cold reload should drop from ~6 s to well under 1 s, and the concurrent
-boot requests should no longer stall) once the host picks up this code;
-the differential tests and benchmark above are the stand-in evidence.
+~48–63 minutes), so its NTP configuration is worth a look.
+
+**Live re-check (2026-11-10, P1.5 on the deployment):** after the host
+picked up the code (deployment restart at 15:01:21 by deployment clock,
+`database` log), the reload scenario was verified in the in-app browser:
+- `/statistic/profit-overall/timeline` cold rebuild: 77–233 ms
+  (previously ~6.4 s); the cache is effectively always cold because a
+  snapshot write advances the generation every ~60 s.
+- Full dashboard reload boot: every request under 105 ms, no stall
+  (previously `/config/all`, `/accumulation/strategies` and the timeline
+  all waited ~6.7 s).
+- Response shape unchanged: 191 points, first bucket
+  `2026-02-22 00:00:00` (Sunday-labeled Monday-anchored week), last
+  bucket the current Monday.
+- One 6.7 s boot stall on the very first load right after the restart
+  was a post-restart watcher history backfill (ticker insert batch)
+  holding the single SQLite connection — transient, data-dependent, and
+  not the timeline rebuild.
+- The standby→active switch exercises the identical path (one cold
+  rebuild for the first fetch after expiry) and was not toggled on the
+  live bot.
 
 **Priority:** P3
 
