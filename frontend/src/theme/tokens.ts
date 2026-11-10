@@ -67,6 +67,13 @@ export const themeTokens = {
             // T8 (2026-09-23): light muted text must clear WCAG AA (4.97:1).
             // Naive's tertiary text tracks the CSS --mw-color-text-muted token.
             textColor3: LIGHT_MUTED,
+            // Naive's internal GlobalStyle writes the merged common theme onto
+            // document.body.style inline (font-size, line-height, ...), where
+            // it outranks the `html body` rule in base.css. Keeping the
+            // document-scope values in the token map is what makes the
+            // rendered body match the documented 16px / 1.5 scale.
+            fontSize: "16px",
+            lineHeight: "1.5",
             borderRadius: "10px",
             borderRadiusSmall: "6px",
          },
@@ -163,6 +170,9 @@ export const themeTokens = {
            textColor1: "#f5f5f7",
            textColor2: "#c7c7d0",
            textColor3: "#a4a4af",
+           // Same GlobalStyle body-write contract as the light scheme.
+           fontSize: "16px",
+           lineHeight: "1.5",
            borderRadius: "10px",
            borderRadiusSmall: "6px",
          },
