@@ -88,6 +88,19 @@ All notable changes to Moonwalker are documented in this file.
 
 ### Fixed
 
+- The dashboard document body now renders at its documented 16px / General
+  Sans / 1.5 line-height in both color schemes. Naive UI's internal global
+  style was writing its 14px / v-sans defaults directly onto the
+  `<body>` element's inline style (and its lazy-injected `body` reset
+  out-cascaded the app stylesheet), so the documented body scale never
+  rendered even though the source was correct. The document-scope
+  `font-size` and `line-height` now live in the theme token map's Naive
+  `common` section — the single source of truth the global style reads —
+  and the app's body rule gained a specificity guard so injection order
+  can no longer win. A rendered e2e guard now fails CI if the body scale,
+  the resolved theme tokens, the 44px phone-width pagination touch
+  targets, or the compact trade-ledger / regular statistics-ledger
+  typography split drifts.
 - Replay charts now show a muted "Indicator overlays unavailable for this
   trade." notice when no indicator series can be loaded — legacy rows without
   a deal id, empty indicator results, or failed indicator requests — instead

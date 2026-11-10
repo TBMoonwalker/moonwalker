@@ -87,17 +87,6 @@ confirmed it: the full frontend CI passed unmodified, and the typescript
 
 **Priority:** P3
 
-## Control Center verification
-
-### Verify remaining rendered accessibility observations
-
-**Status:** Follow-up verification from the historical source audit; not a
-claim that the current UI has these defects.
-
-**What:** Check rendered dark-mode contrast, mobile pagination touch targets,
-and the intentional scope of compact table typography against DESIGN.md.
-The old theme-ownership concern is already addressed by the shared theme store.
-
 ## Frontend staging guard
 
 ### Harden the frontend-staging guard against partial and masked-out failures
@@ -124,6 +113,43 @@ The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
 ## Completed
+
+### Verify remaining rendered accessibility observations
+
+**Status:** Completed 2026-11-10. Plan of record:
+`~/.gstack/projects/TBMoonwalker-moonwalker/rendered-accessibility-verification-plan-20261110.md`;
+findings report:
+`~/.gstack/projects/TBMoonwalker-moonwalker/rendered-accessibility-verification-report-20261110.md`.
+
+**What was verified (rendered, data-fed, throwaway loopback `vite preview`):**
+- **Contrast:** offline WCAG 2.1 matrix over the exact `tokens.ts` values —
+  all 30 text-on-surface pairs pass AA in both schemes (weakest: light
+  muted-on-raised 4.93:1, dark muted-on-card-muted 5.94:1). Rendered half:
+  forced light/dark themes resolve the token map onto real elements
+  (asserted computed colors match the tokens).
+- **Pagination touch targets:** 44×44px item boxes rendered at 375px phone
+  width on both the closed-trades feed and the statistics symbol table;
+  28px Naive default at desktop (1280px) and tablet (768px) — the documented
+  phone-width scope, now a recorded exception instead of an assumption.
+- **Compact table typography:** body renders 16px (was silently 14px — see
+  defect below); statistics ledger renders the documented 12px/14px scale;
+  trade ledger renders the intentional 11px header / 13px cell compact
+  exception (introduced in `05e7cbb`, documented in DESIGN.md, pinned by the
+  guard); control-center mission summary renders 16px.
+
+**Defect found and fixed (same changeset):** the rendered `<body>` was
+14px / v-sans / line-height 1.6, not the documented 16px — Naive UI's
+internal `GlobalStyle` writes the merged common theme onto
+`document.body.style` inline (and its lazy-injected `body` reset sits after
+the app CSS). Fix: `fontSize: "16px"` / `lineHeight: "1.5"` added to both
+schemes' `naive.common` token map (`frontend/src/theme/tokens.ts`) plus an
+`html body` specificity guard in `frontend/src/assets/base.css`.
+
+**Durable guard:** `frontend/tests-e2e/rendered-accessibility.spec.ts`
+(6 tests across chromium / mobile-chromium / tablet-chromium) pins the body
+scale, token resolution, 44px phone touch targets, and the compact/regular
+ledger split; fails CI on drift. Full e2e suite green after the fix
+(98 passed, 0 failed).
 
 ### Repair the two consistently failing Playwright specs
 
