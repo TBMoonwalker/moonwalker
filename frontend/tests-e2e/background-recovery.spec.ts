@@ -56,7 +56,14 @@ test('overview waits for new snapshots and rejects an old sell confirmation', as
   await page.route('**/statistic/profit-overall/timeline', route => route.fulfill({ json: [] }))
   await page.route('**/trades/closed/length', route => route.fulfill({ json: { result: 0 } }))
   let orders = 0
-  await page.route('**/orders/**', route => { orders++; return route.fulfill({ json: { result: 'sell' } }) })
+  await page.route('**/orders/**', route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/orders/placement-recovery') return route.fulfill({ json: { intents: [] } })
+    // The dashboard's recovery card polls that list on load; only
+    // order-mutation calls count against the confirm.
+    if (route.request().method() === 'POST') orders++
+    return route.fulfill({ json: { result: 'sell' } })
+  })
   await page.goto('/')
   const sell = page.getByRole('button', { name: 'Sell BTC/USDC' })
   await expect(sell).toBeEnabled()

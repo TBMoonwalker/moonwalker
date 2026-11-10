@@ -150,30 +150,34 @@ the 2026-09-13 pre-landing review after deferred findings:
 The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
-## Frontend E2E
+## Completed
 
 ### Repair the two consistently failing Playwright specs
 
-**Status:** Recorded 2026-11-10 while verifying the stale full-form save
-flow; pre-existing and unrelated to that change.
+**Status:** Completed 2026-11-10; `MOONWALKER_RUN_E2E=1` is green again
+(49/49 across all five Playwright projects for the affected files).
 
-**What:** Two E2E specs fail on a clean checkout (reproduced on HEAD
-`1c947b2`, chromium; both fail in the full `MOONWALKER_RUN_E2E=1` suite
-across every browser project):
-- `tests-e2e/background-recovery.spec.ts:5` "overview waits for new
-  snapshots and rejects an old sell confirmation" — the no-order-call
-  assertion (`expect(orders).toBe(0)`) receives 1 after the confirm click.
-- `tests-e2e/accumulation.spec.ts:11` "reviews an exact inventory
-  declaration without adding it to order history" — the same
-  order-history counter class of failure (chromium variants).
-`background-recovery.spec.ts:102` and `accumulation.spec.ts:237` have also
-failed once each in full-suite runs but pass in targeted chromium runs, so
-treat them as flaky until proven otherwise.
+**Root causes:** three distinct test-side races, none in the app code:
+- `background-recovery.spec.ts:5`: the `**/orders/**` counter also counted
+  the dashboard's new `GET /orders/placement-recovery` load from
+  `PlacementRecoveryCard` (added after the spec was written). The mock now
+  answers that path with an empty intent list and only counts
+  order-mutation POSTs, which is what the no-order assertions guard.
+- `accumulation.spec.ts:11`: the `expect(requests).toHaveLength(1)` after
+  the confirm click was a synchronous check that always raced the route
+  handler's push (earlier revisions had `await expect(...)` lines after the
+  click that acted as the barrier and were removed with UI changes). The
+  spec now waits for the panel's "Recorded outcome: applied" notice, which
+  only renders after the mocked POST was handled.
+- `accumulation.spec.ts:240` (previously the "flaky" one, ~20% on
+  tablet/mobile chromium): `page.reload()` could outrun the route handler
+  for the intentionally aborted first POST, so the mock counted the retry
+  as the first POST and aborted it as well. The spec now polls
+  `requests.length === 1` before reloading.
 
-**Why:** They block a clean `MOONWALKER_RUN_E2E=1` run and mask real E2E
-regressions; root cause is not yet diagnosed.
-
-## Completed
+**Note:** the firefox/webkit projects need `npx playwright install`
+(browser builds are not on every machine); once installed, all projects
+pass.
 
 ### Evaluate server caching and incremental timeline loading
 
