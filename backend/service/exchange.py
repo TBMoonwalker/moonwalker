@@ -381,6 +381,41 @@ class Exchange:
                 )
         return resolved_symbol
 
+    async def _history_page_backoff(
+        self,
+        *,
+        fetch_kind: str,
+        symbol: str,
+        consecutive_errors: int,
+        backoff_seconds: Callable[[int], float],
+    ) -> bool:
+        """Sleep one history-page backoff or report the error budget exhausted.
+
+        Shared by the two OHLCV history fetchers so the consecutive-error
+        budget and the stop behavior have a single implementation.
+
+        Args:
+            fetch_kind: Human-readable fetch label for the stop message.
+            symbol: The symbol whose history is being fetched.
+            consecutive_errors: Failed pages in a row, including the current one.
+            backoff_seconds: Sleep duration in seconds for the given
+                consecutive-error count.
+
+        Returns:
+            True when paging may continue, False when the consecutive-error
+            budget is exhausted and the fetch must stop.
+        """
+        if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
+            logging.error(
+                "Stopping %s fetch for %s after %s consecutive errors.",
+                fetch_kind,
+                symbol,
+                consecutive_errors,
+            )
+            return False
+        await asyncio.sleep(backoff_seconds(consecutive_errors))
+        return True
+
     async def get_history_for_symbol(
         self,
         config: dict[str, Any],
@@ -449,25 +484,23 @@ class Exchange:
                 # Broad catch to continue paging through historical data.
                 logging.error("Fetching historical data failed due to an error: %s", e)
                 consecutive_errors += 1
-                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
-                    logging.error(
-                        "Stopping history fetch for %s after %s consecutive errors.",
-                        resolved_symbol,
-                        consecutive_errors,
-                    )
+                if not await self._history_page_backoff(
+                    fetch_kind="history",
+                    symbol=resolved_symbol,
+                    consecutive_errors=consecutive_errors,
+                    backoff_seconds=lambda _count: self.HISTORY_RETRY_SLEEP_SECONDS,
+                ):
                     break
-                await asyncio.sleep(self.HISTORY_RETRY_SLEEP_SECONDS)
             except (TypeError, ValueError, RuntimeError) as e:
                 logging.error("Fetching historical data failed due to an error: %s", e)
                 consecutive_errors += 1
-                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
-                    logging.error(
-                        "Stopping history fetch for %s after %s consecutive errors.",
-                        resolved_symbol,
-                        consecutive_errors,
-                    )
+                if not await self._history_page_backoff(
+                    fetch_kind="history",
+                    symbol=resolved_symbol,
+                    consecutive_errors=consecutive_errors,
+                    backoff_seconds=lambda _count: self.HISTORY_RETRY_SLEEP_SECONDS,
+                ):
                     break
-                await asyncio.sleep(self.HISTORY_RETRY_SLEEP_SECONDS)
 
         return all_candles
 
@@ -538,15 +571,23 @@ class Exchange:
             except (ccxt.NetworkError, ccxt.ExchangeError, ccxt.BaseError) as e:
                 logging.error("Batch fetch error: %s", e)
                 consecutive_errors += 1
-                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
+                if not await self._history_page_backoff(
+                    fetch_kind="batch history",
+                    symbol=resolved_symbol,
+                    consecutive_errors=consecutive_errors,
+                    backoff_seconds=lambda count: page_delay * (2 ** (count - 1)),
+                ):
                     break
-                await asyncio.sleep(page_delay * (2 ** (consecutive_errors - 1)))
             except (TypeError, ValueError, RuntimeError) as e:
                 logging.error("Batch fetch error: %s", e)
                 consecutive_errors += 1
-                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
+                if not await self._history_page_backoff(
+                    fetch_kind="batch history",
+                    symbol=resolved_symbol,
+                    consecutive_errors=consecutive_errors,
+                    backoff_seconds=lambda count: page_delay * (2 ** (count - 1)),
+                ):
                     break
-                await asyncio.sleep(page_delay * (2 ** (consecutive_errors - 1)))
 
         return all_candles[:max_candles]
 

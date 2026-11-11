@@ -107,8 +107,8 @@ test('Total Profit column sortOrder uses columnSortOrder helper', () => {
 
 test('watch on perSymbol corrects page when it exceeds maxPage', () => {
     assert.match(source, /watch\(perSymbol/)
-    assert.match(source, /Math\.ceil\(rows\.length \/ pageSize\)/)
-    assert.match(source, /symbolPagination\.page \?\? 1\) > maxPage/)
+    assert.match(source, /syncPaginationBounds\(symbolPagination, rows\.length\)/)
+    assert.match(source, /\(pagination\.page \?\? 1\) > maxPage/)
 })
 
 // ---------------------------------------------------------------------------

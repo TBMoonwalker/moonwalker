@@ -9,20 +9,19 @@ const source = fs.readFileSync(
 )
 
 // ---------------------------------------------------------------------------
-// Functional mirror of the watch(perSymbol) page correction logic
+// Functional mirror of the syncPaginationBounds page correction logic
 // ---------------------------------------------------------------------------
 
 const SYMBOL_PAGE_SIZE = 10
 
-function correctPaginationOnDataChange(rows, currentPage, currentPageSize) {
-    const pageSize = currentPageSize ?? SYMBOL_PAGE_SIZE
-    const itemCount = rows.length
-    const maxPage = Math.max(1, Math.ceil(rows.length / pageSize))
-    let correctedPage = currentPage ?? 1
-    if (correctedPage > maxPage) {
-        correctedPage = maxPage
+function syncPaginationBounds(pagination, itemCount) {
+    const pageSize = pagination.pageSize ?? SYMBOL_PAGE_SIZE
+    pagination.itemCount = itemCount
+    const maxPage = Math.max(1, Math.ceil(itemCount / pageSize))
+    if ((pagination.page ?? 1) > maxPage) {
+        pagination.page = maxPage
     }
-    return { itemCount, maxPage, correctedPage }
+    return { itemCount, maxPage, correctedPage: pagination.page ?? 1 }
 }
 
 // ---------------------------------------------------------------------------
@@ -30,16 +29,14 @@ function correctPaginationOnDataChange(rows, currentPage, currentPageSize) {
 // ---------------------------------------------------------------------------
 
 test('watch keeps page 1 when data has 25 rows', () => {
-    const rows = Array.from({ length: 25 }, (_, i) => i)
-    const result = correctPaginationOnDataChange(rows, 1, 10)
+    const result = syncPaginationBounds({ page: 1, pageSize: 10 }, 25)
     assert.equal(result.itemCount, 25)
     assert.equal(result.maxPage, 3)
     assert.equal(result.correctedPage, 1)
 })
 
 test('watch keeps page 3 when data has 30 rows', () => {
-    const rows = Array.from({ length: 30 }, (_, i) => i)
-    const result = correctPaginationOnDataChange(rows, 3, 10)
+    const result = syncPaginationBounds({ page: 3, pageSize: 10 }, 30)
     assert.equal(result.maxPage, 3)
     assert.equal(result.correctedPage, 3)
 })
@@ -49,15 +46,13 @@ test('watch keeps page 3 when data has 30 rows', () => {
 // ---------------------------------------------------------------------------
 
 test('watch corrects page from 3 to 1 when data shrinks to 5 rows', () => {
-    const rows = Array.from({ length: 5 }, (_, i) => i)
-    const result = correctPaginationOnDataChange(rows, 3, 10)
+    const result = syncPaginationBounds({ page: 3, pageSize: 10 }, 5)
     assert.equal(result.maxPage, 1)
     assert.equal(result.correctedPage, 1)
 })
 
 test('watch corrects page from 5 to 2 when data shrinks to 15 rows', () => {
-    const rows = Array.from({ length: 15 }, (_, i) => i)
-    const result = correctPaginationOnDataChange(rows, 5, 10)
+    const result = syncPaginationBounds({ page: 5, pageSize: 10 }, 15)
     assert.equal(result.maxPage, 2)
     assert.equal(result.correctedPage, 2)
 })
@@ -67,29 +62,26 @@ test('watch corrects page from 5 to 2 when data shrinks to 15 rows', () => {
 // ---------------------------------------------------------------------------
 
 test('watch handles zero rows -- maxPage is 1, page corrected to 1', () => {
-    const result = correctPaginationOnDataChange([], 3, 10)
+    const result = syncPaginationBounds({ page: 3, pageSize: 10 }, 0)
     assert.equal(result.itemCount, 0)
     assert.equal(result.maxPage, 1)
     assert.equal(result.correctedPage, 1)
 })
 
 test('watch handles exactly pageSize rows', () => {
-    const rows = Array.from({ length: 10 }, (_, i) => i)
-    const result = correctPaginationOnDataChange(rows, 1, 10)
+    const result = syncPaginationBounds({ page: 1, pageSize: 10 }, 10)
     assert.equal(result.maxPage, 1)
     assert.equal(result.correctedPage, 1)
 })
 
 test('watch handles exactly pageSize + 1 rows', () => {
-    const rows = Array.from({ length: 11 }, (_, i) => i)
-    const result = correctPaginationOnDataChange(rows, 1, 10)
+    const result = syncPaginationBounds({ page: 1, pageSize: 10 }, 11)
     assert.equal(result.maxPage, 2)
     assert.equal(result.correctedPage, 1)
 })
 
 test('watch uses SYMBOL_PAGE_SIZE fallback when pageSize is undefined', () => {
-    const rows = Array.from({ length: 25 }, (_, i) => i)
-    const result = correctPaginationOnDataChange(rows, 1, undefined)
+    const result = syncPaginationBounds({ page: 1 }, 25)
     assert.equal(result.maxPage, 3) // ceil(25/10) = 3
 })
 
@@ -98,18 +90,22 @@ test('watch uses SYMBOL_PAGE_SIZE fallback when pageSize is undefined', () => {
 // ---------------------------------------------------------------------------
 
 test('source has watch on perSymbol', () => {
-    assert.match(source, /watch\(perSymbol/)
+    assert.match(source, /watch\(\s*perSymbol\s*,/)
 })
 
-test('source watch sets itemCount', () => {
-    assert.match(source, /symbolPagination\.itemCount = rows\.length/)
+test('source watch delegates page correction to syncPaginationBounds', () => {
+    assert.match(source, /syncPaginationBounds\(symbolPagination, rows\.length\)/)
 })
 
-test('source watch computes maxPage with Math.ceil', () => {
-    assert.match(source, /Math\.ceil\(rows\.length \/ pageSize\)/)
+test('syncPaginationBounds sets itemCount', () => {
+    assert.match(source, /pagination\.itemCount = itemCount/)
 })
 
-test('source watch corrects page when it exceeds maxPage', () => {
-    assert.match(source, /symbolPagination\.page \?\? 1\) > maxPage/)
-    assert.match(source, /symbolPagination\.page = maxPage/)
+test('syncPaginationBounds computes maxPage with Math.ceil', () => {
+    assert.match(source, /Math\.ceil\(itemCount \/ pageSize\)/)
+})
+
+test('syncPaginationBounds corrects page when it exceeds maxPage', () => {
+    assert.match(source, /\(pagination\.page \?\? 1\) > maxPage/)
+    assert.match(source, /pagination\.page = maxPage/)
 })

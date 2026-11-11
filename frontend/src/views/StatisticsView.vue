@@ -243,12 +243,7 @@ function syncPaginationBounds(pagination: PaginationProps, itemCount: number) {
 }
 
 watch(perSymbol, (rows) => {
-   const pageSize = symbolPagination.pageSize ?? SYMBOL_PAGE_SIZE
-   symbolPagination.itemCount = rows.length
-   const maxPage = Math.max(1, Math.ceil(rows.length / pageSize))
-   if ((symbolPagination.page ?? 1) > maxPage) {
-     symbolPagination.page = maxPage
-   }
+   syncPaginationBounds(symbolPagination, rows.length)
 })
 
 watch(
@@ -330,6 +325,18 @@ const tabNames = [
       { name: 'distribution', label: 'Distribution' },
  ]
 
+function filterMobileColumns<T>(
+    columns: DataTableColumns<T>,
+    visibleKeys: ReadonlySet<string>,
+): DataTableColumns<T> {
+    return columns.filter((column) => {
+        if (!('key' in column)) {
+            return true
+        }
+        return visibleKeys.has(String(column.key))
+    })
+}
+
 function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][number]> {
    const columns: DataTableColumns<AnalyticsOverview['per_symbol'][number]> = [
       {
@@ -388,12 +395,7 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
       },
     ]
    if (isMobile.value) {
-      return columns.filter((column) => {
-         if (!('key' in column)) {
-            return true
-         }
-         return SYMBOL_MOBILE_COLUMN_KEYS.has(String(column.key))
-      })
+      return filterMobileColumns(columns, SYMBOL_MOBILE_COLUMN_KEYS)
    }
    return columns
 }
@@ -444,12 +446,7 @@ function getDurationColumns(): DataTableColumns<AnalyticsOverview['duration_extr
       },
     ]
    if (isMobile.value) {
-      return columns.filter((column) => {
-         if (!('key' in column)) {
-            return true
-         }
-         return DURATION_MOBILE_COLUMN_KEYS.has(String(column.key))
-      })
+      return filterMobileColumns(columns, DURATION_MOBILE_COLUMN_KEYS)
    }
    return columns
 }
@@ -556,12 +553,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
       },
    ]
    if (isMobile.value) {
-      return columns.filter((column) => {
-         if (!('key' in column)) {
-            return true
-         }
-         return AI_TRUST_MOBILE_COLUMN_KEYS.has(String(column.key))
-      })
+      return filterMobileColumns(columns, AI_TRUST_MOBILE_COLUMN_KEYS)
    }
    return columns
 }

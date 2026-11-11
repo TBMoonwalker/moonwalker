@@ -120,6 +120,10 @@ function isFloat(val: any): boolean {
   return typeof val === 'number' && Number.isFinite(val) && !Number.isInteger(val)
 }
 
+function decimalDigits(value: any, fallback = 0): number {
+  return isFloat(value) ? value.toString().split('.')[1].length : fallback
+}
+
 function formatDecimal(
   value: number,
   fallbackPrecision = 2,
@@ -128,9 +132,7 @@ function formatDecimal(
   if (!Number.isFinite(value)) {
     return String(value)
   }
-  const actualPrecision = isFloat(value)
-    ? value.toString().split('.')[1]?.length ?? fallbackPrecision
-    : fallbackPrecision
+  const actualPrecision = decimalDigits(value, fallbackPrecision)
   const precision = Math.min(maxPrecision, Math.max(fallbackPrecision, actualPrecision))
   return value.toFixed(precision)
 }
@@ -164,21 +166,11 @@ export const useTradesStore = defineStore('trades', {
    }),
   actions: {
     normalizeOpenTradeRow(val: any) {
-      const amountPrecision = isFloat(val.amount)
-        ? val.amount.toString().split('.')[1].length
-        : 0
-      const costPrecision = isFloat(val.cost)
-        ? val.cost.toString().split('.')[1].length
-        : 0
-      const tpPrecision = isFloat(val.tp_price)
-        ? val.tp_price.toString().split('.')[1].length
-        : 0
-      const avgPrecision = isFloat(val.avg_price)
-        ? val.avg_price.toString().split('.')[1].length
-        : 0
-      const currentPrecision = isFloat(val.current_price)
-        ? val.current_price.toString().split('.')[1].length
-        : 0
+      const amountPrecision = decimalDigits(val.amount)
+      const costPrecision = decimalDigits(val.cost)
+      const tpPrecision = decimalDigits(val.tp_price)
+      const avgPrecision = decimalDigits(val.avg_price)
+      const currentPrecision = decimalDigits(val.current_price)
 
       return {
         ...val,
@@ -230,15 +222,9 @@ export const useTradesStore = defineStore('trades', {
     setClosedTrades(raw: any[]) {
       this.closedTrades = raw.map((val: any) => {
         const unverifiedStop = val.close_reason === 'manual_stop' && val.valuation_quantity == null
-        const amountPrecision = isFloat(val.amount)
-          ? val.amount.toString().split('.')[1].length
-          : 0
-        const tpPrecision = isFloat(val.tp_price)
-          ? val.tp_price.toString().split('.')[1].length
-          : 2
-        const avgPrecision = isFloat(val.avg_price)
-          ? val.avg_price.toString().split('.')[1].length
-          : 2
+        const amountPrecision = decimalDigits(val.amount)
+        const tpPrecision = decimalDigits(val.tp_price, 2)
+        const avgPrecision = decimalDigits(val.avg_price, 2)
         return {
           ...val,
           cost: formatDecimal(val.cost, 2),
@@ -261,9 +247,7 @@ export const useTradesStore = defineStore('trades', {
     setUnsellableTrades(raw: any[]) {
       this.unsellableTrades = raw.map((val: any) => {
         const dust = archivedDust(val.accumulation_inventory_json)
-        const amountPrecision = !dust && isFloat(val.amount)
-          ? val.amount.toString().split('.')[1].length
-          : 0
+        const amountPrecision = dust ? 0 : decimalDigits(val.amount)
         return {
           ...val,
           cost: dust ? dust.remaining_cost ?? 'Unknown' : formatDecimal(Number(val.cost), 2),
