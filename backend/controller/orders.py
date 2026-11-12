@@ -210,6 +210,10 @@ async def repair_placement_intent(operation_id: FromPath[str]) -> Any:
         )
     except PlacementRepairError as exc:
         return _placement_repair_error_response(exc)
+    except ValueError as exc:
+        # release_quarantine reports a row that left quarantine underfoot
+        # with a bare ValueError; surface it as the same conflict contract.
+        return _placement_repair_error_response(PlacementRepairConflict(str(exc)))
 
 
 @post(
@@ -257,6 +261,10 @@ async def dismiss_placement_intent(
         return await placement_repair.dismiss(operation_id, note)
     except PlacementRepairError as exc:
         return _placement_repair_error_response(exc)
+    except ValueError as exc:
+        # release_quarantine reports a row that left quarantine underfoot
+        # with a bare ValueError; surface it as the same conflict contract.
+        return _placement_repair_error_response(PlacementRepairConflict(str(exc)))
 
 
 route_handlers = [

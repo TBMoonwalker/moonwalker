@@ -19,6 +19,7 @@ from service.exchange_capabilities import (
     ExchangeOrderLookupResult,
     ExchangeOrderLookupStatus,
 )
+from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.placement_intents import (
     PlacementAction,
@@ -81,6 +82,11 @@ class PlacementRepairService:
     an explicit dismissal.
     """
 
+    # One lock per operation serializes concurrent repair/dismiss attempts on
+    # the same intent, so the second caller re-checks durable state after the
+    # first one finishes instead of double-applying terminal evidence.
+    _operation_locks: dict[str, asyncio.Lock] = {}
+
     def __init__(
         self,
         exchange: Any,
@@ -90,6 +96,16 @@ class PlacementRepairService:
         self.exchange = exchange
         self.intents = intents
         self.resume_placement = resume_placement
+
+    @classmethod
+    def _lock_for_operation(cls, operation_id: str) -> asyncio.Lock:
+        """Return the process-wide lock serializing one operation's exits."""
+        normalized = str(operation_id or "").strip()
+        lock = cls._operation_locks.get(normalized)
+        if lock is None:
+            lock = asyncio.Lock()
+            cls._operation_locks[normalized] = lock
+        return lock
 
     async def list_quarantined(self) -> list[dict[str, Any]]:
         """Describe every intent that keeps the startup gate closed."""
@@ -102,6 +118,15 @@ class PlacementRepairService:
         config: dict[str, Any],
     ) -> dict[str, Any]:
         """Look up one quarantined intent and apply its terminal evidence."""
+        async with self._lock_for_operation(operation_id):
+            return await self._repair_locked(operation_id, config)
+
+    async def _repair_locked(
+        self,
+        operation_id: str,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Apply one repair while the per-operation lock is held."""
         intent = await self._load_quarantined(operation_id)
         exchange_name = str(config.get("exchange") or "").strip()
         if not is_exchange_placement_enabled(config):
@@ -150,6 +175,15 @@ class PlacementRepairService:
 
     async def dismiss(self, operation_id: str, note: str) -> dict[str, Any]:
         """Record one explicit operator dismissal as a terminal disposition."""
+        async with self._lock_for_operation(operation_id):
+            return await self._dismiss_locked(operation_id, note)
+
+    async def _dismiss_locked(
+        self,
+        operation_id: str,
+        note: str,
+    ) -> dict[str, Any]:
+        """Record one dismissal while the per-operation lock is held."""
         intent = await self._load_quarantined(operation_id)
         note_text = str(note or "").strip()
         if not note_text:
@@ -329,9 +363,25 @@ class PlacementRepairService:
         order: dict[str, Any],
         config: dict[str, Any],
     ) -> bool:
-        """Resume local persistence from found evidence, mirroring startup."""
+        """Resume local persistence from found evidence, mirroring startup.
+
+        The shared finalize seam documents that its callers guarantee
+        exclusivity by holding the lifecycle mutation lock (at startup by
+        reconciling before producers start), so acquire it here before the
+        resume handler touches trade state.
+        """
         try:
-            return bool(await self.resume_placement(intent, order, config))
+            async with lifecycle_mutation_coordinator.mutation(
+                str(intent.symbol)
+            ) as admitted:
+                if not admitted:
+                    logging.info(
+                        "Placement repair resume for %s skipped during "
+                        "trading maintenance.",
+                        str(intent.operation_id),
+                    )
+                    return False
+                return bool(await self.resume_placement(intent, order, config))
         except Exception as exc:  # noqa: BLE001 - a failure keeps quarantine.
             logging.error(
                 "Placement repair resume failed for %s: %s",

@@ -15,6 +15,7 @@ seam=none (unit-level; the app startup mode is covered in test_app_startup).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -867,5 +868,67 @@ async def test_repair_only_touches_the_exchange_through_lookup(
 
         assert [call["symbol"] for call in exchange.calls] == ["BTC/USDC"]
         assert not hasattr(exchange, "create_order")
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_repairs_persist_fill_once_and_conflict(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A concurrent second repair must conflict, not double-apply evidence."""
+    await _init_database(tmp_path)
+    try:
+        _classic_route(monkeypatch)
+        order = {
+            "id": "7788",
+            "status": "closed",
+            "filled": 0.6,
+            "amount": 0.6,
+            "price": 0.21,
+        }
+        exchange = _FakeExchange(
+            ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.FOUND, order=order
+            )
+        )
+
+        class _YieldingResume(_FakeResume):
+            """Yield the loop mid-resume so a concurrent repair interleaves."""
+
+            async def __call__(
+                self,
+                intent: Any,
+                exchange_order: dict[str, Any],
+                _config: dict[str, Any],
+            ) -> bool:
+                self.calls.append((str(intent.operation_id), dict(exchange_order)))
+                await asyncio.sleep(0)
+                return True
+
+        resume = _YieldingResume()
+        await _quarantined_limit_sell()
+        service = _service(exchange, resume=resume)
+
+        outcomes = await asyncio.gather(
+            service.repair("limit_sell-test", {"exchange": "binance"}),
+            service.repair("limit_sell-test", {"exchange": "binance"}),
+            return_exceptions=True,
+        )
+
+        results = [outcome for outcome in outcomes if isinstance(outcome, dict)]
+        conflicts = [
+            outcome
+            for outcome in outcomes
+            if isinstance(outcome, PlacementRepairConflict)
+        ]
+        assert len(results) == 1
+        assert results[0]["status"] == "completed"
+        assert len(conflicts) == 1
+        # Exactly one resume ran: the second caller must never re-apply the
+        # fill and then fail on the stale quarantine release.
+        assert len(resume.calls) == 1
+        intent = await model.PlacementIntent.get(operation_id="limit_sell-test")
+        assert str(intent.state) == "completed"
     finally:
         await Tortoise.close_connections()
