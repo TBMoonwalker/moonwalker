@@ -88,10 +88,24 @@ class DcaExchange(Exchange):
         await self._ensure_markets_loaded()
         self._last_buy_precheck_result = None
         order_check_range_seconds = self._get_order_check_range_seconds(config)
-        order["price"] = await self._get_price_for_symbol(
-            order["symbol"],
-            prefer_ask=True,
-        )
+        try:
+            order["price"] = await self._get_price_for_symbol(
+                order["symbol"],
+                prefer_ask=True,
+            )
+        except (ccxt.BaseError, RetryError, RuntimeError, TypeError, ValueError):
+            self._last_buy_precheck_result = build_buy_precheck_result(
+                ok=False,
+                reason="executable_price_unavailable",
+                symbol=str(order.get("symbol") or ""),
+                required_quote=self._resolve_required_buy_quote(order),
+            )
+            logging.error(
+                "Skipping buy for %s: executable price fetch failed.",
+                order.get("symbol"),
+                exc_info=True,
+            )
+            return None
         maximum_buy_price = float(order.get("maximum_buy_price") or 0.0)
         if maximum_buy_price > 0:
             if getattr(self.exchange, "id", None) == "bybiteu":
@@ -152,11 +166,25 @@ class DcaExchange(Exchange):
         amount_sizing_price = (
             maximum_buy_price if maximum_buy_price > 0 else order["price"]
         )
-        order["amount"] = await self._get_amount_from_symbol(
-            order["ordersize"],
-            order["symbol"],
-            amount_sizing_price,
-        )
+        try:
+            order["amount"] = await self._get_amount_from_symbol(
+                order["ordersize"],
+                order["symbol"],
+                amount_sizing_price,
+            )
+        except (ccxt.BaseError, RetryError, RuntimeError, TypeError, ValueError):
+            self._last_buy_precheck_result = build_buy_precheck_result(
+                ok=False,
+                reason="executable_price_unavailable",
+                symbol=str(order.get("symbol") or ""),
+                required_quote=self._resolve_required_buy_quote(order),
+            )
+            logging.error(
+                "Skipping buy for %s: order amount resolution failed.",
+                order.get("symbol"),
+                exc_info=True,
+            )
+            return None
         if not order["price"] or not order["amount"] or float(order["amount"]) <= 0:
             self._last_buy_precheck_result = build_buy_precheck_result(
                 ok=False,
