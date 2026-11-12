@@ -484,6 +484,11 @@ class Statistic:
             cache_clear = getattr(cached_reader, "cache_clear", None)
             if cache_clear is not None:
                 await cache_clear()
+        # A bulk ledger replacement rewrites the history the timeline
+        # resamples from; drop this instance's cached timeline and advance
+        # the shared generation so other instances rebuild too.
+        self.invalidate_timeline_cache()
+        _advance_timeline_generation()
 
     @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
     async def _get_profit_base_cached(self) -> dict[str, Any]:

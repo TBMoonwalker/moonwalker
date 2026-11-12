@@ -164,6 +164,35 @@ async def test_snapshot_write_from_other_instance_invalidates_cache(
 
 
 @pytest.mark.asyncio
+async def test_bulk_ledger_invalidation_forces_timeline_rebuild_elsewhere(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'test.sqlite'}", modules={"models": ["model"]}
+    )
+    await Tortoise.generate_schemas()
+    try:
+        await _seed_history([(timedelta(hours=1), 10.0, 100.0)])
+        serving = Statistic()
+        other = Statistic()
+        builds = _instrument_builds(serving)
+
+        first = await serving.get_profit_overall_timeline()
+        await other.invalidate_profit_caches()
+        second = await serving.get_profit_overall_timeline()
+
+        # The bulk-ledger invalidation came from a different Statistic
+        # instance (the controller's restore path), yet the shared
+        # generation must force the serving cache to rebuild.
+        assert builds == [2]
+        assert second == first
+        assert second[-1]["profit_overall"] == 10.0
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_timeline_cache_expires_after_ttl(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     await Tortoise.init(
