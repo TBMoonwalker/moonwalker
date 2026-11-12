@@ -630,7 +630,10 @@ class Exchange:
 
         Buy execution paths prefer the best ask because it is the immediately
         executable buy price. Sell-side exit price guards prefer the best bid
-        for the same reason. Other callers retain the last-trade behavior.
+        for the same reason. Those executable-side fetches never fall back to
+        the last trade - a stale last can mislead exactly the guards that
+        exist to protect against unexecutable prices - and retry like a
+        missing price instead. Other callers retain the last-trade behavior.
         """
         result = None
 
@@ -644,13 +647,9 @@ class Exchange:
                 return ""
             # Fetch the ticker data for the trading pair
             ticker = await self.exchange.fetch_ticker(resolved_pair)
-            if prefer_ask:
-                raw_price = ticker.get("ask")
-            elif prefer_bid:
-                raw_price = ticker.get("bid")
+            if prefer_ask or prefer_bid:
+                raw_price = ticker.get("ask" if prefer_ask else "bid")
             else:
-                raw_price = ticker.get("last")
-            if not raw_price:
                 raw_price = ticker.get("last")
             if not raw_price:
                 logging.debug(

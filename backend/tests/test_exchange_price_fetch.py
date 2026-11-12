@@ -2,6 +2,7 @@
 
 import pytest
 from service.exchange import Exchange
+from tenacity import RetryError, stop_after_attempt, wait_none
 
 
 class _TickerExchange:
@@ -31,6 +32,17 @@ async def _resolve(_symbol: str) -> str:
     return "BTC/USDC"
 
 
+def _neutralize_retry(exchange: Exchange, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail a missing price immediately instead of waiting through retries.
+
+    The decorated fetcher shares one Tenacity instance across calls, so
+    monkeypatch restores the production stop/wait after the test.
+    """
+    retry = exchange._get_price_for_symbol.retry
+    monkeypatch.setattr(retry, "wait", wait_none())
+    monkeypatch.setattr(retry, "stop", stop_after_attempt(1))
+
+
 @pytest.mark.asyncio
 async def test_get_price_for_symbol_prefers_bid_when_present(monkeypatch) -> None:
     exchange, client = _make_exchange({"bid": 100.0, "ask": 101.0, "last": 100.5})
@@ -43,15 +55,29 @@ async def test_get_price_for_symbol_prefers_bid_when_present(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_get_price_for_symbol_prefers_bid_falls_back_to_last(
+async def test_get_price_for_symbol_missing_bid_retries_instead_of_last(
     monkeypatch,
 ) -> None:
     exchange, _client = _make_exchange({"bid": None, "ask": 101.0, "last": 100.5})
     monkeypatch.setattr(exchange, "_resolve_symbol_with_refresh", _resolve)
+    _neutralize_retry(exchange, monkeypatch)
 
-    price = await exchange._get_price_for_symbol("BTC/USDC", prefer_bid=True)
+    # A missing executable side must not be papered over with the last
+    # trade; the fetcher retries like a missing price.
+    with pytest.raises(RetryError):
+        await exchange._get_price_for_symbol("BTC/USDC", prefer_bid=True)
 
-    assert price == "100.50000000"
+
+@pytest.mark.asyncio
+async def test_get_price_for_symbol_missing_ask_retries_instead_of_last(
+    monkeypatch,
+) -> None:
+    exchange, _client = _make_exchange({"bid": 100.0, "ask": None, "last": 100.5})
+    monkeypatch.setattr(exchange, "_resolve_symbol_with_refresh", _resolve)
+    _neutralize_retry(exchange, monkeypatch)
+
+    with pytest.raises(RetryError):
+        await exchange._get_price_for_symbol("BTC/USDC", prefer_ask=True)
 
 
 @pytest.mark.asyncio
