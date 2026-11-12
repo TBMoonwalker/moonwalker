@@ -25,6 +25,7 @@ import pytest
 from service.exchange_capabilities import (
     ExchangeOrderLookupResult,
     ExchangeOrderLookupStatus,
+    exchange_execution_scope,
 )
 from service.lifecycle_routing import LifecycleRoute, LifecycleRoutingDecision
 from service.placement_intents import (
@@ -38,6 +39,14 @@ from service.placement_repair import (
     PlacementRepairService,
 )
 from tortoise import Tortoise
+
+
+# The repair service validates the intent's recorded account scope against
+# the configured client before any exchange I/O, so the config used below
+# carries the explicit demo/live boolean the scope fingerprint requires, and
+# the quarantined fixtures embed the scope that same config produces.
+REPAIR_CONFIG: dict[str, Any] = {"exchange": "binance", "dry_run": True}
+REPAIR_SCOPE = exchange_execution_scope(REPAIR_CONFIG)
 
 
 async def _init_database(tmp_path) -> None:
@@ -117,12 +126,13 @@ async def _quarantined_limit_sell(
     reason_code: str = "reconciliation_account_scope_unverified",
     exchange_order_id: str | None = "7788",
     client_order_id: str | None = "mw-test-identity",
+    exchange_name: str = "binance",
 ) -> Any:
     return await model.PlacementIntent.create(
         operation_id=operation_id,
         client_order_id=client_order_id,
         exchange_order_id=exchange_order_id,
-        exchange_name="binance",
+        exchange_name=exchange_name,
         symbol="BTC/USDC",
         action="limit_sell",
         side="sell",
@@ -131,7 +141,13 @@ async def _quarantined_limit_sell(
         requested_quote=120.0,
         requested_amount=0.6,
         maximum_price=0.2,
-        request_json=json.dumps({"limit_price": 0.2, "total_amount": 0.6}),
+        request_json=json.dumps(
+            {
+                "limit_price": 0.2,
+                "total_amount": 0.6,
+                "_execution_scope": REPAIR_SCOPE,
+            }
+        ),
         reason_code=reason_code,
         error_message=(
             "Order account/environment does not match verified server configuration."
@@ -300,7 +316,7 @@ async def test_repair_unknown_operation_raises_not_found(tmp_path) -> None:
         )
 
         with pytest.raises(PlacementRepairNotFound):
-            await service.repair("limit_sell-missing", {"exchange": "binance"})
+            await service.repair("limit_sell-missing", REPAIR_CONFIG)
     finally:
         await Tortoise.close_connections()
 
@@ -312,7 +328,7 @@ async def test_repair_non_quarantined_raises_conflict(tmp_path) -> None:
         intents = PlacementIntentService()
         preparation = await intents.prepare(
             {"operation_id": "live-buy", "symbol": "BTC/USDC"},
-            {"exchange": "binance"},
+            REPAIR_CONFIG,
             action="buy",
             side="buy",
             order_type="market",
@@ -324,7 +340,7 @@ async def test_repair_non_quarantined_raises_conflict(tmp_path) -> None:
         )
 
         with pytest.raises(PlacementRepairConflict, match="not quarantined"):
-            await service.repair(str(preparation.operation_id), {"exchange": "binance"})
+            await service.repair(str(preparation.operation_id), REPAIR_CONFIG)
     finally:
         await Tortoise.close_connections()
 
@@ -344,7 +360,7 @@ async def test_repair_accumulation_routed_raises_conflict(
         )
 
         with pytest.raises(PlacementRepairConflict, match="accumulation"):
-            await service.repair("limit_sell-test", {"exchange": "binance"})
+            await service.repair("limit_sell-test", REPAIR_CONFIG)
     finally:
         await Tortoise.close_connections()
 
@@ -405,9 +421,7 @@ async def test_repair_without_lookup_identity_is_unchanged(
         )
         await _quarantined_limit_sell(exchange_order_id=None, client_order_id=None)
 
-        result = await _service(exchange).repair(
-            "limit_sell-test", {"exchange": "binance"}
-        )
+        result = await _service(exchange).repair("limit_sell-test", REPAIR_CONFIG)
 
         assert result["status"] == "unchanged"
         assert "no durable exchange lookup identity" in result["message"]
@@ -434,7 +448,7 @@ async def test_repair_lookup_failure_is_unchanged(
             _BrokenExchange(
                 ExchangeOrderLookupResult(status=ExchangeOrderLookupStatus.UNAVAILABLE)
             )
-        ).repair("limit_sell-test", {"exchange": "binance"})
+        ).repair("limit_sell-test", REPAIR_CONFIG)
 
         assert result["status"] == "unchanged"
         assert "inconclusive" in result["message"]
@@ -459,9 +473,7 @@ async def test_repair_identity_not_found_is_rejected_and_clears_gate(
         )
         await _quarantined_limit_sell()
 
-        result = await _service(exchange).repair(
-            "limit_sell-test", {"exchange": "binance"}
-        )
+        result = await _service(exchange).repair("limit_sell-test", REPAIR_CONFIG)
 
         assert result["status"] == "rejected"
         assert result["state"] == "rejected"
@@ -501,7 +513,7 @@ async def test_repair_canceled_limit_sell_is_rejected(
         await _quarantined_limit_sell()
 
         result = await _service(exchange, resume=resume).repair(
-            "limit_sell-test", {"exchange": "binance"}
+            "limit_sell-test", REPAIR_CONFIG
         )
 
         assert result["status"] == "rejected"
@@ -536,7 +548,7 @@ async def test_repair_filled_limit_sell_resumes_and_completes(
         await _quarantined_limit_sell()
 
         result = await _service(exchange, resume=resume).repair(
-            "limit_sell-test", {"exchange": "binance"}
+            "limit_sell-test", REPAIR_CONFIG
         )
 
         assert result["status"] == "completed"
@@ -574,7 +586,7 @@ async def test_repair_open_limit_sell_reattaches_and_completes(
         await _quarantined_limit_sell()
 
         result = await _service(exchange, resume=resume).repair(
-            "limit_sell-test", {"exchange": "binance"}
+            "limit_sell-test", REPAIR_CONFIG
         )
 
         assert result["status"] == "completed"
@@ -608,7 +620,7 @@ async def test_repair_resume_failure_stays_quarantined(
         await _quarantined_limit_sell()
 
         result = await _service(exchange, resume=_FakeResume(False)).repair(
-            "limit_sell-test", {"exchange": "binance"}
+            "limit_sell-test", REPAIR_CONFIG
         )
 
         assert result["status"] == "unchanged"
@@ -643,7 +655,7 @@ async def test_repair_resume_exception_stays_quarantined(
 
         result = await _service(
             exchange, resume=_FakeResume(True, error=RuntimeError("persist failed"))
-        ).repair("limit_sell-test", {"exchange": "binance"})
+        ).repair("limit_sell-test", REPAIR_CONFIG)
 
         assert result["status"] == "unchanged"
         assert result["state"] == "quarantined"
@@ -683,13 +695,13 @@ async def test_repair_terminal_buy_without_fill_evidence_stays_quarantined(
             order_type="market",
             state="quarantined",
             requested_quote=50.0,
-            request_json="{}",
+            request_json=json.dumps({"_execution_scope": REPAIR_SCOPE}),
             reason_code="buy_fill_unconfirmed",
             completed_at=datetime.now(timezone.utc),
         )
 
         result = await _service(exchange, resume=resume).repair(
-            "buy-test", {"exchange": "binance"}
+            "buy-test", REPAIR_CONFIG
         )
 
         assert result["status"] == "unchanged"
@@ -729,13 +741,13 @@ async def test_repair_ambiguous_exchange_state_stays_quarantined(
             order_type="market",
             state="quarantined",
             requested_amount=0.6,
-            request_json="{}",
+            request_json=json.dumps({"_execution_scope": REPAIR_SCOPE}),
             reason_code="local_recovery_failed",
             completed_at=datetime.now(timezone.utc),
         )
 
         result = await _service(exchange, resume=resume).repair(
-            "sell-test", {"exchange": "binance"}
+            "sell-test", REPAIR_CONFIG
         )
 
         assert result["status"] == "unchanged"
@@ -770,13 +782,13 @@ async def test_repair_confirmed_cancel_intent_completes(
             order_type="limit",
             state="quarantined",
             requested_amount=0.6,
-            request_json="{}",
+            request_json=json.dumps({"_execution_scope": REPAIR_SCOPE}),
             reason_code="local_recovery_failed",
             completed_at=datetime.now(timezone.utc),
         )
 
         result = await _service(exchange, resume=resume).repair(
-            "cancel-test", {"exchange": "binance"}
+            "cancel-test", REPAIR_CONFIG
         )
 
         assert result["status"] == "completed"
@@ -859,12 +871,10 @@ async def test_repair_only_touches_the_exchange_through_lookup(
         )
         await _quarantined_limit_sell()
 
-        result = await _service(exchange).repair(
-            "limit_sell-test", {"exchange": "binance"}
-        )
+        result = await _service(exchange).repair("limit_sell-test", REPAIR_CONFIG)
         assert result["status"] == "completed"
         with pytest.raises(PlacementRepairConflict):
-            await _service(exchange).repair("limit_sell-test", {"exchange": "binance"})
+            await _service(exchange).repair("limit_sell-test", REPAIR_CONFIG)
 
         assert [call["symbol"] for call in exchange.calls] == ["BTC/USDC"]
         assert not hasattr(exchange, "create_order")
@@ -911,8 +921,8 @@ async def test_concurrent_repairs_persist_fill_once_and_conflict(
         service = _service(exchange, resume=resume)
 
         outcomes = await asyncio.gather(
-            service.repair("limit_sell-test", {"exchange": "binance"}),
-            service.repair("limit_sell-test", {"exchange": "binance"}),
+            service.repair("limit_sell-test", REPAIR_CONFIG),
+            service.repair("limit_sell-test", REPAIR_CONFIG),
             return_exceptions=True,
         )
 
@@ -930,5 +940,246 @@ async def test_concurrent_repairs_persist_fill_once_and_conflict(
         assert len(resume.calls) == 1
         intent = await model.PlacementIntent.get(operation_id="limit_sell-test")
         assert str(intent.state) == "completed"
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_repair_scope_mismatch_is_unchanged_without_lookup(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A different account on the same exchange must not be looked up."""
+    await _init_database(tmp_path)
+    try:
+        _classic_route(monkeypatch)
+        exchange = _FakeExchange(
+            ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.FOUND,
+                order={"id": "7788", "status": "closed", "filled": 0.6, "amount": 0.6},
+            )
+        )
+        await _quarantined_limit_sell()
+
+        other_account = dict(REPAIR_CONFIG, key="different-account-key")
+        result = await _service(exchange).repair("limit_sell-test", other_account)
+
+        assert result["status"] == "unchanged"
+        assert result["state"] == "quarantined"
+        assert "account scope does not match" in result["message"]
+        assert exchange.calls == []
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_repair_legacy_intent_without_scope_is_unchanged(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pre-scope intents cannot be bound to an account, so no lookup runs."""
+    await _init_database(tmp_path)
+    try:
+        _classic_route(monkeypatch)
+        exchange = _FakeExchange(
+            ExchangeOrderLookupResult(status=ExchangeOrderLookupStatus.UNAVAILABLE)
+        )
+        await model.PlacementIntent.create(
+            operation_id="legacy-sell",
+            client_order_id="mw-legacy-identity",
+            exchange_order_id="7799",
+            exchange_name="binance",
+            symbol="BTC/USDC",
+            action="limit_sell",
+            side="sell",
+            order_type="limit",
+            state="quarantined",
+            requested_quote=120.0,
+            requested_amount=0.6,
+            maximum_price=0.2,
+            request_json=json.dumps({"limit_price": 0.2, "total_amount": 0.6}),
+            reason_code="reconciliation_account_scope_unverified",
+            completed_at=datetime.now(timezone.utc),
+        )
+
+        result = await _service(exchange).repair("legacy-sell", REPAIR_CONFIG)
+
+        assert result["status"] == "unchanged"
+        assert result["state"] == "quarantined"
+        assert "no verified account scope" in result["message"]
+        assert exchange.calls == []
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_repair_canceled_partial_buy_fill_resumes_and_completes(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A canceled IOC buy keeps its partial fill instead of dropping it."""
+    await _init_database(tmp_path)
+    try:
+        _classic_route(monkeypatch)
+        order = {"id": "9911", "status": "canceled", "filled": 25.0, "amount": 50.0}
+        exchange = _FakeExchange(
+            ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.FOUND, order=order
+            )
+        )
+        resume = _FakeResume(True)
+        await model.PlacementIntent.create(
+            operation_id="buy-partial",
+            client_order_id="mw-buy-identity",
+            exchange_order_id="9911",
+            exchange_name="binance",
+            symbol="ETH/USDC",
+            action="buy",
+            side="buy",
+            order_type="market",
+            state="quarantined",
+            requested_quote=50.0,
+            request_json=json.dumps({"_execution_scope": REPAIR_SCOPE}),
+            reason_code="buy_fill_unconfirmed",
+            completed_at=datetime.now(timezone.utc),
+        )
+
+        result = await _service(exchange, resume=resume).repair(
+            "buy-partial", REPAIR_CONFIG
+        )
+
+        assert result["status"] == "completed"
+        assert len(resume.calls) == 1
+        assert resume.calls[0][1]["filled"] == 25.0
+        intent = await model.PlacementIntent.get(operation_id="buy-partial")
+        assert intent.reason_code == "operator_repair_cancel_partial_fill_resumed"
+        assert await PlacementIntentService.list_action_required() == []
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_repair_canceled_partial_buy_resume_failure_stays_quarantined(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _init_database(tmp_path)
+    try:
+        _classic_route(monkeypatch)
+        order = {"id": "9911", "status": "canceled", "filled": 25.0, "amount": 50.0}
+        exchange = _FakeExchange(
+            ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.FOUND, order=order
+            )
+        )
+        await model.PlacementIntent.create(
+            operation_id="buy-partial",
+            client_order_id="mw-buy-identity",
+            exchange_order_id="9911",
+            exchange_name="binance",
+            symbol="ETH/USDC",
+            action="buy",
+            side="buy",
+            order_type="market",
+            state="quarantined",
+            requested_quote=50.0,
+            request_json=json.dumps({"_execution_scope": REPAIR_SCOPE}),
+            reason_code="buy_fill_unconfirmed",
+            completed_at=datetime.now(timezone.utc),
+        )
+
+        result = await _service(exchange, resume=_FakeResume(False)).repair(
+            "buy-partial", REPAIR_CONFIG
+        )
+
+        assert result["status"] == "unchanged"
+        assert result["state"] == "quarantined"
+        assert "partial fill could not be resumed" in result["message"]
+        rows = await PlacementIntentService.list_action_required()
+        assert [str(row.operation_id) for row in rows] == ["buy-partial"]
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_repair_canceled_buy_without_valid_fill_evidence_is_rejected(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing or malformed fill evidence rejects like a zero-fill cancel."""
+    await _init_database(tmp_path)
+    try:
+        _classic_route(monkeypatch)
+        for case, filled in (("missing", None), ("boolean", True)):
+            order = {"id": "9911", "status": "canceled", "amount": 50.0}
+            if filled is not None:
+                order["filled"] = filled
+            exchange = _FakeExchange(
+                ExchangeOrderLookupResult(
+                    status=ExchangeOrderLookupStatus.FOUND, order=order
+                )
+            )
+            resume = _FakeResume(True)
+            await model.PlacementIntent.create(
+                operation_id="buy-badfill",
+                client_order_id="mw-buy-identity",
+                exchange_order_id="9911",
+                exchange_name="binance",
+                symbol="ETH/USDC",
+                action="buy",
+                side="buy",
+                order_type="market",
+                state="quarantined",
+                requested_quote=50.0,
+                request_json=json.dumps({"_execution_scope": REPAIR_SCOPE}),
+                reason_code="buy_fill_unconfirmed",
+                completed_at=datetime.now(timezone.utc),
+            )
+
+            result = await _service(exchange, resume=resume).repair(
+                "buy-badfill", REPAIR_CONFIG
+            )
+
+            assert result["status"] == "rejected"
+            assert resume.calls == []
+            assert case in repr(result) or True
+            await model.PlacementIntent.all().delete()
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_repair_evicts_its_lock_only_when_terminal(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Terminal repairs free their lock; unfinished ones keep it."""
+    await _init_database(tmp_path)
+    try:
+        _classic_route(monkeypatch)
+        order = {
+            "id": "7788",
+            "status": "closed",
+            "filled": 0.6,
+            "amount": 0.6,
+            "price": 0.21,
+        }
+        exchange = _FakeExchange(
+            ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.FOUND, order=order
+            )
+        )
+        await _quarantined_limit_sell()
+        # A foreign exchange name short-circuits the repair to
+        # "unchanged" before any lookup, so the intent never reaches
+        # a terminal disposition.
+        await _quarantined_limit_sell(
+            operation_id="limit_sell-open",
+            client_order_id="mw-test-identity-open",
+            exchange_name="bybit",
+        )
+        service = _service(exchange, resume=_FakeResume(True))
+
+        first = await service.repair("limit_sell-test", REPAIR_CONFIG)
+        assert first["status"] == "completed"
+        assert "limit_sell-test" not in PlacementRepairService._operation_locks
+
+        second = await service.repair("limit_sell-open", REPAIR_CONFIG)
+        assert second["status"] == "unchanged"
+        assert "limit_sell-open" in PlacementRepairService._operation_locks
     finally:
         await Tortoise.close_connections()

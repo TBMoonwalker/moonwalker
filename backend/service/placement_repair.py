@@ -11,6 +11,7 @@ nothing here submits, cancels, or otherwise changes exchange state.
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import Any
 
 import ccxt.async_support as ccxt
@@ -26,7 +27,9 @@ from service.placement_intents import (
     PlacementIntentService,
     PlacementIntentState,
     deserialize_placement_payload,
+    has_execution_scope,
     is_exchange_placement_enabled,
+    placement_scope_matches,
 )
 
 logging = helper.LoggerFactory.get_logger(
@@ -54,6 +57,8 @@ TERMINAL_EXCHANGE_STATES = frozenset(
         "expired",
     }
 )
+
+TERMINAL_REPAIR_STATUSES = frozenset({"completed", "rejected", "dismissed"})
 
 
 class PlacementRepairError(ValueError):
@@ -119,7 +124,20 @@ class PlacementRepairService:
     ) -> dict[str, Any]:
         """Look up one quarantined intent and apply its terminal evidence."""
         async with self._lock_for_operation(operation_id):
-            return await self._repair_locked(operation_id, config)
+            result = await self._repair_locked(operation_id, config)
+            self._evict_settled(operation_id, result)
+            return result
+
+    @classmethod
+    def _evict_settled(cls, operation_id: str, result: dict[str, Any]) -> None:
+        """Drop the per-operation lock once the intent is terminal.
+
+        A terminal intent no longer mutates, so serializing it against
+        itself is over; keeping the lock forever would grow the registry
+        with one entry per operator repair for the process lifetime.
+        """
+        if str(result.get("status") or "") in TERMINAL_REPAIR_STATUSES:
+            cls._operation_locks.pop(str(operation_id or "").strip(), None)
 
     async def _repair_locked(
         self,
@@ -142,6 +160,23 @@ class PlacementRepairService:
                 f"the placement's exchange ({intent.exchange_name}). Repair "
                 "with the matching credentials, or dismiss after manual "
                 "review.",
+            )
+        if has_execution_scope(intent):
+            if not placement_scope_matches(intent, config):
+                return self._unchanged(
+                    intent,
+                    "The placement's verified account scope does not match "
+                    f"the configured credentials ({exchange_name}). A lookup "
+                    "could resolve against the wrong account; repair with "
+                    "the matching credentials, or dismiss after manual "
+                    "review.",
+                )
+        else:
+            return self._unchanged(
+                intent,
+                "This legacy placement has no verified account scope, so a "
+                "lookup cannot be bound to the account it was made on. "
+                "Review the exchange manually and dismiss it when safe.",
             )
         if not intent.exchange_order_id and not intent.client_order_id:
             return self._unchanged(
@@ -176,7 +211,9 @@ class PlacementRepairService:
     async def dismiss(self, operation_id: str, note: str) -> dict[str, Any]:
         """Record one explicit operator dismissal as a terminal disposition."""
         async with self._lock_for_operation(operation_id):
-            return await self._dismiss_locked(operation_id, note)
+            result = await self._dismiss_locked(operation_id, note)
+            self._evict_settled(operation_id, result)
+            return result
 
     async def _dismiss_locked(
         self,
@@ -287,6 +324,28 @@ class PlacementRepairService:
                     "completed",
                     "Confirmed cancel evidence was applied locally.",
                 )
+            if action == PlacementAction.BUY.value:
+                buy_filled = validated_buy_filled_amount(order)
+                if buy_filled is not None and buy_filled > 0:
+                    if not await self._resume(intent, order, config):
+                        return self._unchanged(
+                            intent,
+                            "The canceled order's partial fill could not be "
+                            "resumed into local trade state. Review the "
+                            "trade, then retry or dismiss.",
+                        )
+                    released = await self.intents.release_quarantine(
+                        operation_id,
+                        PlacementIntentState.COMPLETED,
+                        reason_code="operator_repair_cancel_partial_fill_resumed",
+                        result=order,
+                    )
+                    return self._result(
+                        released,
+                        "completed",
+                        "The canceled order's partial fill was resumed into "
+                        "local trade state.",
+                    )
             released = await self.intents.release_quarantine(
                 operation_id,
                 PlacementIntentState.REJECTED,
@@ -464,6 +523,26 @@ class PlacementRepairService:
             "state": str(intent.state),
             "message": message,
         }
+
+
+def validated_buy_filled_amount(order: dict[str, Any]) -> float | None:
+    """Return a validated non-negative buy fill amount, or ``None``.
+
+    Mirrors the startup reconciler's buy fill evidence check so the
+    operator repair path and startup reconciliation reject the same
+    malformed evidence: missing, boolean, non-numeric, non-finite or
+    negative fills all count as "no valid fill evidence".
+    """
+    raw_filled = order.get("filled")
+    if raw_filled is None or isinstance(raw_filled, bool):
+        return None
+    try:
+        filled = float(raw_filled)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(filled) or filled < 0:
+        return None
+    return filled
 
 
 def lookup_error_from_order(order: dict[str, Any]) -> str | None:
