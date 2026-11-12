@@ -32,6 +32,10 @@ def _full_payload(config_rows: list[dict], trade_data: dict | None = None) -> di
     return payload
 
 
+def _row(key: str, value: str | bool, value_type: str) -> dict:
+    return {"key": key, "value": value, "value_type": value_type}
+
+
 def _finding_codes(result: dict) -> list[str]:
     return [finding["code"] for finding in result["findings"]]
 
@@ -54,13 +58,9 @@ def test_classify_reports_pre_4_9_bridge_keys_as_blocking() -> None:
     result = BackupService().classify_backup(
         _config_payload(
             [
-                {"key": "timezone", "value": "UTC", "value_type": "str"},
-                {
-                    "key": "trade_lifecycle_mode",
-                    "value": "classic_dca",
-                    "value_type": "str",
-                },
-                {"key": "dynamic_dca", "value": True, "value_type": "bool"},
+                _row("timezone", "UTC", "str"),
+                _row("trade_lifecycle_mode", "classic_dca", "str"),
+                _row("dynamic_dca", True, "bool"),
             ]
         ),
         restore_trade_data=False,
@@ -87,15 +87,7 @@ def test_classify_reports_pre_4_9_bridge_keys_as_blocking() -> None:
 def test_classify_reports_removed_config_key_as_blocking() -> None:
     """Removed config keys mirror the restore refusal with the replacement."""
     result = BackupService().classify_backup(
-        _config_payload(
-            [
-                {
-                    "key": "autopilot_max_fund",
-                    "value": "300",
-                    "value_type": "int",
-                }
-            ]
-        ),
+        _config_payload([_row("autopilot_max_fund", "300", "int")]),
         restore_trade_data=False,
     )
 
@@ -267,13 +259,7 @@ def test_classify_reports_full_restore_without_trade_data_as_blocking() -> None:
 
 def test_classify_reports_config_only_version_id_drop_as_warning() -> None:
     """Config-only restore drops the local pin; full restore keeps it."""
-    rows = [
-        {
-            "key": "accumulation_strategy_version_id",
-            "value": "42",
-            "value_type": "int",
-        }
-    ]
+    rows = [_row("accumulation_strategy_version_id", "42", "int")]
 
     config_only = BackupService().classify_backup(
         _config_payload(rows), restore_trade_data=False
@@ -291,23 +277,19 @@ def test_classify_trade_mode_era_variants() -> None:
     service = BackupService()
 
     dynamic = service.classify_backup(
-        _config_payload(
-            [{"key": "trade_mode", "value": "dynamic_dca", "value_type": "str"}]
-        ),
+        _config_payload([_row("trade_mode", "dynamic_dca", "str")]),
         restore_trade_data=False,
     )
     assert dynamic["classification"]["trade_mode_era"] == "dynamic_dca"
 
     accumulation = service.classify_backup(
-        _config_payload(
-            [{"key": "trade_mode", "value": "accumulation", "value_type": "str"}]
-        ),
+        _config_payload([_row("trade_mode", "accumulation", "str")]),
         restore_trade_data=False,
     )
     assert accumulation["classification"]["trade_mode_era"] == "accumulation"
 
     legacy = service.classify_backup(
-        _config_payload([{"key": "timezone", "value": "UTC", "value_type": "str"}]),
+        _config_payload([_row("timezone", "UTC", "str")]),
         restore_trade_data=False,
     )
     assert legacy["classification"]["trade_mode_era"] == "legacy_unspecified"
@@ -347,13 +329,7 @@ def test_classify_orders_blocking_findings_first() -> None:
         {"id": 1, "symbol": "AAA/USDC", "campaign_id": 1},
     ]
     payload = _full_payload(
-        [
-            {
-                "key": "trade_lifecycle_mode",
-                "value": "classic_dca",
-                "value_type": "str",
-            }
-        ],
+        [_row("trade_lifecycle_mode", "classic_dca", "str")],
         trade_data,
     )
     result = BackupService().classify_backup(payload, restore_trade_data=True)
@@ -366,15 +342,7 @@ def test_classify_orders_blocking_findings_first() -> None:
 
 def test_classify_does_not_mutate_the_payload() -> None:
     """The preview is a read projection: the operator's file must stay intact."""
-    payload = _full_payload(
-        [
-            {
-                "key": "trade_lifecycle_mode",
-                "value": "classic_dca",
-                "value_type": "str",
-            }
-        ]
-    )
+    payload = _full_payload([_row("trade_lifecycle_mode", "classic_dca", "str")])
     original = copy.deepcopy(payload)
 
     BackupService().classify_backup(payload, restore_trade_data=True)
