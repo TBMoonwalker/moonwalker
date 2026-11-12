@@ -40,7 +40,6 @@ defineProps<{
     activeTarget: ControlCenterTarget
     activationDisabled: boolean
     activationLoading: boolean
-    backupClassification?: BackupClassification | null
     backupClassifications?: Partial<Record<BackupRestoreMode, BackupClassification>>
     bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
     classificationLoading?: boolean
@@ -114,7 +113,6 @@ const emit = defineEmits<{
 <template>
     <ControlCenterSetupWorkspace
         :active-target="activeTarget"
-        :backup-classification="backupClassification"
         :backup-classifications="backupClassifications"
         :bind-backup-file-input="bindBackupFileInput"
         :bind-target-element="bindTargetElement"

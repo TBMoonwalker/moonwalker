@@ -10,7 +10,6 @@ import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.v
 
 withDefaults(
     defineProps<{
-        backupClassification?: BackupClassification | null
         backupClassifications?: Partial<Record<BackupRestoreMode, BackupClassification>>
         backupDownloadLoading: boolean
         backupIncludeTradeData: boolean
@@ -29,7 +28,6 @@ withDefaults(
         selectedBackupHasTradeData: boolean
     }>(),
     {
-        backupClassification: null,
         backupClassifications: () => ({}),
         classificationLoading: false,
     },
@@ -84,7 +82,6 @@ const emit = defineEmits<{
                 </div>
                 <ConfigBackupRestoreControls
                     action-button-class="utility-action-button"
-                    :backup-classification="backupClassification"
                     :backup-classifications="backupClassifications"
                     :bind-backup-file-input="bindBackupFileInput"
                     :classification-loading="classificationLoading"

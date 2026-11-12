@@ -9,7 +9,6 @@ import type { SetupEntryChoice } from '../../control-center/setupEntryHistory'
 
 withDefaults(
     defineProps<{
-        backupClassification?: BackupClassification | null
         backupClassifications?: Partial<Record<BackupRestoreMode, BackupClassification>>
         bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
         classificationLoading?: boolean
@@ -21,7 +20,6 @@ withDefaults(
         selectedBackupHasTradeData: boolean
     }>(),
     {
-        backupClassification: null,
         backupClassifications: () => ({}),
         classificationLoading: false,
     },
@@ -65,7 +63,6 @@ const emit = defineEmits<{
             </n-alert>
 
             <ConfigBackupRestoreControls
-                :backup-classification="backupClassification"
                 :backup-classifications="backupClassifications"
                 :bind-backup-file-input="bindBackupFileInput"
                 :classification-loading="classificationLoading"

@@ -24,7 +24,6 @@ interface SetupTaskStatus {
 
 const props = defineProps<{
     activeTarget: ControlCenterTarget
-    backupClassification?: BackupClassification | null
     backupClassifications?: Partial<Record<BackupRestoreMode, BackupClassification>>
     bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
     bindTargetElement: (
@@ -81,7 +80,6 @@ const emit = defineEmits<{
 
     <template v-else-if="showRestoreSetupFlow">
         <ControlCenterSetupRestoreFlow
-            :backup-classification="backupClassification"
             :backup-classifications="backupClassifications"
             :bind-backup-file-input="bindBackupFileInput"
             :classification-loading="classificationLoading"

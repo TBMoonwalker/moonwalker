@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type {
     BackupClassification,
     BackupRestoreMode,
@@ -9,7 +10,6 @@ import type {
 const props = withDefaults(
     defineProps<{
         actionButtonClass?: string | null
-        backupClassification?: BackupClassification | null
         backupClassifications?: Partial<Record<BackupRestoreMode, BackupClassification>>
         bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
         classificationLoading?: boolean
@@ -22,7 +22,6 @@ const props = withDefaults(
     }>(),
     {
         actionButtonClass: null,
-        backupClassification: null,
         backupClassifications: () => ({}),
         classificationLoading: false,
         restoreReview: null,
@@ -36,8 +35,20 @@ const emit = defineEmits<{
     'restore-backup': [mode: BackupRestoreMode]
 }>()
 
+const classificationEntries = computed<BackupClassification[]>(() =>
+    (Object.keys(props.backupClassifications ?? {}) as BackupRestoreMode[])
+        .map(mode => props.backupClassifications[mode])
+        .filter((value): value is BackupClassification => value != null),
+)
+
 function isBlocking(mode: BackupRestoreMode): boolean {
     return props.backupClassifications?.[mode]?.blocking ?? false
+}
+
+function blockingReason(mode: BackupRestoreMode): string | undefined {
+    const findings = props.backupClassifications?.[mode]?.findings
+    const blocking = findings?.find(finding => finding.severity === 'blocking')
+    return blocking ? blocking.message : undefined
 }
 
 function findingLabel(finding: ClassificationFinding): string {
@@ -79,23 +90,24 @@ function findingLabel(finding: ClassificationFinding): string {
     </n-text>
 
     <div
-        v-if="backupClassification || classificationLoading"
+        v-if="classificationEntries.length > 0 || classificationLoading"
         class="backup-classification"
         role="status"
         aria-live="polite"
     >
-        <n-text v-if="classificationLoading && !backupClassification" depth="3">
+        <n-text v-if="classificationLoading && classificationEntries.length === 0" depth="3">
             Reviewing backup…
         </n-text>
         <n-alert
-            v-else-if="backupClassification"
-            :type="backupClassification.blocking ? 'error' : 'info'"
+            v-for="classification in classificationEntries"
+            :key="classification.mode"
+            :type="classification.blocking ? 'error' : 'info'"
             :bordered="false"
-            :title="`Backup review (${backupClassification.mode === 'full' ? 'full backup' : 'config only'} restore)`"
+            :title="`Backup review (${classification.mode === 'full' ? 'full backup' : 'config only'} restore)`"
         >
             <ul class="backup-classification-findings">
                 <li
-                    v-for="finding in backupClassification.findings"
+                    v-for="finding in classification.findings"
                     :key="`${finding.code}:${finding.message}`"
                 >
                     <n-text :depth="finding.severity === 'info' ? 3 : 2">
@@ -130,6 +142,7 @@ function findingLabel(finding: ClassificationFinding): string {
             type="warning"
             :loading="restoreLoading || classificationLoading"
             :disabled="!hasSelectedBackupPayload || isBlocking('config')"
+            :title="blockingReason('config')"
             @click="emit('restore-backup', 'config')"
         >
             Restore config only
@@ -140,6 +153,7 @@ function findingLabel(finding: ClassificationFinding): string {
             ghost
             :loading="restoreLoading || classificationLoading"
             :disabled="!selectedBackupHasTradeData || isBlocking('full')"
+            :title="blockingReason('full')"
             @click="emit('restore-backup', 'full')"
         >
             Restore full backup

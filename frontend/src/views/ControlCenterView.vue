@@ -63,7 +63,6 @@ const {
     aiTrust,
     aiTrustFormRef,
     autopilotFormRef,
-    backupClassification,
     backupClassifications,
     backupDownloadLoading,
     backupIncludeTradeData,
@@ -438,7 +437,6 @@ useControlCenterLifecycle({
                     :handle-monitoring-test-action="handleMonitoringTestAction"
                     :handle-signal-settings-select="handleSignalSettingsSelect"
                     :has-selected-backup-payload="!!selectedBackupPayload"
-                    :backup-classification="backupClassification"
                     :backup-classifications="backupClassifications"
                     :classification-loading="classificationLoading"
                     :is-asap-exchange-ready="isAsapExchangeReady()"
@@ -515,7 +513,6 @@ useControlCenterLifecycle({
 
             <template v-else>
                 <ControlCenterUtilitiesWorkspace
-                    :backup-classification="backupClassification"
                     :backup-classifications="backupClassifications"
                     :backup-download-loading="backupDownloadLoading"
                     :backup-include-trade-data="backupIncludeTradeData"

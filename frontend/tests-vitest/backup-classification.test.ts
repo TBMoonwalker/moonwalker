@@ -78,6 +78,12 @@ function classifyCalls() {
     )
 }
 
+function restoreCalls() {
+    return post.mock.calls.filter(
+        call => String(call[0]) === '/config/backup/restore',
+    )
+}
+
 afterEach(() => {
     post.mockReset()
     get.mockReset()
@@ -106,9 +112,7 @@ describe('backup classification preview', () => {
             backup: payload,
             restore_trade_data: false,
         })
-        const restoreCall = post.mock.calls.find(
-            call => String(call[0]) === '/config/backup/restore',
-        )
+        const restoreCall = restoreCalls()[0]
         expect(restoreCall?.[1]).toEqual(
             expect.objectContaining({ confirm: true, restore_trade_data: false }),
         )
@@ -116,6 +120,7 @@ describe('backup classification preview', () => {
     })
 
     it('sends restore_trade_data true for full restores', async () => {
+        post.mockResolvedValueOnce(classifyResponse([]))
         post.mockResolvedValueOnce(classifyResponse([]))
         post.mockResolvedValueOnce(restoreResponse())
         const confirm = vi.spyOn(window, 'confirm').mockImplementation(() => true)
@@ -128,7 +133,12 @@ describe('backup classification preview', () => {
 
         await flow.handleRestoreBackup('full')
 
+        // Pre-classification previews both restore scopes on file selection.
+        expect(classifyCalls()).toHaveLength(2)
         expect(classifyCalls()[0][1]).toEqual(
+            expect.objectContaining({ restore_trade_data: false }),
+        )
+        expect(classifyCalls()[1][1]).toEqual(
             expect.objectContaining({ restore_trade_data: true }),
         )
     })
@@ -153,8 +163,8 @@ describe('backup classification preview', () => {
         expect(result.status).toBe('blocked')
         expect(confirm).not.toHaveBeenCalled()
         expect(post).toHaveBeenCalledTimes(1)
-        expect(flow.backupClassification.value?.blocking).toBe(true)
-        const finding = flow.backupClassification.value?.findings[0]
+        expect(flow.backupClassifications.value.config?.blocking).toBe(true)
+        const finding = flow.backupClassifications.value.config?.findings[0]
         expect(finding).toMatchObject({
             code: 'campaign_residue',
             severity: 'blocking',
@@ -184,6 +194,7 @@ describe('backup classification preview', () => {
             isAxiosError: true,
             response: { status: 500, data: { message: 'preview down' } },
         })
+        post.mockResolvedValueOnce(classifyResponse([]))
         post.mockResolvedValueOnce(restoreResponse())
         const confirm = vi.spyOn(window, 'confirm').mockImplementation(() => true)
         const { flow, message } = createFlow()
@@ -205,26 +216,30 @@ describe('backup classification preview', () => {
         await selectBackup(flow, { schema_version: 3, config: [] })
         await flow.handleRestoreBackup('config')
 
-        expect(flow.backupClassification.value).not.toBeNull()
+        expect(flow.backupClassifications.value.config?.blocking).toBe(true)
         flow.clearSelectedBackup()
 
-        expect(flow.backupClassification.value).toBeNull()
         expect(flow.backupClassifications.value).toEqual({})
     })
 
-    it('resets the classification when a new backup file is selected', async () => {
+    it('resets the classification and re-classifies when a new backup file is selected', async () => {
         post.mockResolvedValueOnce(
             classifyResponse([
                 { code: 'campaign_residue', severity: 'blocking', message: 'residue' },
             ]),
         )
+        post.mockResolvedValueOnce(classifyResponse([]))
         const { flow } = createFlow()
         await selectBackup(flow, { schema_version: 3, config: [] })
         await flow.handleRestoreBackup('config')
 
+        expect(flow.backupClassifications.value.config?.blocking).toBe(true)
+
         await selectBackup(flow, { schema_version: 3, config: [] })
 
-        expect(flow.backupClassification.value).toBeNull()
+        // The new file replaces the review and is pre-classified immediately.
+        expect(classifyCalls()).toHaveLength(2)
+        expect(flow.backupClassifications.value.config?.blocking).toBe(false)
     })
 })
 
@@ -294,13 +309,14 @@ describe('backup download and file selection', () => {
     })
 
     it('refuses a full restore when the backup has no trade data', async () => {
+        post.mockResolvedValueOnce(classifyResponse([]))
         const { flow } = createFlow()
         await selectBackup(flow, { schema_version: 3, config: [] })
 
         const result = await flow.handleRestoreBackup('full')
 
         expect(result.status).toBe('error')
-        expect(post).not.toHaveBeenCalled()
+        expect(restoreCalls()).toHaveLength(0)
     })
 })
 
@@ -361,10 +377,7 @@ describe('restore outcome handling', () => {
         const result = await flow.handleRestoreBackup('config')
 
         expect(result.status).toBe('noop')
-        const restoreCalls = post.mock.calls.filter(
-            call => String(call[0]) === '/config/backup/restore',
-        )
-        expect(restoreCalls).toHaveLength(0)
+        expect(restoreCalls()).toHaveLength(0)
     })
 
     it('warns when history refresh fails for restored symbols', async () => {
@@ -431,7 +444,6 @@ describe('backup classification panel', () => {
         const wrapper = mount(ConfigBackupRestoreControls, {
             props: {
                 ...baseProps(),
-                backupClassification: classification,
                 backupClassifications: { config: classification },
             },
         })
@@ -450,7 +462,51 @@ describe('backup classification panel', () => {
             button.text().includes('Restore full backup'),
         )
         expect(configButton?.attributes('disabled')).toBeDefined()
+        expect(configButton?.attributes('title')).toBe(
+            '2 open trade row(s) with legacy campaign residue.',
+        )
         expect(fullButton?.attributes('disabled')).toBeUndefined()
+    })
+
+    it('renders one alert per classified restore mode', () => {
+        const configClassification = blockingClassification([
+            {
+                code: 'forced_dry_run_pause',
+                severity: 'info',
+                message: 'A restore always finishes paused in dry-run mode.',
+                nextAction: null,
+            },
+        ])
+        const fullClassification: BackupClassification = {
+            ...blockingClassification([
+                {
+                    code: 'campaign_residue',
+                    severity: 'blocking',
+                    message: 'Legacy campaign residue blocks the full restore.',
+                    nextAction: null,
+                },
+            ]),
+            mode: 'full',
+        }
+        const wrapper = mount(ConfigBackupRestoreControls, {
+            props: {
+                ...baseProps(),
+                backupClassifications: {
+                    config: configClassification,
+                    full: fullClassification,
+                },
+            },
+        })
+
+        expect(wrapper.text()).toContain('Backup review (config only restore)')
+        expect(wrapper.text()).toContain('Backup review (full backup restore)')
+        const fullButton = wrapper.findAll('button').find(button =>
+            button.text().includes('Restore full backup'),
+        )
+        expect(fullButton?.attributes('disabled')).toBeDefined()
+        expect(fullButton?.attributes('title')).toBe(
+            'Legacy campaign residue blocks the full restore.',
+        )
     })
 
     it('shows a loading hint while the preview is in flight', () => {

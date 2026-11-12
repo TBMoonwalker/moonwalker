@@ -181,14 +181,6 @@ export function useConfigBackupRestore(
     const restoreReview = ref<RestoreReviewState | null>(null)
     const backupClassifications = ref<Partial<Record<BackupRestoreMode, BackupClassification>>>({})
     const classificationLoading = ref(false)
-    const lastClassifiedMode = ref<BackupRestoreMode | null>(null)
-
-    const backupClassification = computed<BackupClassification | null>(() => {
-        if (!lastClassifiedMode.value) {
-            return null
-        }
-        return backupClassifications.value[lastClassifiedMode.value] ?? null
-    })
 
     const selectedBackupHasTradeData = computed(() =>
         Boolean(
@@ -218,7 +210,6 @@ export function useConfigBackupRestore(
         selectedBackupPayload.value = null
         restoreReview.value = null
         backupClassifications.value = {}
-        lastClassifiedMode.value = null
         if (backupFileInputRef.value) {
             backupFileInputRef.value.value = ''
         }
@@ -229,7 +220,6 @@ export function useConfigBackupRestore(
     async function ensureClassification(mode: BackupRestoreMode): Promise<boolean> {
         const cached = backupClassifications.value[mode]
         if (cached) {
-            lastClassifiedMode.value = mode
             return !cached.blocking
         }
         const inFlight = classificationInFlight.get(mode)
@@ -257,7 +247,6 @@ export function useConfigBackupRestore(
                     ...backupClassifications.value,
                     [mode]: classification,
                 }
-                lastClassifiedMode.value = mode
                 return !classification.blocking
             } catch (error) {
                 // The preview is advisory; the restore endpoint re-checks
@@ -347,8 +336,14 @@ export function useConfigBackupRestore(
             selectedBackupPayload.value = parsed
             restoreReview.value = null
             backupClassifications.value = {}
-            lastClassifiedMode.value = null
             options.message.success(`Loaded backup ${selectedFile.name}`)
+            // Preview both restore scopes up front so the review findings are
+            // visible before any restore is attempted. Sequential keeps the
+            // classify call order deterministic and the loading flag accurate.
+            await ensureClassification('config')
+            if (selectedBackupHasTradeData.value) {
+                await ensureClassification('full')
+            }
         } catch (error) {
             clearSelectedBackup()
             options.message.error(
@@ -389,6 +384,8 @@ export function useConfigBackupRestore(
             }
         }
 
+        // Safety net: pre-classification runs on file selection, but a
+        // blocked or unavailable preview must not wedge the restore.
         const classificationAllowed = await ensureClassification(mode)
         if (!classificationAllowed) {
             return {
@@ -476,7 +473,6 @@ export function useConfigBackupRestore(
     }
 
     return {
-        backupClassification,
         backupClassifications,
         backupDownloadLoading,
         backupFileInputRef,
