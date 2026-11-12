@@ -7,18 +7,31 @@
   >
     <div class="placement-recovery-heading">
       <h2>Placement recovery</h2>
-      <n-tag type="warning" :bordered="false">Startup gate closed</n-tag>
+      <n-tag v-if="loadError" type="error" :bordered="false">Status unknown</n-tag>
+      <n-tag v-else type="warning" :bordered="false">Startup gate closed</n-tag>
     </div>
-    <p class="placement-recovery-lead">
+    <p v-if="loadError" class="placement-recovery-lead">
+      The quarantined placement list could not be loaded, so it is unknown whether the
+      startup gate is blocked. Retry the load, or restart Moonwalker and check the logs
+      if the error persists.
+    </p>
+    <p v-else class="placement-recovery-lead">
       {{ openCount }} placement {{ openCount === 1 ? 'intent is' : 'intents are' }} blocking
       startup. Repair checks the exchange and applies the confirmed state locally; dismissal
       records your decision without touching the exchange. Restart Moonwalker once every intent
       is resolved.
     </p>
     <p v-if="loading" class="placement-recovery-note">Loading quarantined placements…</p>
-    <p v-else-if="loadError" class="placement-recovery-error" role="alert">
-      Could not load quarantined placements: {{ loadError }}
-    </p>
+    <template v-else-if="loadError">
+      <p class="placement-recovery-error" role="alert">
+        Could not load quarantined placements: {{ loadError }}
+      </p>
+      <div class="placement-recovery-actions">
+        <n-button size="small" type="primary" :loading="loading" @click="void load()">
+          Retry
+        </n-button>
+      </div>
+    </template>
     <ul v-else-if="intents.length > 0" class="placement-recovery-list">
       <li
         v-for="intent in intents"
@@ -61,7 +74,8 @@
             size="small"
             type="warning"
             :disabled="stateFor(intent).pending"
-            @click="openDismiss(intent.operation_id)"
+            :data-dismiss-trigger="intent.operation_id"
+            @click="openDismissForm(intent.operation_id)"
           >
             Dismiss…
           </n-button>
@@ -88,7 +102,7 @@
             >
               Dismiss intent
             </n-button>
-            <n-button size="small" quaternary :disabled="stateFor(intent).pending" @click="closeDismiss()">
+            <n-button size="small" quaternary :disabled="stateFor(intent).pending" @click="closeDismissForm()">
               Cancel
             </n-button>
           </div>
@@ -102,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, nextTick, onMounted } from 'vue'
 import { usePlacementRecovery } from '../composables/usePlacementRecovery'
 import type { PlacementRecoveryActionState } from '../composables/usePlacementRecovery'
 import type {
@@ -177,6 +191,26 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat('en-US', { maximumSignificantDigits: 8 }).format(value)
 }
 
+// Keyboard flow: opening the form moves focus to the required note, and
+// cancelling hands focus back to the trigger instead of dropping it on body.
+function openDismissForm(operationId: string): void {
+  openDismiss(operationId)
+  void nextTick().then(() => {
+    document.getElementById(`dismiss-note-${operationId}`)?.focus()
+  })
+}
+
+function closeDismissForm(): void {
+  const openId = dismissing.value
+  closeDismiss()
+  void nextTick().then(() => {
+    const trigger = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-dismiss-trigger]'),
+    ).find(element => element.getAttribute('data-dismiss-trigger') === openId)
+    trigger?.focus()
+  })
+}
+
 onMounted(() => { void load() })
 </script>
 
@@ -211,6 +245,9 @@ onMounted(() => { void load() })
   margin: 12px 0 0;
   font-size: 14px;
   color: var(--mw-color-error);
+}
+.placement-recovery-actions {
+  margin-top: 12px;
 }
 .placement-recovery-list {
   list-style: none;
@@ -308,7 +345,8 @@ onMounted(() => { void load() })
 }
 @media (max-width: 767px) {
   .intent-actions .n-button,
-  .dismiss-actions .n-button {
+  .dismiss-actions .n-button,
+  .placement-recovery-actions .n-button {
     min-height: 44px;
   }
 }

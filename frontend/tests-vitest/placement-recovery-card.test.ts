@@ -74,6 +74,31 @@ describe('placement recovery card', () => {
     expect(wrapper.text()).toContain('boom')
   })
 
+  it('offers a retry and unknown-status state when the list cannot be loaded', async () => {
+    let attempts = 0
+    api.fetchPlacementRecoveryIntents.mockImplementation(() => {
+      attempts += 1
+      if (attempts === 1) {
+        return Promise.reject(axiosError(500, 'boom'))
+      }
+      return Promise.resolve({ intents: [intent()] })
+    })
+    const wrapper = render()
+    await settle()
+
+    expect(wrapper.text()).toContain('Status unknown')
+    expect(wrapper.text()).not.toContain('Startup gate closed')
+    expect(wrapper.text()).not.toContain('placement intents are blocking')
+
+    const retry = wrapper.findAll('button').find((button) => button.text() === 'Retry')!
+    await retry.trigger('click')
+    await settle()
+
+    expect(api.fetchPlacementRecoveryIntents).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('Startup gate closed')
+    expect(wrapper.text()).toContain('1 placement intent is blocking startup')
+  })
+
   it('describes every quarantined intent with its exchange details', async () => {
     api.fetchPlacementRecoveryIntents.mockResolvedValue({
       intents: [
@@ -279,5 +304,35 @@ describe('placement recovery card', () => {
     await settle()
     expect(wrapper.find('input.dismiss-input').exists()).toBe(false)
     expect(api.dismissPlacementIntent).not.toHaveBeenCalled()
+  })
+
+  it('moves focus to the dismissal note and back to the trigger on cancel', async () => {
+    api.fetchPlacementRecoveryIntents.mockResolvedValue({ intents: [intent()] })
+    // Attach to the document so focus() can move document.activeElement.
+    const attachTo = document.createElement('div')
+    document.body.appendChild(attachTo)
+    const wrapper = mount(PlacementRecoveryCard, { attachTo })
+    try {
+      await settle()
+
+      const dismissToggle = wrapper.findAll('button').find((button) => button.text() === 'Dismiss…')!
+      await dismissToggle.trigger('click')
+      await settle()
+
+      const input = wrapper.find('input.dismiss-input')
+      expect(input.exists()).toBe(true)
+      expect(document.activeElement).toBe(input.element)
+
+      const cancel = wrapper.findAll('button').find((button) => button.text() === 'Cancel')!
+      await cancel.trigger('click')
+      await settle()
+
+      expect(wrapper.find('input.dismiss-input').exists()).toBe(false)
+      expect(document.activeElement).toBe(dismissToggle.element)
+      expect(api.dismissPlacementIntent).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      attachTo.remove()
+    }
   })
 })
