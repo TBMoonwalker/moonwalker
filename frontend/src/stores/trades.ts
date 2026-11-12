@@ -121,7 +121,18 @@ function isFloat(val: any): boolean {
 }
 
 function decimalDigits(value: any, fallback = 0): number {
-  return isFloat(value) ? value.toString().split('.')[1].length : fallback
+  if (!isFloat(value)) {
+    return fallback
+  }
+  const [mantissa, exponent] = value.toString().split('e')
+  if (exponent === undefined) {
+    const fractional = mantissa.split('.')[1]
+    return fractional ? fractional.length : fallback
+  }
+  // Exponent notation (for example 1e-7): the decimal digit count is the
+  // mantissa's fractional digits shifted by the negative exponent.
+  const mantissaFractional = mantissa.split('.')[1] ?? ''
+  return Math.max(0, -parseInt(exponent, 10) + mantissaFractional.length)
 }
 
 function formatDecimal(
