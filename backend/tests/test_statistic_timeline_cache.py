@@ -7,6 +7,7 @@ from typing import Any
 
 import model
 import pytest
+from service import statistic as statistic_module
 from service.housekeeper import Housekeeper
 from service.statistic import Statistic
 from tortoise import Tortoise
@@ -373,5 +374,45 @@ async def test_retention_cleanup_without_deletions_does_not_fire_hook(
 
         assert await model.UpnlHistory.all().count() == rows_before
         assert builds == [1]
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_timeline_rebuild_racing_invalidation_is_not_cached(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'test.sqlite'}", modules={"models": ["model"]}
+    )
+    await Tortoise.generate_schemas()
+    try:
+        await _seed_history([(timedelta(hours=1), 10.0, 100.0)])
+        statistic = Statistic()
+        builds = _instrument_builds(statistic)
+        raced = [False]
+        counting = statistic._fetch_profit_overall_timeline
+
+        async def racing(now: datetime) -> Any:
+            if not raced[0]:
+                # A snapshot write or retention prune on another instance
+                # advances the shared generation mid-rebuild.
+                raced[0] = True
+                statistic_module._advance_timeline_generation()
+            return await counting(now)
+
+        statistic._fetch_profit_overall_timeline = racing  # type: ignore[method-assign]
+
+        first = await statistic.get_profit_overall_timeline()
+        second = await statistic.get_profit_overall_timeline()
+        third = await statistic.get_profit_overall_timeline()
+
+        # The raced rebuild is served but never cached: the next caller
+        # rebuilds and caches (build two), and the third call hits it.
+        assert builds == [2]
+        assert first == second == third
+        assert len(first) >= 1
+        assert statistic._timeline_cache is not None
     finally:
         await Tortoise.close_connections()

@@ -797,6 +797,7 @@ class Statistic:
             cached = self._timeline_cache
             if self._timeline_cache_valid(cached):
                 return list(cached[2])
+            generation = _timeline_generation
             now = datetime.now(timezone.utc)
             try:
                 timeline = await self._fetch_profit_overall_timeline(now)
@@ -805,11 +806,22 @@ class Statistic:
                 # not cached, so a healthy follow-up fetch re-queries.
                 logging.error("Error getting profit-overall timeline: %s", e)
                 return []
-            self._timeline_cache = (
-                _timeline_generation,
-                time.monotonic() + TIMELINE_CACHE_TTL_SECONDS,
-                timeline,
-            )
+            if generation == _timeline_generation:
+                self._timeline_cache = (
+                    generation,
+                    time.monotonic() + TIMELINE_CACHE_TTL_SECONDS,
+                    timeline,
+                )
+            else:
+                # A snapshot write or retention prune advanced the
+                # generation while the rebuild ran; its rows may be
+                # missing that write. Serve the consistent point but do
+                # not cache it under the new generation - the next
+                # caller rebuilds.
+                logging.info(
+                    "Timeline rebuild raced a cache invalidation; "
+                    "serving without caching.",
+                )
             return list(timeline)
 
     async def update_statistic_data(self, stats: dict[str, Any]) -> None:
