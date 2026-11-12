@@ -261,10 +261,13 @@ async def startup() -> None:
                 not reconciliation.ready
                 and reconciliation.action_required
                 and reconciliation.remaining == 0
+                and accumulation_ready
             ):
                 # Only quarantined classic-DCA placement intents block: serve
                 # the placement recovery endpoints with every trading worker
-                # stopped, instead of exiting with no operator access.
+                # stopped, instead of exiting with no operator access. A
+                # blocked accumulation runtime is not repair-ready, so the
+                # placement-only mode would hide it from the operator.
                 runtime_state.recovery_mode = "placement"
             if runtime_state.recovery_mode is not None:
                 runtime_state.controller_services = build_runtime_services(
@@ -281,6 +284,18 @@ async def startup() -> None:
                         "Serving placement intent recovery only; all trading workers remain stopped. Repair or dismiss every quarantined intent, then restart."
                     )
                 return
+            if not reconciliation.ready and not accumulation_ready:
+                raise RuntimeError(
+                    "Both exchange placement reconciliation and the "
+                    "accumulation runtime require operator action, but the "
+                    "accumulation runtime is not in a repair-ready state, so "
+                    "neither the /accumulation/repair endpoints nor the "
+                    "placement recovery endpoints can be served. Resolve the "
+                    "accumulation runtime (see the startup log above), then "
+                    "restart: once it is repair-ready, a restart serves "
+                    "/accumulation/repair together with the placement "
+                    "recovery endpoints."
+                )
             if not reconciliation.ready:
                 operations = ", ".join(reconciliation.action_required)
                 raise RuntimeError(

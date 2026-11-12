@@ -917,3 +917,45 @@ class _FakeAccumulationRuntime:
     async def shutdown(self):
         assert self.stopping and not self.running
         self.closed = True
+
+
+class _BlockedAccumulationRuntime(_FakeAccumulationRuntime):
+    """Accumulation runtime that is blocked and not repair-ready."""
+
+    repair_ready = False
+    ready = False
+
+    async def startup(self) -> bool:
+        self.startup_calls += 1
+        return False
+
+
+class _QuarantinedOnlySummary(_FakePlacementSummary):
+    ready = False
+    action_required = ("limit_sell-abc123",)
+
+
+class _QuarantinedOnlyRecovery(_FakePlacementRecovery):
+    async def reconcile_placement_intents(self, _config):
+        return _QuarantinedOnlySummary()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_stays_fatal_when_placement_only_mode_would_hide_accumulation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blocked non-repair-ready accumulation runtime forbids placement-only mode."""
+
+    _patch_startup_gate_dependencies(monkeypatch, _QuarantinedOnlyRecovery)
+    monkeypatch.setattr(
+        app_module,
+        "build_accumulation_runtime",
+        lambda _provider: _BlockedAccumulationRuntime(),
+    )
+
+    with pytest.raises(RuntimeError, match="not in a repair-ready state"):
+        async with app_module.runtime_lifespan(None):
+            pass
+
+    assert app_module.runtime_state.recovery_mode is None
+    assert app_module.runtime_state.controller_services is None
