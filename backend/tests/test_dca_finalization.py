@@ -21,6 +21,7 @@ from service.dca.finalization import (
     build_entry_size_retry_order,
     build_tp_limit_sell_payload,
 )
+from service.dca.recovery_sizing import build_recovery_sizing_policy
 
 
 @dataclass(frozen=True)
@@ -248,3 +249,200 @@ async def test_closed_trade_stats_zero_partials_close_on_final_fill_only() -> No
     assert payload["avg_price"] == pytest.approx(200.0)
     assert payload["profit"] == pytest.approx(-80.0)
     assert payload["profit_percent"] == pytest.approx(-40.0)
+
+
+def _buy_status(**overrides: Any) -> dict[str, Any]:
+    """A filled exchange buy payload carrying every persistence key."""
+    status: dict[str, Any] = {
+        "timestamp": 1_700_000_000_000,
+        "ordersize": 17.0,
+        "fees": 0.01,
+        "precision": 2,
+        "amount_fee": 0.0,
+        "amount": 1025.0,
+        "price": 0.0166,
+        "symbol": "TUT/USDC",
+        "orderid": "test-order",
+        "botname": "symsignal_tutusdc",
+        "ordertype": "market",
+        "baseorder": True,
+        "safetyorder": False,
+        "order_count": 0,
+        "so_percentage": None,
+        "direction": "long",
+        "side": "buy",
+    }
+    status.update(overrides)
+    return status
+
+
+class _BuyFinalizationRecorder:
+    """Captures persistence and monitoring calls made during finalization."""
+
+    def __init__(self) -> None:
+        self.persisted: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+        self.notifications: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+        self.persist_log_calls: list[str | None] = []
+
+    async def persist_buy_trade(
+        self,
+        symbol: str,
+        payload: dict[str, Any],
+        **kwargs: Any,
+    ) -> None:
+        self.persisted.append((symbol, payload, kwargs))
+
+    async def notify_trade(
+        self,
+        event: str,
+        payload: dict[str, Any],
+        config: dict[str, Any],
+    ) -> None:
+        self.notifications.append((event, payload, config))
+
+    def log_persisted(self, operation_id: str | None, **kwargs: Any) -> None:
+        self.persist_log_calls.append(operation_id)
+
+
+async def _noop_reset(_symbol: str, *, dependencies: Any = None) -> None:
+    return None
+
+
+def _finalize_dependencies(recorder: _BuyFinalizationRecorder) -> Any:
+    return finalization.DcaFinalizationContext(
+        trades=_UnusedCollaborator(),
+        monitoring=recorder,
+        placement_workflow=recorder,
+        exchange=_UnusedCollaborator(),
+        utils=helper.Utils(),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "order_status",
+    [
+        pytest.param(_buy_status(price=0.0), id="zero_price"),
+        pytest.param(_buy_status(amount=0.0), id="zero_amount"),
+        pytest.param(_buy_status(amount=-1.0), id="negative_amount"),
+        pytest.param(
+            {key: value for key, value in _buy_status().items() if key != "price"},
+            id="missing_price",
+        ),
+    ],
+)
+async def test_finalize_buy_order_skips_persistence_for_invalid_fill(
+    monkeypatch: pytest.MonkeyPatch,
+    order_status: dict[str, Any],
+) -> None:
+    """An exchange payload without a core filled value is never persisted.
+
+    Value: protects=a failed or zero-quantity exchange result cannot create
+        a trade row or a Telegram notification; finalize reports False so
+        the caller keeps the placement unresolved.
+    fails_when=the fill validation stops failing closed and an empty fill
+        reaches persistence or monitoring.
+    why_new=the only prior finalize_buy_order test monkeypatched the
+        validation to True, so the fail-closed branch itself was untested.
+    seam=none (persistence and unsellable reset are the module's own
+        collaborators and are recorded, not production seams).
+    """
+    recorder = _BuyFinalizationRecorder()
+    monkeypatch.setattr(finalization, "persist_buy_trade", recorder.persist_buy_trade)
+    monkeypatch.setattr(finalization, "reset_unsellable_state", _noop_reset)
+
+    result = await finalization.finalize_buy_order(
+        dict(order_status),
+        {},
+        original_order=dict(order_status),
+        dependencies=_finalize_dependencies(recorder),
+    )
+
+    assert result is False
+    assert recorder.persisted == []
+    assert recorder.notifications == []
+    assert recorder.persist_log_calls == []
+
+
+_POLICY_CONFIG = {"dynamic_dca": True, "dca_strategy": "ema20_swing"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "config", "expected_metadata"),
+    [
+        pytest.param(
+            _buy_status(
+                safetyorder=True,
+                baseorder=False,
+                order_count=1,
+                price=105.0,
+                amount=2.0,
+                metadata_json=json.dumps(
+                    {
+                        "recovery_so": {
+                            "reference_price": 100.0,
+                            "current_price": 102.0,
+                        }
+                    }
+                ),
+            ),
+            {},
+            {
+                "recovery_so": {
+                    "reference_price": 100.0,
+                    "current_price": 102.0,
+                    "fill_price": 105.0,
+                    "fill_deviation_percent": 5.0,
+                    "fill_vs_trigger_percent": round((105.0 - 102.0) / 102.0 * 100, 8),
+                }
+            },
+            id="recovery_fill_evidence_recorded",
+        ),
+        pytest.param(
+            _buy_status(),
+            _POLICY_CONFIG,
+            {"dca_policy": build_recovery_sizing_policy(_POLICY_CONFIG).to_dict()},
+            id="dynamic_dca_base_order_policy_stamped",
+        ),
+    ],
+)
+async def test_finalize_buy_order_records_recovery_evidence_in_persisted_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    status: dict[str, Any],
+    config: dict[str, Any],
+    expected_metadata: dict[str, Any],
+) -> None:
+    """Recovery fill evidence and the deal policy reach the persisted row.
+
+    Value: protects=a recovered safety-order fill records its fill price and
+        deviation from the reference and trigger prices, and a dynamic-DCA
+        base order persists the deal's recovery sizing policy, so the closed
+        replay can explain how the order was sized.
+    fails_when=finalize stops enriching the metadata before persistence and
+        the execution ledger loses the deviation or policy evidence.
+    why_new=no prior test asserted the recovery_so deviation fields or the
+        base-order dca_policy stamp on the payload finalize persists.
+    seam=none.
+    """
+    recorder = _BuyFinalizationRecorder()
+    monkeypatch.setattr(finalization, "persist_buy_trade", recorder.persist_buy_trade)
+    monkeypatch.setattr(finalization, "reset_unsellable_state", _noop_reset)
+
+    result = await finalization.finalize_buy_order(
+        status,
+        config,
+        original_order=dict(status),
+        dependencies=_finalize_dependencies(recorder),
+    )
+
+    assert result is True
+    assert len(recorder.persisted) == 1
+    symbol, payload, _kwargs = recorder.persisted[0]
+    assert symbol == status["symbol"]
+    persisted_metadata = json.loads(payload["metadata_json"])
+    for key, expected_value in expected_metadata.items():
+        assert persisted_metadata[key] == expected_value, key
+    assert [event for event, _payload, _config in recorder.notifications] == [
+        "trade.buy"
+    ]
