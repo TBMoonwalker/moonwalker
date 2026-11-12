@@ -317,10 +317,12 @@ class Statistic:
         index seek for its last verified snapshot - the exact value the
         original pandas ``resample(...).last()`` pipeline emitted for that
         bucket - so a cold rebuild reads a few hundred rows instead of a
-        year of snapshots. The per-slice points are merged with
-        later-slice precedence, mirroring the original
-        ``concat``/``sort_index``/``dedup(keep="last")`` order, keeping the
-        output point-for-point identical.
+        year of snapshots. Slices merge in rank order (year, month, week,
+        day); when two slices produce the same label (the year slice's
+        Sunday labels can collide with month-slice day labels), the newer
+        slice's point wins - the ``slice_rank >=`` comparison in
+        ``_fetch_slice_timeline`` pins the tie-break the original
+        ``concat`` order implied, which its unstable sort never guaranteed.
         """
         horizons = self.timeline_horizons
         day_start = now - horizons["day"]

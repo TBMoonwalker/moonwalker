@@ -172,10 +172,10 @@ function findingLabel(finding: ClassificationFinding): string {
 
 .backup-classification-findings {
     margin: 0;
-    padding-left: 18px;
+    padding-left: 16px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 .restore-review-next-action {

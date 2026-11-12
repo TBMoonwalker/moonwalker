@@ -296,3 +296,48 @@ async def test_prewin_public_api_matches_reference(tmp_path, monkeypatch) -> Non
         assert public == expected
     finally:
         await Tortoise.close_connections()
+
+
+COLLISION_ROWS: list[tuple[datetime, float, bool]] = [
+    # year slice: Monday-anchored week bin [2026-10-12, 2026-10-19) clipped
+    # at month_start 2026-10-13; its +6-day Sunday label is "2026-10-18 00:00:00"
+    (datetime(2026, 10, 12, 23, 59, 0, tzinfo=UTC), 111.0, True),
+    # month slice: day bin [2026-10-18, 2026-10-19); same label, newer slice
+    (datetime(2026, 10, 18, 23, 59, 0, tzinfo=UTC), 222.0, True),
+    # remaining slices filled so the merge walks all four ranks
+    (datetime(2026, 11, 6, 12, 0, 0, tzinfo=UTC), 333.0, True),
+    (datetime(2026, 11, 11, 6, 0, 0, tzinfo=UTC), 444.0, True),
+    (datetime(2025, 12, 1, 12, 0, 0, tzinfo=UTC), 555.0, True),
+]
+
+
+@pytest.mark.asyncio
+async def test_prewin_colliding_label_newer_slice_wins(tmp_path, monkeypatch) -> None:
+    """A label emitted by two slices keeps the newer slice's point.
+
+    Rebuilding at 2026-11-12T00:00Z, the year bin starting 2026-10-12
+    (clipped at month_start 2026-10-13) and the month day bin starting
+    2026-10-18 both emit the label "2026-10-18 00:00:00". The original
+    pipeline's ``dedup(keep="last")`` ran after a non-stable sort, so the
+    winner of a colliding label was never guaranteed; the rebuild pins the
+    tie-break explicitly - the newer slice wins. This case fills both
+    colliding bins with distinct values and asserts the month-slice point
+    is the one emitted, alongside the full differential match.
+    """
+    await _make_db(tmp_path, monkeypatch)
+    try:
+        await _seed_rows(COLLISION_ROWS)
+        now = datetime(2026, 11, 12, 0, 0, 0, tzinfo=UTC)
+        statistic = Statistic()
+        await _assert_matches_reference(statistic, now)
+
+        colliding = [
+            point
+            for point in await statistic._fetch_profit_overall_timeline(now)
+            if point["timestamp"] == "2026-10-18 00:00:00"
+        ]
+        assert len(colliding) == 1
+        assert colliding[0]["profit_overall"] == 222.0
+        assert colliding[0]["funds_locked"] == 222.0
+    finally:
+        await Tortoise.close_connections()

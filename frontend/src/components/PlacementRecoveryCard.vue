@@ -326,7 +326,7 @@ onMounted(() => { void load() })
 .dismiss-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 9px 12px;
+  padding: 8px 12px;
   font-size: 14px;
   border: 1px solid var(--mw-color-border);
   border-radius: var(--mw-radius-sm);
