@@ -373,6 +373,14 @@ If an intent cannot be resolved safely, startup fails closed and identifies the
 operation requiring manual reconciliation. Capital recorded by an unresolved
 buy remains reserved until the intent reaches a safe terminal state.
 
+Before applying a recovered safety buy, full sell or take-profit order, startup
+checks the exchange order identity and confirms that the current open deal is
+the original deal recorded by the intent. A recovered base buy also requires
+that no open deal or orphan trade rows exist for the symbol. If an older intent
+lacks enough identity evidence, or the current deal or take-profit order differs,
+it remains quarantined. Review the exchange order and local ledger before an
+operator decision; do not guess the missing identity or resubmit the order.
+
 If paused, quarantined accumulation obligations are ready for repair, startup can
 instead serve restricted recovery access with trading workers stopped, including
 when separate DCA work remains unresolved. That work still needs reconciliation
