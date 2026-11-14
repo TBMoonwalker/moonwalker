@@ -3055,3 +3055,78 @@ async def test_fallback_partial_producer_journals_identity_before_restart(
         assert await model.TradeExecutions.filter(order_id="sell-1").count() == 1
     finally:
         await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_cost", [5.00000001, 5.1])
+async def test_stored_partial_recovery_uses_execution_proceeds(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, first_cost: float
+) -> None:
+    """Rounded executions reconcile with later fills; inconsistent evidence blocks."""
+    await _init_database(tmp_path)
+    try:
+        _classic_route(monkeypatch)
+        await _seed_buy_trade(2)
+        await model.OpenTrades.create(
+            symbol="BTC/USDC", deal_id="deal", amount=2, cost=20
+        )
+        lifecycle = DcaOrderLifecycle()
+        entry = PlacementRecoveryEntry(lifecycle=lifecycle)
+
+        async def recover(operation_id, requested, remaining, cost):
+            execution = {
+                "symbol": "BTC/USDC",
+                "side": "sell",
+                "role": "partial_sell",
+                "timestamp": "",
+                "price": 10,
+                "amount": 0.5,
+                "ordersize": cost,
+                "fee": 0,
+                "order_id": operation_id,
+            }
+            evidence = {
+                "type": "partial_sell",
+                "symbol": "BTC/USDC",
+                "partial_filled_amount": 0.5,
+                "partial_avg_price": 10,
+                "partial_proceeds": 5,
+                "remaining_amount": remaining,
+                "executions": [execution],
+            }
+            await model.PlacementIntent.create(
+                operation_id=operation_id,
+                client_order_id=f"client-{operation_id}",
+                exchange_order_id=operation_id,
+                exchange_name="binance",
+                symbol="BTC/USDC",
+                action="sell",
+                side="sell",
+                order_type="limit",
+                state="filled",
+                deal_id="deal",
+                requested_amount=requested,
+                request_json=json.dumps({"_execution_scope": REPAIR_SCOPE}),
+                result_json=json.dumps(evidence),
+            )
+            await entry.build_reconciler().reconcile(REPAIR_CONFIG)
+            return await model.PlacementIntent.get(operation_id=operation_id)
+
+        first = await recover("one", 2, 1.5, first_cost)
+        if first_cost == 5.1:
+            assert first.state == "quarantined"
+            assert await model.TradeExecutions.all().count() == 0
+            assert (await model.OpenTrades.get(symbol="BTC/USDC")).sold_proceeds == 0
+        else:
+            assert first.state == "completed"
+            assert (
+                await model.OpenTrades.get(symbol="BTC/USDC")
+            ).sold_proceeds == first_cost
+            second = await recover("two", 1.5, 1, 5)
+            assert second.state == "completed"
+            trade = await model.OpenTrades.get(symbol="BTC/USDC")
+            assert trade.sold_amount == 1
+            assert trade.sold_proceeds == first_cost + 5
+            assert await model.TradeExecutions.all().count() == 2
+    finally:
+        await Tortoise.close_connections()

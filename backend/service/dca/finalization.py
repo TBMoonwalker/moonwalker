@@ -396,6 +396,28 @@ async def persist_reconciled_limit_fallback(
         default_symbol=str(limit_status.get("symbol") or ""),
     )
     if "recovery_deal_id" in limit_status:
+        executions = limit_status.get("executions")
+        if not isinstance(executions, list) or len(executions) != 1:
+            return False
+        execution = executions[0]
+        if not isinstance(execution, dict) or isinstance(
+            execution.get("ordersize"), bool
+        ):
+            return False
+        try:
+            execution_proceeds = float(execution["ordersize"])
+            calculated_proceeds = float(partial_status["partial_proceeds"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return False
+        if (
+            not math.isfinite(execution_proceeds)
+            or execution_proceeds <= 0
+            or not math.isfinite(calculated_proceeds)
+            or not math.isclose(execution_proceeds, calculated_proceeds, rel_tol=1e-8)
+        ):
+            return False
+        # Keep the aggregate exactly aligned with the validated execution ledger.
+        partial_status["partial_proceeds"] = execution_proceeds
         partial_status["recovery_deal_id"] = limit_status["recovery_deal_id"]
         partial_status["recovery_tp_order_id"] = limit_status.get(
             "recovery_tp_order_id"
