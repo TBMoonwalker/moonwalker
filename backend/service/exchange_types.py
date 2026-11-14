@@ -139,6 +139,7 @@ class PartialSellStatus(TypedDict, total=False):
     executions: list[TradeExecutionPayload]
     recovery_deal_id: str
     recovery_tp_order_id: str | None
+    exit_guard_canceled_zero_fill: bool
 
 
 class MarketFallbackStatus(TypedDict, total=False):

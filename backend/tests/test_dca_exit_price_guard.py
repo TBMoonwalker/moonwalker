@@ -232,6 +232,49 @@ async def test_market_trailing_exit_aborts_when_fresh_price_drops_out(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("first_bid", ["108.0", None])
+async def test_trailing_peak_survives_guard_abort_until_bid_recovers(
+    monkeypatch, first_bid
+) -> None:
+    dca = Dca()
+    _configure_dca(dca, trailing_tp=1.0)
+    sell_calls = []
+    cancel_calls = []
+    bids = iter([first_bid, "109.5"])
+
+    async def fetch_bid(_symbol):
+        bid = next(bids)
+        if bid is None:
+            raise RuntimeError("bid unavailable")
+        return bid
+
+    async def sell(order, _config):
+        sell_calls.append(order)
+
+    async def cancel(*args, **kwargs):
+        cancel_calls.append((args, kwargs))
+        return True
+
+    _patch_engine(dca, monkeypatch)
+    monkeypatch.setattr(dca.exchange, "get_bid_price_for_symbol", fetch_bid)
+    monkeypatch.setattr(dca.order_lifecycle, "receive_sell_order", sell)
+    monkeypatch.setattr(dca.order_lifecycle, "cancel_tp_limit_order", cancel)
+    trades = _build_trades()
+
+    await dca._Dca__calculate_tp(112.0, trades, _build_policy())
+    await dca._Dca__calculate_tp(108.5, trades, _build_policy())
+    assert dca._trailing_tp_peaks["XPL/USDC"] == pytest.approx(12.0)
+    assert sell_calls == []
+    assert cancel_calls == []
+
+    await dca._Dca__calculate_tp(108.5, trades, _build_policy())
+    assert len(sell_calls) == 1
+    assert sell_calls[0]["sell_reason"] == "trailing_take_profit"
+    assert sell_calls[0]["current_price"] == pytest.approx(109.5)
+    assert "XPL/USDC" not in dca._trailing_tp_peaks
+
+
+@pytest.mark.asyncio
 async def test_market_autopilot_timeout_exit_uses_sl_inverted_bound(
     monkeypatch,
 ) -> None:

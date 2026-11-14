@@ -872,6 +872,7 @@ class DcaOrderLifecycle:
         self, order: SellIntent | dict[str, Any], config: dict[str, Any]
     ) -> bool:
         """Create a sell order and persist closed trades."""
+        order.pop("_exit_guard_canceled_zero_fill", None)
         async with lifecycle_mutation_coordinator.mutation(
             str(order["symbol"])
         ) as admitted:
@@ -1037,12 +1038,24 @@ class DcaOrderLifecycle:
                         order_status.get("partial_filled_amount") or 0.0
                     )
                     if partial_amount <= 0:
-                        await self.placement_intents.transition(
+                        if order_status.get("exit_guard_canceled_zero_fill") is True:
+                            # The acknowledged order was explicitly canceled without
+                            # a fill; record that evidence through reconciliation.
+                            await self.placement_intents.transition(
+                                active_operation_id,
+                                PlacementIntentState.RECONCILING,
+                            )
+                        rejected = await self.placement_intents.transition(
                             active_operation_id,
                             PlacementIntentState.REJECTED,
                             result=dict(order_status),
                             reason_code=str(
-                                order_status.get("unsellable_reason")
+                                (
+                                    "exit_guard_canceled_zero_fill"
+                                    if order_status.get("exit_guard_canceled_zero_fill")
+                                    else None
+                                )
+                                or order_status.get("unsellable_reason")
                                 or order_status.get("fallback_reason")
                                 or "no_sell_fill"
                             ),
@@ -1052,6 +1065,13 @@ class DcaOrderLifecycle:
                             config,
                             dependencies=self.finalization,
                         )
+                        if (
+                            order_status.get("exit_guard_canceled_zero_fill") is True
+                            and rejected is not None
+                            and str(rejected.state)
+                            == PlacementIntentState.REJECTED.value
+                        ):
+                            order["_exit_guard_canceled_zero_fill"] = True
                         return False
                     await self.placement_intents.transition(
                         active_operation_id,

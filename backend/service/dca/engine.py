@@ -1014,6 +1014,10 @@ class Dca:
                 sell = False
                 sell_reason = None
 
+        # Retain the prior peak if a triggered exit cannot reach submission.
+        trailing_peak = self._trailing_tp_peaks.get(trades["symbol"])
+        trailing_sell = False
+
         # Trailing TP
         if not is_unsellable and trailing_tp > 0:
             trailing_sell = apply_trailing_take_profit(
@@ -1102,6 +1106,8 @@ class Dca:
             if verified_price is not None:
                 current_price = verified_price
             if not exit_proceeds:
+                if trailing_peak is not None and trailing_sell:
+                    self._trailing_tp_peaks[trades["symbol"]] = trailing_peak
                 sell = False
                 sell_reason = None
             else:
@@ -1153,6 +1159,12 @@ class Dca:
                     **self.__order_snapshot_payload(trades),
                 }
                 await self.order_lifecycle.receive_sell_order(order, self.config or {})
+                if (
+                    trailing_peak is not None
+                    and trailing_sell
+                    and order.get("_exit_guard_canceled_zero_fill") is True
+                ):
+                    self._trailing_tp_peaks[trades["symbol"]] = trailing_peak
         elif exit_action is DcaAction.ARM_TP_LIMIT:
             has_tp_limit_order = await self.__arm_tp_limit_order(
                 trades=trades,

@@ -7,7 +7,9 @@ from typing import Any
 import model
 import pytest
 import service.placement_recovery_entry as entry_module
+from service.autopilot import ResolvedTradingPolicy
 from service.capital_budget import CapitalBudgetService
+from service.dca import Dca
 from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.exchange_capabilities import (
     ExchangePostSubmissionFailure,
@@ -242,6 +244,137 @@ async def _init_database(tmp_path) -> None:
         modules={"models": ["model"]},
     )
     await Tortoise.generate_schemas()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["zero", "partial", "ambiguous"])
+async def test_trailing_limit_guard_retries_only_confirmed_zero_fill(
+    tmp_path, monkeypatch, outcome
+) -> None:
+    await _init_database(tmp_path)
+    try:
+        await model.Trades.create(
+            timestamp="1778000000000",
+            ordersize=100,
+            fee=0,
+            precision=8,
+            amount=1,
+            amount_fee=0,
+            price=100,
+            symbol="ETH/USDC",
+            orderid="buy",
+            bot="test",
+            ordertype="market",
+            baseorder=True,
+            safetyorder=False,
+            order_count=0,
+            direction="long",
+            side="buy",
+        )
+        await model.OpenTrades.create(symbol="ETH/USDC", deal_id="deal-1")
+        dca = Dca()
+        dca.config = {
+            "exchange": "binance",
+            "dry_run": False,
+            "trailing_tp": 1,
+            "sell_order_type": "limit",
+            "mstc": 0,
+        }
+        policy = ResolvedTradingPolicy(
+            symbol="ETH/USDC",
+            mode="low",
+            effective_max_bots=2,
+            take_profit=10,
+            baseline_take_profit=10,
+            stop_loss=5,
+            stop_loss_timeout=0,
+            adaptive_tp_applied=False,
+            adaptive_reason_code=None,
+            adaptive_trust_direction=None,
+            adaptive_trust_score=None,
+            adaptive_entry_size_applied=False,
+            adaptive_entry_reason_code=None,
+            memory_status="fresh",
+            baseline_base_order=50,
+            entry_order_size=50,
+            suggested_base_order=50,
+        )
+        trades = {
+            "symbol": "ETH/USDC",
+            "direction": "long",
+            "total_cost": 100,
+            "total_amount": 1,
+            "sellable_amount": 1,
+            "fee": 0,
+            "timestamp": 1778000000000,
+            "safetyorders_count": 0,
+            "safetyorders": [],
+            "bo_price": 100,
+            "bot": "test",
+        }
+        calls = []
+        market_calls = []
+
+        async def limit(order, _config):
+            calls.append(dict(order))
+            if outcome == "ambiguous":
+                raise ExchangeSubmissionIndeterminate(
+                    action="cancel", symbol="ETH/USDC", client_order_id=None
+                )
+            amount = 0.4 if outcome == "partial" else 0.0
+            return {
+                "requires_market_fallback": True,
+                "limit_cancel_confirmed": True,
+                "fallback_reason": "limit_order_partial_timeout"
+                if amount
+                else "limit_order_timeout",
+                "exchange_order_id": "limit-1",
+                "symbol": "ETH/USDC",
+                "remaining_amount": 1 - amount,
+                "partial_filled_amount": amount,
+                "partial_avg_price": 108.0,
+            }
+
+        async def price(*_args, **_kwargs):
+            return "108" if len(calls) == 1 else "109.5"
+
+        async def market(*_args, **_kwargs):
+            market_calls.append(True)
+            raise ExchangeSubmissionIndeterminate(
+                action="sell", symbol="ETH/USDC", client_order_id=None
+            )
+
+        async def noop(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(
+            dca.order_lifecycle.exchange, "create_spot_limit_sell", limit
+        )
+        monkeypatch.setattr(
+            dca.order_lifecycle.exchange, "_get_price_for_symbol", price
+        )
+        monkeypatch.setattr(
+            dca.order_lifecycle.exchange, "create_spot_market_sell", market
+        )
+        monkeypatch.setattr(dca.order_lifecycle.exchange, "close", noop)
+        monkeypatch.setattr(dca.statistic, "update_statistic_data", noop)
+        await dca._Dca__calculate_tp(112, trades, policy)
+        await dca._Dca__calculate_tp(108.5, trades, policy)
+        assert len(calls) == 1
+        assert market_calls == []
+        if outcome == "zero":
+            assert dca._trailing_tp_peaks["ETH/USDC"] == pytest.approx(12)
+            intent = await model.PlacementIntent.first()
+            assert intent.state == PlacementIntentState.REJECTED.value
+            await dca._Dca__calculate_tp(108.5, trades, policy)
+            assert len(calls) == 2
+            assert market_calls == [True]
+        else:
+            assert "ETH/USDC" not in dca._trailing_tp_peaks
+            await dca._Dca__calculate_tp(108.5, trades, policy)
+            assert len(calls) == 1
+    finally:
+        await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio
