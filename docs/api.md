@@ -399,9 +399,12 @@ submits, cancels, or otherwise changes exchange state, and inconclusive
 evidence leaves the intent quarantined. Dismissal records a terminal
 disposition with the operator's note as the audit trail.
 
-All three endpoints answer with `{"operation_id", "status", "state",
-"message"}` for the action endpoints (`status` is `completed`, `rejected`,
-`unchanged`, or `dismissed`) and `{"intents": [...]}` for the list. Errors use
+The action endpoints return `{"operation_id", "status", "state", "message"}`
+(`status` is `completed`, `rejected`, `unchanged`, or `dismissed`). The list
+returns `{"intents": [...], "recovery_mode": ...}`. `recovery_mode` is
+`"placement"` or `"accumulation"` when the instance is serving that restricted
+recovery mode, and `null` during normal operation. A placement recovery mode
+requires a restart even when the intent list is empty. Errors use
 `404` (`not_found`), `409` (`conflict`, including intents owned by the
 accumulation route), or `400` (`invalid_request`, including a dismissal
 without a note). Dismissal requires a JSON body `{"note": "..."}`.

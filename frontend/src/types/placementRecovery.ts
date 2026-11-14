@@ -23,6 +23,7 @@ export interface PlacementRecoveryIntent {
 
 export interface PlacementRecoveryList {
   intents: PlacementRecoveryIntent[]
+  recovery_mode: 'placement' | 'accumulation' | null
 }
 
 export type PlacementRecoveryActionStatus = 'completed' | 'rejected' | 'unchanged' | 'dismissed'

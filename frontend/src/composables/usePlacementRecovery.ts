@@ -24,11 +24,13 @@ export interface PlacementRecoveryActionState {
 export function usePlacementRecovery() {
   const intents = ref<PlacementRecoveryIntent[]>([])
   const loading = ref(false)
+  const placementRecoveryActive = ref(false)
   const loadError = ref('')
   const actions = reactive(new Map<string, PlacementRecoveryActionState>())
   const dismissing = ref<string | null>(null)
   const dismissNote = ref('')
   let disposed = false
+  let actionVersion = 0
 
   onScopeDispose(() => { disposed = true })
 
@@ -36,9 +38,17 @@ export function usePlacementRecovery() {
     if (loading.value || disposed) return
     loading.value = true
     loadError.value = ''
+    const version = actionVersion
     try {
       const page = await fetchPlacementRecoveryIntents()
-      if (!disposed) intents.value = page.intents
+      if (!disposed && version === actionVersion) {
+        intents.value = page.intents
+        placementRecoveryActive.value = page.recovery_mode === 'placement'
+        for (const intent of page.intents) {
+          const state = actions.get(intent.operation_id)
+          if (state && !state.pending && state.last?.status !== 'unchanged') state.last = null
+        }
+      }
     } catch (cause) {
       if (!disposed) loadError.value = placementRecoveryError(cause)
     } finally {
@@ -65,6 +75,7 @@ export function usePlacementRecovery() {
     const state = actionState(operationId)
     if (state.pending) return null
     state.pending = true
+    actionVersion += 1
     state.error = ''
     try {
       const result = await repairPlacementIntent(operationId)
@@ -74,6 +85,7 @@ export function usePlacementRecovery() {
       if (!disposed) state.error = placementRecoveryError(cause)
       return null
     } finally {
+      actionVersion += 1
       if (!disposed) state.pending = false
     }
   }
@@ -92,6 +104,7 @@ export function usePlacementRecovery() {
     const state = actionState(operationId)
     if (state.pending) return null
     state.pending = true
+    actionVersion += 1
     state.error = ''
     try {
       const result = await dismissPlacementIntent(operationId, dismissNote.value)
@@ -102,12 +115,14 @@ export function usePlacementRecovery() {
       if (!disposed) state.error = placementRecoveryError(cause)
       return null
     } finally {
+      actionVersion += 1
       if (!disposed) state.pending = false
     }
   }
 
   return {
     intents,
+    placementRecoveryActive,
     loading,
     loadError,
     actions,

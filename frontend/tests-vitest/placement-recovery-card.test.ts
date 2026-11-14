@@ -356,3 +356,100 @@ describe('placement recovery card', () => {
     }
   })
 })
+
+describe('placement recovery refresh across clients', () => {
+  afterEach(() => { vi.resetAllMocks() })
+  it('refreshes after another client resolves an intent and shows restart guidance', async () => {
+    api.fetchPlacementRecoveryIntents
+      .mockResolvedValueOnce({ intents: [intent(), intent({ operation_id: 'other', symbol: 'ETH/USDC' })] })
+      .mockResolvedValueOnce({ intents: [intent({ operation_id: 'other', symbol: 'ETH/USDC' })] })
+      .mockResolvedValueOnce({ intents: [], recovery_mode: 'placement' })
+    const wrapper = render()
+    await settle()
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh')!.trigger('click')
+    await settle()
+    expect(wrapper.text()).toContain('1 placement intent is blocking startup')
+    expect(wrapper.text()).not.toContain('BTC/USDC')
+    expect(wrapper.text()).toContain('ETH/USDC')
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh')!.trigger('click')
+    await settle()
+    expect(wrapper.text()).toContain('No quarantined placements remain')
+    expect(wrapper.text()).toContain('Restart Moonwalker')
+    expect(wrapper.findAll('button').filter(button => button.text() === 'Repair')).toHaveLength(0)
+  })
+
+  it('keeps unresolved intents visible on refresh failure and allows retry', async () => {
+    api.fetchPlacementRecoveryIntents
+      .mockResolvedValueOnce({ intents: [intent()] })
+      .mockRejectedValueOnce(new Error('network failure'))
+      .mockResolvedValueOnce({ intents: [intent()] })
+    const wrapper = render()
+    await settle()
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh')!.trigger('click')
+    await settle()
+    expect(wrapper.text()).toContain('network failure')
+    expect(wrapper.text()).toContain('BTC/USDC')
+    expect(wrapper.text()).toContain('Status unknown')
+    await wrapper.findAll('button').find(button => button.text() === 'Retry')!.trigger('click')
+    await settle()
+    expect(wrapper.text()).not.toContain('network failure')
+    expect(wrapper.text()).toContain('1 placement intent is blocking startup')
+  })
+
+  it('restores actions if the server still reports a locally resolved intent', async () => {
+    api.fetchPlacementRecoveryIntents.mockResolvedValue({ intents: [intent()] })
+    api.repairPlacementIntent.mockResolvedValue({ operation_id: 'limit_sell-abc123', status: 'completed', state: 'completed', message: 'Resolved.' })
+    const wrapper = render()
+    await settle()
+    await wrapper.findAll('button').find(button => button.text() === 'Repair')!.trigger('click')
+    await settle()
+    expect(wrapper.findAll('button').some(button => button.text() === 'Repair')).toBe(false)
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh')!.trigger('click')
+    await settle()
+    expect(wrapper.text()).toContain('1 placement intent is blocking startup')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Repair')).toBe(true)
+  })
+
+  it('ignores a pending refresh after disposal', async () => {
+    let resolveRefresh!: (value: { intents: unknown[] }) => void
+    api.fetchPlacementRecoveryIntents
+      .mockResolvedValueOnce({ intents: [intent()] })
+      .mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve }))
+    const wrapper = render()
+    await settle()
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh')!.trigger('click')
+    wrapper.unmount()
+    resolveRefresh({ intents: [] })
+    await settle()
+    expect(api.fetchPlacementRecoveryIntents).toHaveBeenCalledTimes(2)
+  })
+
+
+  it.each([['placement', true], ['accumulation', false], [null, false]] as const)(
+    'handles an initially empty %s recovery list', async (mode, showRestart) => {
+      api.fetchPlacementRecoveryIntents.mockResolvedValue({ intents: [], recovery_mode: mode })
+      const wrapper = render()
+      await settle()
+      expect(wrapper.text().includes('Restart Moonwalker')).toBe(showRestart)
+    },
+  )
+
+  it('does not let an older refresh erase a completed action', async () => {
+    let finishRefresh!: (value: { intents: unknown[] }) => void
+    api.fetchPlacementRecoveryIntents
+      .mockResolvedValueOnce({ intents: [intent()], recovery_mode: 'placement' })
+      .mockImplementationOnce(() => new Promise(resolve => { finishRefresh = resolve }))
+    api.repairPlacementIntent.mockResolvedValue({ operation_id: 'limit_sell-abc123', status: 'completed', state: 'completed', message: 'Resolved.' })
+    const wrapper = render()
+    await settle()
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Repair')!.trigger('click')
+    await settle()
+    expect(wrapper.text()).toContain('Resolved.')
+    finishRefresh({ intents: [intent()] })
+    await settle()
+    expect(wrapper.text()).toContain('Resolved.')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Repair')).toBe(false)
+  })
+
+})

@@ -15,6 +15,9 @@
       startup gate is blocked. Retry the load, or restart Moonwalker and check the logs
       if the error persists.
     </p>
+    <p v-else-if="intents.length === 0" class="placement-recovery-lead">
+      No quarantined placements remain. Restart Moonwalker to resume startup.
+    </p>
     <p v-else class="placement-recovery-lead">
       {{ openCount }} placement {{ openCount === 1 ? 'intent is' : 'intents are' }} blocking
       startup. Repair checks the exchange and applies the confirmed state locally; dismissal
@@ -22,7 +25,7 @@
       is resolved.
     </p>
     <p v-if="loading" class="placement-recovery-note">Loading quarantined placements…</p>
-    <template v-else-if="loadError">
+    <template v-if="loadError">
       <p class="placement-recovery-error" role="alert">
         Could not load quarantined placements: {{ loadError }}
       </p>
@@ -32,7 +35,10 @@
         </n-button>
       </div>
     </template>
-    <ul v-else-if="intents.length > 0" class="placement-recovery-list">
+    <div v-else-if="intents.length > 0" class="placement-recovery-actions">
+      <n-button size="small" :loading="loading" @click="void load()">Refresh</n-button>
+    </div>
+    <ul v-if="intents.length > 0" class="placement-recovery-list">
       <li
         v-for="intent in intents"
         :key="intent.operation_id"
@@ -132,6 +138,7 @@ import type {
 
 const {
   intents,
+  placementRecoveryActive,
   loading,
   loadError,
   actions,
@@ -144,9 +151,8 @@ const {
   dismiss,
 } = usePlacementRecovery()
 
-// The card only exists to unblock a locked instance: with no quarantined
-// intents and no load failure there is nothing to show.
-const visible = computed(() => intents.value.length > 0 || loadError.value !== '')
+// An empty list still needs restart guidance during placement recovery.
+const visible = computed(() => placementRecoveryActive.value || intents.value.length > 0 || loadError.value !== '')
 const openCount = computed(() => intents.value.filter(
   (intent) => {
     const result = actions.get(intent.operation_id)?.last

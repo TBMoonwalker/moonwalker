@@ -113,6 +113,9 @@ class RecoveryOnlyMiddleware(ASGIMiddleware):
     async def handle(
         self, scope: Scope, receive: Receive, send: Send, next_app: ASGIApp
     ) -> None:
+        scope.setdefault("state", {})["moonwalker_recovery_mode"] = (
+            runtime_state.recovery_mode
+        )
         if runtime_state.recovery_mode is None:
             await next_app(scope, receive, send)
             return

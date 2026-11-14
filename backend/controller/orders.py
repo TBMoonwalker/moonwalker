@@ -172,7 +172,7 @@ def _placement_repair_error_response(exc: PlacementRepairError) -> Any:
 
 
 @get(path="/orders/placement-recovery")
-async def list_placement_recovery() -> Any:
+async def list_placement_recovery(request: Request[Any, Any, Any]) -> Any:
     """List quarantined placement intents that keep the startup gate closed.
 
     Returns:
@@ -184,7 +184,10 @@ async def list_placement_recovery() -> Any:
         "quarantined", "reason_code": "...", ...}]}
     """
     intents = await placement_repair.list_quarantined()
-    return {"intents": intents}
+    return {
+        "intents": intents,
+        "recovery_mode": request.scope.get("state", {}).get("moonwalker_recovery_mode"),
+    }
 
 
 @post(path="/orders/placement-recovery/{operation_id:str}/repair", status_code=200)

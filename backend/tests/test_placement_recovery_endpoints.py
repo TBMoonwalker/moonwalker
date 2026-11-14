@@ -1,7 +1,7 @@
 """HTTP contract tests for the placement-recovery operator endpoints.
 
 Value: protects=the recovery API contract the dashboard's recovery card
-    consumes: the list envelope {"intents": [...]}, the repair/dismiss
+    consumes: the list envelope {"intents": [...], "recovery_mode": ...}, the repair/dismiss
     pass-through of service results, the error mapping (NotFound -> 404
     "not_found", Conflict -> 409 "conflict", other PlacementRepairError ->
     400 "invalid_request"), and the rule that a dismissal note is required
@@ -52,6 +52,7 @@ class _FakeRepairService:
         self.repair_result: dict[str, Any] | None = None
         self.repair_error: Exception | None = None
         self.intents: list[dict[str, Any]] = []
+        self.recovery_mode: str | None = None
 
     async def list_quarantined(self) -> list[dict[str, Any]]:
         return self.intents
@@ -170,7 +171,10 @@ async def test_list_and_repair_endpoints_pass_through_service_results(
         repaired = await http.post("/orders/placement-recovery/op-1/repair")
 
     assert listed.status_code == 200
-    assert listed.json() == {"intents": [{"operation_id": "op-1"}]}
+    assert listed.json() == {
+        "intents": [{"operation_id": "op-1"}],
+        "recovery_mode": None,
+    }
     assert repaired.status_code == 200
     assert repaired.json() == fake.repair_result
     assert fake.repair_calls == [("op-1", {"exchange": "binance", "market": "spot"})]
@@ -214,3 +218,21 @@ async def test_dismiss_endpoint_validates_the_note_and_passes_it_through(
     assert response.status_code == 400
     assert response.json()["code"] == "invalid_request"
     assert fake.dismiss_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, "placement", "accumulation"])
+async def test_recovery_list_reports_lifespan_mode(monkeypatch, mode):
+    fake = _FakeRepairService()
+    import app as app_module
+
+    app, _ = _install_fakes(monkeypatch, fake)
+    monkeypatch.setattr(
+        app_module, "runtime_state", app_module.RuntimeState(recovery_mode=mode)
+    )
+    app = app_module.RecoveryOnlyMiddleware()(app)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as http:
+        response = await http.get("/orders/placement-recovery")
+    assert response.json() == {"intents": [], "recovery_mode": mode}
