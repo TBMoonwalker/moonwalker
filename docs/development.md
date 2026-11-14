@@ -37,8 +37,8 @@ For the operator-facing behavior, see [safety-order sizing](dynamic-so.md),
 Dynamic DCA and accumulation are supported trade modes. Accumulation retains
 managed inventory until an explicit sale and does not use DCA's automatic exits.
 Valid accumulation configuration survives reload and backup normalization;
-legacy Sidestep config keys are dropped silently by backup restore and the
-runtime never reads them. Historical Sidestep plans do not describe a
+backup restore rejects removed Sidestep config keys and identifies their
+`trade_mode` replacement. Historical Sidestep plans do not describe a
 supported runtime capability. See the [accumulation reference](accumulation.md)
 and [recovery guide](howto-recover-accumulation.md).
 

@@ -20,7 +20,7 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 ### Mandatory CI Check
 - After every code change, run CI from the scripts directory directly: `cd scripts && ./ci.sh`
 - Frontend CI on OSX runs against Homebrew `node` (26.x)/`npm`; if it is not on the default PATH, prefix the run with `PATH="/opt/homebrew/opt/node/bin:$PATH"` (binary at `/opt/homebrew/Cellar/node/*/bin`).
-- The **Python dependency audit** step in `ci.sh` is a periodic hygiene gate that fails whenever `pip list --outdated` is non-empty. This is expected on many branches and is unrelated to code changes; classify each outdated package as patch/minor (safe), major (needs review), or unsafe (do not bump) per the Dependency Hygiene section below.
+- The **Python dependency audit** step in `ci.sh` runs a strict vulnerability audit of the development lock. Investigate audit failures; do not dismiss them as outdated-package hygiene. Run the separate outdated checks and classify their results under Dependency Hygiene below.
 
 ### Dependency Hygiene (Mandatory)
 - Run dependency outdated checks at least weekly and before each release candidate.
@@ -36,7 +36,7 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 
 ### Backend (Python)
 - **Run application:** `cd backend && python app.py` or use the `./run.sh` script
-- **Install dependencies:** `cd backend && pip install -r requirements.txt`
+- **Install dependencies (from repository root):** `./scripts/install_python_dependencies.sh "$PWD/.venv/bin/python" "$PWD/backend/requirements.txt"`
 - **Install development tools (from repository root):** `./scripts/install_python_dependencies.sh "$PWD/.venv/bin/python" "$PWD/backend/requirements-dev.txt"`
 - **Format code (from repository root):** `./.venv/bin/python -m ruff format backend/`
 - **Check formatting:** `./.venv/bin/python -m ruff format --check backend/`
@@ -215,8 +215,7 @@ In QA mode, flag any code that doesn't match DESIGN.md.
 
 1. **Backend dependencies:**
    ```bash
-   cd backend
-   pip install -r requirements.txt
+   ./scripts/install_python_dependencies.sh "$PWD/.venv/bin/python" "$PWD/backend/requirements.txt"
    ```
 
 2. **Frontend dependencies:**

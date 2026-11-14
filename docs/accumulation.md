@@ -357,12 +357,13 @@ amounts and the operator's reason remain in the journal; return history becomes
 unverified. Historical CSV fee uncertainty can remain declared, but incomplete
 native executions must first be reconciled.
 
-If startup finds only paused, quarantined accumulation obligations, it can serve
+If startup finds paused, quarantined accumulation obligations ready for repair, it can serve
 **recovery only**: status/strategy reads and explicit reconciliation, settlement
 acknowledgement or interrupted-command retirement. Trading workers, watcher,
-signal plugins, configuration writes and websocket feeds remain stopped. Restart
-after repairing the obligations. Mixed or unknown unresolved DCA work retains the
-fatal startup gate; recovery access does not bypass it.
+signal plugins, configuration writes and websocket feeds remain stopped. This
+restricted access can also be served when separate DCA work remains unresolved;
+it does not clear or bypass that work. Repair the available obligations and
+restart so startup can reconcile all remaining exchange work before trading.
 
 ## Backup and restore
 

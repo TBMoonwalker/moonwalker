@@ -393,8 +393,10 @@ All mutating order endpoints use `POST`.
 
 Placement recovery is the operator exit for quarantined classic-DCA placement
 intents. It stays reachable while the startup gate is closed (see
-[Startup Recovery](operations.md#startup-recovery)); every other trading and
-configuration route is blocked in that mode. Repair is lookup-only: it never
+[Startup Recovery](operations.md#startup-recovery)). Trading routes and
+configuration writes are blocked in that mode; `GET /config/all` remains
+available, and accumulation recovery mode permits its repair-specific reads
+and action. Repair is lookup-only: it never
 submits, cancels, or otherwise changes exchange state, and inconclusive
 evidence leaves the intent quarantined. Dismissal records a terminal
 disposition with the operator's note as the audit trail.

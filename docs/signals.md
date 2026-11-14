@@ -97,7 +97,8 @@ Dynamic DCA rules:
 
 In accumulation mode, CSV declares already-owned net inventory instead of
 reconstructing Dynamic DCA base/safety orders. Fresh wallet ownership must cover
-the complete net declaration. Four-column purchases retain unknown fees.
+the complete net declaration. Fee-aware columns are required; blank fee fields
+retain unknown fees.
 Fee-complete, quote-valued declarations enable returns based on those declared
 purchases and fees, labelled separately from exchange-confirmed fills. Failed adoption needs
 an explicit entry retry. See [accumulation setup](howto-operate-accumulation.md#adopt-coins-already-owned-with-csv)

@@ -356,8 +356,8 @@ Before the restore confirmation, the dashboard runs a read-only backup review
   endpoint enforce the same rules, and the restore endpoint remains the
   authoritative gate.
 - The review performs no database reads or writes and never mutates the
-  selected file. If the review is unavailable, the restore proceeds to its
-  own checks and refuses with the usual error.
+  selected file. If the review is unavailable, the dashboard blocks restore
+  until the review succeeds. Retry the review before restoring.
 
 Restore requires explicit confirmation. Before replacing state, Moonwalker
 blocks new exchange-order work and waits for already admitted order work to
@@ -373,8 +373,10 @@ If an intent cannot be resolved safely, startup fails closed and identifies the
 operation requiring manual reconciliation. Capital recorded by an unresolved
 buy remains reserved until the intent reaches a safe terminal state.
 
-If only paused, quarantined accumulation obligations remain, startup can instead
-serve restricted recovery access with trading workers stopped. See the
+If paused, quarantined accumulation obligations are ready for repair, startup can
+instead serve restricted recovery access with trading workers stopped, including
+when separate DCA work remains unresolved. That work still needs reconciliation
+before normal startup. See the
 [accumulation recovery guide](howto-recover-accumulation.md#recover-after-restore-or-upgrade).
 
 If only quarantined classic-DCA placement intents remain (with no other
