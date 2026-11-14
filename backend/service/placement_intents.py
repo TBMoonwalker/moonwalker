@@ -66,6 +66,20 @@ class QuarantineResolution:
     result: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class RecoveryTarget:
+    """Bind a startup recovery to its durable placement and owning deal."""
+
+    operation_id: str
+    request_json: str
+    symbol: str
+    action: str
+    deal_id: str | None
+    exchange_order_id: str | None
+    client_order_id: str | None
+    base_buy: bool
+
+
 TERMINAL_PLACEMENT_STATES = frozenset(
     {
         PlacementIntentState.REJECTED.value,
@@ -768,36 +782,66 @@ async def mark_placement_persisted_in_transaction(
 
 
 async def validate_repair_target_in_transaction(
-    resolution: QuarantineResolution | None, connection: Any, *, symbol: str
+    resolution: QuarantineResolution | None,
+    connection: Any,
+    *,
+    symbol: str,
+    recovery_target: RecoveryTarget | None = None,
 ) -> None:
-    """Ensure a repair cannot mutate a different symbol or deal."""
-    if resolution is None:
+    """Ensure a recovery cannot mutate a different durable placement or deal."""
+    if resolution is not None and recovery_target is not None:
+        raise ValueError("Recovery target cannot combine startup and operator repair.")
+    if recovery_target is not None:
+        if not recovery_target.exchange_order_id:
+            raise ValueError("Startup recovery lacks exchange order identity.")
+        durable = (
+            await model.PlacementIntent.filter(
+                operation_id=recovery_target.operation_id,
+                state__in=[
+                    PlacementIntentState.ACCEPTED.value,
+                    PlacementIntentState.FILLED.value,
+                ],
+                request_json=recovery_target.request_json,
+                symbol=recovery_target.symbol,
+                action=recovery_target.action,
+                deal_id=recovery_target.deal_id,
+                exchange_order_id=recovery_target.exchange_order_id,
+                client_order_id=recovery_target.client_order_id,
+            )
+            .using_db(connection)
+            .exists()
+        )
+        if not durable:
+            raise ValueError("Startup recovery placement identity changed.")
+    target = resolution or recovery_target
+    if target is None:
         return
-    if symbol != resolution.symbol:
+    if symbol != target.symbol:
         raise ValueError("Repair target symbol does not match its placement.")
     trade = (
-        await model.OpenTrades.filter(symbol=resolution.symbol)
-        .using_db(connection)
-        .first()
+        await model.OpenTrades.filter(symbol=target.symbol).using_db(connection).first()
     )
-    if resolution.base_buy:
-        if trade is not None:
-            raise ValueError("Cannot repair a base buy over an open deal.")
+    if target.base_buy:
+        if trade is not None or (
+            recovery_target is not None
+            and await model.Trades.filter(symbol=symbol).using_db(connection).exists()
+        ):
+            raise ValueError("Cannot recover a base buy over existing trade data.")
         return
-    if not resolution.deal_id or trade is None or trade.deal_id != resolution.deal_id:
+    if not target.deal_id or trade is None or trade.deal_id != target.deal_id:
         raise ValueError("Repair cannot verify the original open deal identity.")
-    if resolution.action == PlacementAction.BUY.value and trade.tp_limit_order_id:
+    if target.action == PlacementAction.BUY.value and trade.tp_limit_order_id:
         raise ValueError("Repair cannot add to a deal with an active TP order.")
-    if resolution.action == PlacementAction.SELL.value and trade.tp_limit_order_id:
+    if target.action == PlacementAction.SELL.value and trade.tp_limit_order_id:
         raise ValueError("Repair cannot close a deal with an active TP order.")
-    if resolution.action == PlacementAction.CANCEL.value:
-        if not resolution.exchange_order_id or (
-            trade.tp_limit_order_id != resolution.exchange_order_id
+    if target.action == PlacementAction.CANCEL.value:
+        if not target.exchange_order_id or (
+            trade.tp_limit_order_id != target.exchange_order_id
         ):
             raise ValueError("Repair cannot verify the canceled TP order identity.")
-    if resolution.action == PlacementAction.LIMIT_SELL.value:
+    if target.action == PlacementAction.LIMIT_SELL.value:
         if trade.tp_limit_order_id and (
-            trade.tp_limit_order_id != resolution.exchange_order_id
+            trade.tp_limit_order_id != target.exchange_order_id
         ):
             raise ValueError("Repair would overwrite a different TP order.")
 

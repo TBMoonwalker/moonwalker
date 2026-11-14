@@ -40,6 +40,7 @@ from service.persistence_records import (
 )
 from service.placement_intents import (
     QuarantineResolution,
+    RecoveryTarget,
     mark_placement_persisted_in_transaction,
     mark_placements_persisted_in_transaction,
     validate_repair_target_in_transaction,
@@ -374,12 +375,22 @@ async def persist_buy_trade(
     entry_evaluation: AiTrustEntryGate | None = None,
     placement_operation_id: str | None = None,
     resolution: QuarantineResolution | None = None,
+    recovery_target: RecoveryTarget | None = None,
 ) -> None:
     """Persist a filled buy trade and create the open-trade row when needed."""
 
     async def _persist_buy() -> None:
         async with in_transaction() as conn:
-            await validate_repair_target_in_transaction(resolution, conn, symbol=symbol)
+            await validate_repair_target_in_transaction(
+                resolution, conn, symbol=symbol, recovery_target=recovery_target
+            )
+            if (
+                recovery_target is not None
+                and create_open_trade != recovery_target.base_buy
+            ):
+                raise ValueError(
+                    "Recovered buy type does not match its original placement."
+                )
             existing_open_trade = (
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
             )
@@ -488,6 +499,7 @@ async def persist_closed_trade(
     placement_operation_id: str | None = None,
     placement_operation_ids: Iterable[str] | None = None,
     resolution: QuarantineResolution | None = None,
+    recovery_target: RecoveryTarget | None = None,
 ) -> None:
     """Persist a closed trade and remove its open-trade rows."""
 
@@ -498,7 +510,9 @@ async def persist_closed_trade(
     async def _persist_sell() -> None:
         nonlocal closed_close_date, closed_deal_id, closed_open_date
         async with in_transaction() as conn:
-            await validate_repair_target_in_transaction(resolution, conn, symbol=symbol)
+            await validate_repair_target_in_transaction(
+                resolution, conn, symbol=symbol, recovery_target=recovery_target
+            )
             deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
             closed_deal_id = deal_id
             summary_payload = {

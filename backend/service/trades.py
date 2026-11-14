@@ -16,6 +16,7 @@ from service.order_persistence import (
 )
 from service.placement_intents import (
     QuarantineResolution,
+    RecoveryTarget,
     mark_placement_persisted_in_transaction,
     validate_repair_target_in_transaction,
 )
@@ -566,13 +567,14 @@ class Trades:
         amount: float,
         placement_operation_id: str | None = None,
         resolution: QuarantineResolution | None = None,
+        recovery_target: RecoveryTarget | None = None,
     ) -> bool:
         """Persist the currently armed proactive TP limit order for a symbol."""
 
         async def _set_tp_limit_order() -> int:
             async with in_transaction() as conn:
                 await validate_repair_target_in_transaction(
-                    resolution, conn, symbol=symbol
+                    resolution, conn, symbol=symbol, recovery_target=recovery_target
                 )
                 updated_count = (
                     await model.OpenTrades.filter(symbol=symbol)

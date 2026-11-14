@@ -39,7 +39,7 @@ from service.order_persistence import (
     persist_closed_trade,
     persist_partial_sell_execution,
 )
-from service.placement_intents import QuarantineResolution
+from service.placement_intents import QuarantineResolution, RecoveryTarget
 from service.placement_workflow import PlacementWorkflow
 from service.trades import Trades
 from tortoise.exceptions import ConfigurationError
@@ -125,6 +125,7 @@ async def finalize_buy_order(
     dependencies: DcaFinalizationContext,
     placement_operation_id: str | None = None,
     resolution: QuarantineResolution | None = None,
+    recovery_target: RecoveryTarget | None = None,
 ) -> bool:
     """Persist a filled buy order and emit monitoring."""
     logging.debug(
@@ -187,6 +188,8 @@ async def finalize_buy_order(
         persistence_options["placement_operation_id"] = placement_operation_id
     if resolution is not None:
         persistence_options["resolution"] = resolution
+    if recovery_target is not None:
+        persistence_options["recovery_target"] = recovery_target
     await persist_buy_trade(
         order_status["symbol"],
         payload,
@@ -315,6 +318,7 @@ async def finalize_completed_sell(
     placement_operation_id: str | None = None,
     placement_operation_ids: list[str] | None = None,
     resolution: QuarantineResolution | None = None,
+    recovery_target: RecoveryTarget | None = None,
 ) -> None:
     """Persist a completed sell status and emit monitoring."""
     normalized_close_reason = normalize_close_reason(order_status.get("close_reason"))
@@ -359,6 +363,8 @@ async def finalize_completed_sell(
         close_options["placement_operation_ids"] = placement_operation_ids
     if resolution is not None:
         close_options["resolution"] = resolution
+    if recovery_target is not None:
+        close_options["recovery_target"] = recovery_target
     await persist_closed_trade(
         order_status["symbol"],
         close_context["payload"],

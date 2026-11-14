@@ -3130,3 +3130,165 @@ async def test_stored_partial_recovery_uses_execution_proceeds(
             assert await model.TradeExecutions.all().count() == 2
     finally:
         await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "scenario"),
+    [
+        (kind, scenario)
+        for kind in ("sell", "limit_full", "cancel_full", "safety_buy", "limit_open")
+        for scenario in (
+            "matching",
+            "different",
+            "client_only",
+            "missing_deal",
+            "conflicting_tp",
+        )
+    ]
+    + [
+        ("base_buy", scenario)
+        for scenario in ("matching", "different", "client_only", "orphan")
+    ],
+)
+async def test_startup_full_recovery_binds_original_deal(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, kind: str, scenario: str
+) -> None:
+    """Startup recovery binds its placement to the matching local deal."""
+    valid = scenario in {"matching", "client_only"}
+    await _init_database(tmp_path)
+    try:
+        _classic_route(monkeypatch)
+        is_buy = kind in {"base_buy", "safety_buy"}
+        if kind != "base_buy" or scenario == "different":
+            current_deal = "newer" if scenario == "different" else "original"
+            await _seed_buy_trade(1, deal_id=current_deal)
+            await model.OpenTrades.create(
+                symbol="BTC/USDC",
+                deal_id=current_deal,
+                amount=1,
+                cost=10,
+                tp_limit_order_id=(
+                    "other-tp"
+                    if scenario == "conflicting_tp"
+                    else "order-1"
+                    if kind == "cancel_full"
+                    else None
+                ),
+                tp_limit_order_amount=1 if kind == "cancel_full" else None,
+            )
+        if scenario == "orphan":
+            await _seed_buy_trade(1, deal_id="orphan")
+        request = {
+            "_execution_scope": REPAIR_SCOPE,
+            "symbol": "BTC/USDC",
+            "direction": "long",
+            "side": "buy" if is_buy else "sell",
+            "ordersize": 10,
+            "botname": "test",
+            "baseorder": kind == "base_buy",
+            "safetyorder": kind == "safety_buy",
+            "order_count": 1 if kind == "safety_buy" else 0,
+            "ordertype": "market",
+            "so_percentage": 1 if kind == "safety_buy" else None,
+        }
+        action = (
+            "buy"
+            if is_buy
+            else "limit_sell"
+            if kind.startswith("limit_")
+            else "cancel"
+            if kind == "cancel_full"
+            else "sell"
+        )
+        await model.PlacementIntent.create(
+            operation_id="startup-bind",
+            client_order_id="client",
+            exchange_order_id=None if scenario == "client_only" else "order-1",
+            exchange_name="binance",
+            symbol="BTC/USDC",
+            action=action,
+            side="buy" if is_buy else "sell",
+            order_type="market",
+            state="submitting",
+            deal_id=None
+            if kind == "base_buy" or scenario == "missing_deal"
+            else "original",
+            requested_amount=1,
+            request_json=json.dumps(request),
+        )
+        evidence = {
+            "id": "order-1",
+            "clientOrderId": "client",
+            "orderid": "order-1",
+            "symbol": "BTC/USDC",
+            "side": "buy" if is_buy else "sell",
+            "status": "open" if kind == "limit_open" else "closed",
+            "filled": 0 if kind == "limit_open" else 1,
+            "amount": 1,
+            "price": 10,
+            "average": 10,
+            "cost": 10,
+            "timestamp": "1778000001000",
+            "fees": 0,
+            "ordersize": 10,
+            "precision": 8,
+            "amount_fee": 0,
+            "type": "sold_check" if kind == "sell" else "limit",
+            "total_amount": 1,
+            "total_cost": 10,
+        }
+
+        class Exchange(_FakeExchange):
+            async def build_spot_sell_order_status(self, payload, config):
+                return {
+                    **payload,
+                    "type": "sold_check",
+                    "total_amount": 1,
+                    "price": 10,
+                    "total_cost": 10,
+                    "timestamp": "1778000001000",
+                }
+
+        lifecycle = DcaOrderLifecycle()
+        lifecycle.exchange = Exchange(
+            ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.FOUND, order=evidence
+            )
+        )
+
+        async def no_notify(*args, **kwargs):
+            pass
+
+        monkeypatch.setattr(lifecycle.monitoring, "notify_trade", no_notify)
+        await (
+            PlacementRecoveryEntry(lifecycle=lifecycle)
+            .build_reconciler()
+            .reconcile(REPAIR_CONFIG)
+        )
+        intent = await model.PlacementIntent.get(operation_id="startup-bind")
+        assert intent.state == ("completed" if valid else "quarantined")
+        if not valid:
+            if scenario == "orphan":
+                assert not await model.OpenTrades.filter(symbol="BTC/USDC").exists()
+            else:
+                trade = await model.OpenTrades.get(symbol="BTC/USDC")
+                assert trade.deal_id == (
+                    "newer" if scenario == "different" else "original"
+                )
+                if scenario == "conflicting_tp":
+                    assert trade.tp_limit_order_id == "other-tp"
+            assert await model.ClosedTrades.all().count() == 0
+            assert await model.Trades.all().count() == 1
+        elif is_buy:
+            assert await model.OpenTrades.filter(symbol="BTC/USDC").exists()
+            assert await model.Trades.all().count() == (1 if kind == "base_buy" else 2)
+        elif kind == "limit_open":
+            assert (
+                await model.OpenTrades.get(symbol="BTC/USDC")
+            ).tp_limit_order_id == "order-1"
+        else:
+            assert not await model.OpenTrades.filter(symbol="BTC/USDC").exists()
+            assert await model.ClosedTrades.all().count() == 1
+    finally:
+        await Tortoise.close_connections()

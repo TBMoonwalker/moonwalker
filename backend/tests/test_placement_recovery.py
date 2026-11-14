@@ -624,6 +624,9 @@ async def test_recovered_open_limit_sell_restores_trade_metadata() -> None:
     )
 
     assert result is True
+    target = trades.set_calls[0].pop("recovery_target")
+    assert target.operation_id == "limit_sell-operation"
+    assert target.exchange_order_id == "limit-1"
     assert trades.set_calls == [
         {
             "symbol": "BTC/USDC",

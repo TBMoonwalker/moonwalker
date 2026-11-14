@@ -12,6 +12,7 @@ from service.placement_intents import (
     BUY_RECOVERY_CONTEXT_KEYS,
     PlacementAction,
     QuarantineResolution,
+    RecoveryTarget,
     deserialize_placement_payload,
 )
 from service.placement_repair import (
@@ -108,6 +109,26 @@ class PlacementRecoveryHandler:
         stored_result = deserialize_placement_payload(intent.result_json)
         evidence = dict(exchange_order or stored_result)
         action = str(intent.action)
+        recovery_target = None
+        if resolution is None:
+            recovery_target = RecoveryTarget(
+                operation_id=operation_id,
+                request_json=str(intent.request_json),
+                symbol=str(intent.symbol),
+                action=action,
+                deal_id=str(intent.deal_id)
+                if getattr(intent, "deal_id", None)
+                else None,
+                exchange_order_id=str(
+                    evidence.get("id") or intent.exchange_order_id or ""
+                )
+                or None,
+                client_order_id=str(intent.client_order_id)
+                if getattr(intent, "client_order_id", None)
+                else None,
+                base_buy=action == PlacementAction.BUY.value
+                and bool(request.get("baseorder")),
+            )
         if not _matches_intent(evidence, intent):
             return False
 
@@ -191,6 +212,7 @@ class PlacementRecoveryHandler:
                 config,
                 intent=intent,
                 resolution=resolution,
+                recovery_target=recovery_target,
             )
         if action == PlacementAction.SELL.value:
             return await self._resume_sell(
@@ -200,6 +222,7 @@ class PlacementRecoveryHandler:
                 config,
                 intent=intent,
                 resolution=resolution,
+                recovery_target=recovery_target,
             )
         if action == PlacementAction.LIMIT_SELL.value:
             return await self._resume_limit_sell(
@@ -209,6 +232,7 @@ class PlacementRecoveryHandler:
                 evidence,
                 config,
                 resolution=resolution,
+                recovery_target=recovery_target,
             )
         if action == PlacementAction.CANCEL.value:
             return await self._resume_cancel(
@@ -217,6 +241,7 @@ class PlacementRecoveryHandler:
                 evidence,
                 config,
                 resolution=resolution,
+                recovery_target=recovery_target,
             )
         return False
 
@@ -229,6 +254,7 @@ class PlacementRecoveryHandler:
         *,
         intent: Any,
         resolution: QuarantineResolution | None = None,
+        recovery_target: RecoveryTarget | None = None,
     ) -> bool:
         """Normalize and persist a confirmed buy fill."""
         if request.get("safetyorder") and request.get("so_percentage") is None:
@@ -293,6 +319,7 @@ class PlacementRecoveryHandler:
                 original_order=request,
                 placement_operation_id=operation_id,
                 **({"resolution": resolution} if resolution else {}),
+                **({"recovery_target": recovery_target} if recovery_target else {}),
             )
         )
 
@@ -305,6 +332,7 @@ class PlacementRecoveryHandler:
         *,
         intent: Any,
         resolution: QuarantineResolution | None = None,
+        recovery_target: RecoveryTarget | None = None,
     ) -> bool:
         """Normalize and persist a confirmed market sell fill."""
         normalized = {**request, **evidence}
@@ -323,6 +351,7 @@ class PlacementRecoveryHandler:
             config,
             placement_operation_id=operation_id,
             **({"resolution": resolution} if resolution else {}),
+            **({"recovery_target": recovery_target} if recovery_target else {}),
         )
         return True
 
@@ -335,6 +364,7 @@ class PlacementRecoveryHandler:
         config: dict[str, Any],
         *,
         resolution: QuarantineResolution | None = None,
+        recovery_target: RecoveryTarget | None = None,
     ) -> bool:
         """Persist either an open proactive order or its confirmed fill."""
         if bool(evidence.get("requires_market_fallback")):
@@ -369,6 +399,7 @@ class PlacementRecoveryHandler:
                     amount=amount,
                     placement_operation_id=operation_id,
                     **({"resolution": resolution} if resolution else {}),
+                    **({"recovery_target": recovery_target} if recovery_target else {}),
                 )
             )
 
@@ -389,6 +420,7 @@ class PlacementRecoveryHandler:
             config,
             placement_operation_id=operation_id,
             **({"resolution": resolution} if resolution else {}),
+            **({"recovery_target": recovery_target} if recovery_target else {}),
         )
         return True
 
@@ -400,6 +432,7 @@ class PlacementRecoveryHandler:
         config: dict[str, Any],
         *,
         resolution: QuarantineResolution | None = None,
+        recovery_target: RecoveryTarget | None = None,
     ) -> bool:
         """Persist a confirmed cancel and any exchange-reported partial fill."""
         symbol = str(intent.symbol)
@@ -431,6 +464,7 @@ class PlacementRecoveryHandler:
                 config,
                 placement_operation_id=operation_id,
                 **({"resolution": resolution} if resolution else {}),
+                **({"recovery_target": recovery_target} if recovery_target else {}),
             )
             return True
 
