@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -297,17 +298,29 @@ def evaluate_exit_price_guard(
         or inconsistent bounds, or a missing fresh price are reported as
         unavailable so callers fail closed instead of selling on stale data.
     """
-    if fresh_price is None:
+
+    def valid_price(value: float | None) -> bool:
+        return (
+            value is not None
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and value > 0
+        )
+
+    if not valid_price(fresh_price):
         return False, "guard_unavailable"
+    assert fresh_price is not None
     if sell_reason in EXIT_GUARD_MIN_PRICE_REASONS:
-        if min_price is None or max_price is not None:
+        if not valid_price(min_price) or max_price is not None:
             return False, "guard_unavailable"
+        assert min_price is not None
         if fresh_price < min_price:
             return False, "fresh_price_below_min"
         return True, "exit_price_ok"
     if sell_reason in EXIT_GUARD_MAX_PRICE_REASONS:
-        if max_price is None or min_price is not None:
+        if not valid_price(max_price) or min_price is not None:
             return False, "guard_unavailable"
+        assert max_price is not None
         if fresh_price > max_price:
             return False, "fresh_price_above_max"
         return True, "exit_price_ok"

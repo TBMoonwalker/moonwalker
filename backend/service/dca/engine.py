@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import math
 import sqlite3
 from contextvars import ContextVar
 from datetime import datetime, timedelta
@@ -830,7 +831,7 @@ class Dca:
             fresh_price = float(raw_price)
         except (TypeError, ValueError):
             fresh_price = None
-        if fresh_price is None or fresh_price <= 0:
+        if fresh_price is None or not math.isfinite(fresh_price) or fresh_price <= 0:
             logging.error(
                 "Aborting market sell for %s: exit price guard returned an "
                 "unusable price %r (sell_reason=%s).",

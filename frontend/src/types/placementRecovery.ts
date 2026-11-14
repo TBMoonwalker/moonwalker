@@ -11,6 +11,7 @@ export interface PlacementRecoveryIntent {
   reason_code: string | null
   error_message: string | null
   exchange_order_id: string | null
+  client_order_id?: string | null
   has_lookup_identity: boolean
   limit_price: number | null
   amount: number | null

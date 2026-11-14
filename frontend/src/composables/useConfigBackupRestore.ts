@@ -59,22 +59,48 @@ function toFinding(raw: NonNullable<ClassifyResponse['findings']>[number]): Clas
 
 function toClassification(
     mode: BackupRestoreMode,
-    payload: ClassifyResponse,
+    payload: unknown,
 ): BackupClassification {
-    const findings = (payload.findings ?? []).map(toFinding)
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+        throw new Error('Invalid backup review response.')
+    }
+    const response = payload as ClassifyResponse
+    if (
+        typeof response.classification !== 'object' ||
+        response.classification === null ||
+        Array.isArray(response.classification) ||
+        !(response.classification.schema_version === null ||
+            (typeof response.classification.schema_version === 'number' &&
+                Number.isInteger(response.classification.schema_version))) ||
+        ![null, 'accumulation', 'dynamic_dca', 'legacy_unspecified'].includes(
+            response.classification.trade_mode_era ?? null,
+        ) ||
+        typeof response.classification.includes_accumulation !== 'boolean' ||
+        !Array.isArray(response.findings) ||
+        response.findings.some(finding =>
+            typeof finding !== 'object' || finding === null ||
+            !isKnownSeverity(finding.severity) ||
+            typeof finding.code !== 'string' || !finding.code ||
+            typeof finding.message !== 'string' || !finding.message ||
+            (finding.next_action != null && typeof finding.next_action !== 'string'),
+        )
+    ) {
+        throw new Error('Invalid backup review response.')
+    }
+    const findings = response.findings.map(toFinding)
     return {
         mode,
         schemaVersion:
-            typeof payload.classification?.schema_version === 'number'
-                ? payload.classification.schema_version
+            typeof response.classification?.schema_version === 'number'
+                ? response.classification.schema_version
                 : null,
         tradeModeEra:
-            payload.classification?.trade_mode_era === 'accumulation' ||
-            payload.classification?.trade_mode_era === 'dynamic_dca' ||
-            payload.classification?.trade_mode_era === 'legacy_unspecified'
-                ? payload.classification.trade_mode_era
+            response.classification?.trade_mode_era === 'accumulation' ||
+            response.classification?.trade_mode_era === 'dynamic_dca' ||
+            response.classification?.trade_mode_era === 'legacy_unspecified'
+                ? response.classification.trade_mode_era
                 : null,
-        includesAccumulation: Boolean(payload.classification?.includes_accumulation),
+        includesAccumulation: Boolean(response.classification?.includes_accumulation),
         findings,
         blocking: findings.some(finding => finding.severity === 'blocking'),
     }
@@ -108,6 +134,7 @@ export interface RestoreReviewState {
     code: string
     message: string
     nextAction: string | null
+    previewMessage?: string
 }
 
 interface MessageApiLike {
@@ -205,17 +232,46 @@ export function useConfigBackupRestore(
                 : null
     }
 
+    let backupSelectionGeneration = 0
+    const previewFailures = new Set<BackupRestoreMode>()
+
+    function previewFailureMessage(): string {
+        const scopes = Array.from(previewFailures)
+            .map(scope => scope === 'full' ? 'full backup' : 'config only')
+            .join(' and ')
+        return `Backup review is unavailable for ${scopes}. Restore is blocked until that review succeeds.`
+    }
+
+    function updatePreviewFailure(mode: BackupRestoreMode, failed: boolean): void {
+        if (failed) previewFailures.add(mode)
+        else previewFailures.delete(mode)
+        if (previewFailures.size > 0) {
+            const message = previewFailureMessage()
+            restoreReview.value = restoreReview.value && restoreReview.value.code !== 'preview_unavailable'
+                ? { ...restoreReview.value, previewMessage: message }
+                : { code: 'preview_unavailable', message, nextAction: 'Retry the restore to review the backup again.' }
+        } else if (restoreReview.value?.code === 'preview_unavailable') {
+            restoreReview.value = null
+        } else if (restoreReview.value?.previewMessage) {
+            const { previewMessage: _previewMessage, ...review } = restoreReview.value
+            restoreReview.value = review
+        }
+    }
+
     function clearSelectedBackup(): void {
+        backupSelectionGeneration += 1
+        previewFailures.clear()
         selectedBackupFileName.value = null
         selectedBackupPayload.value = null
         restoreReview.value = null
         backupClassifications.value = {}
+        classificationLoading.value = false
         if (backupFileInputRef.value) {
             backupFileInputRef.value.value = ''
         }
     }
 
-    const classificationInFlight = new Map<BackupRestoreMode, Promise<boolean>>()
+    const classificationInFlight = new Map<BackupRestoreMode, { generation: number; request: Promise<boolean> }>()
 
     async function ensureClassification(mode: BackupRestoreMode): Promise<boolean> {
         const cached = backupClassifications.value[mode]
@@ -223,22 +279,25 @@ export function useConfigBackupRestore(
             return !cached.blocking
         }
         const inFlight = classificationInFlight.get(mode)
-        if (inFlight) {
-            return inFlight
+        if (inFlight?.generation === backupSelectionGeneration) {
+            return inFlight.request
         }
         if (!selectedBackupPayload.value) {
             return false
         }
+        const generation = backupSelectionGeneration
+        const payload = selectedBackupPayload.value
         const request = (async (): Promise<boolean> => {
             classificationLoading.value = true
             try {
                 const response = await axios.post<ClassifyResponse>(
                     options.apiUrl('/config/backup/classify'),
                     {
-                        backup: selectedBackupPayload.value,
+                        backup: payload,
                         restore_trade_data: mode === 'full',
                     },
                 )
+                if (generation !== backupSelectionGeneration) return false
                 const classification = toClassification(
                     mode,
                     response.data ?? {},
@@ -247,29 +306,29 @@ export function useConfigBackupRestore(
                     ...backupClassifications.value,
                     [mode]: classification,
                 }
+                updatePreviewFailure(mode, false)
                 return !classification.blocking
             } catch (error) {
-                // The preview is advisory; the restore endpoint re-checks
-                // everything, so an unavailable review must not wedge
-                // restores.
+                if (generation !== backupSelectionGeneration) return false
+                updatePreviewFailure(mode, true)
                 if (options.surfaceMessages !== false) {
                     options.message.warning(
                         extractApiErrorMessage(
                             error,
-                            'Backup review is unavailable; the restore will re-check before applying.',
+                            'Backup review is unavailable; retry before restoring.',
                         ),
                     )
                 }
-                return true
+                return false
             } finally {
-                classificationLoading.value = false
+                if (generation === backupSelectionGeneration) classificationLoading.value = false
             }
         })()
-        classificationInFlight.set(mode, request)
+        classificationInFlight.set(mode, { generation, request })
         try {
             return await request
         } finally {
-            classificationInFlight.delete(mode)
+            if (classificationInFlight.get(mode)?.request === request) classificationInFlight.delete(mode)
         }
     }
 
@@ -326,8 +385,17 @@ export function useConfigBackupRestore(
             return
         }
 
+        const generation = ++backupSelectionGeneration
+        previewFailures.clear()
+        selectedBackupFileName.value = null
+        selectedBackupPayload.value = null
+        restoreReview.value = null
+        backupClassifications.value = {}
+        classificationLoading.value = false
+
         try {
             const rawText = await selectedFile.text()
+            if (generation !== backupSelectionGeneration) return
             const parsed = JSON.parse(rawText) as unknown
             if (!isBackupPayload(parsed)) {
                 throw new Error('Selected file is not a valid Moonwalker backup.')
@@ -341,10 +409,12 @@ export function useConfigBackupRestore(
             // visible before any restore is attempted. Sequential keeps the
             // classify call order deterministic and the loading flag accurate.
             await ensureClassification('config')
+            if (generation !== backupSelectionGeneration) return
             if (selectedBackupHasTradeData.value) {
                 await ensureClassification('full')
             }
         } catch (error) {
+            if (generation !== backupSelectionGeneration) return
             clearSelectedBackup()
             options.message.error(
                 error instanceof Error
@@ -354,7 +424,7 @@ export function useConfigBackupRestore(
         }
     }
 
-    async function handleRestoreBackup(
+    async function performRestoreBackup(
         mode: BackupRestoreMode,
     ): Promise<OperationResult> {
         if (!selectedBackupPayload.value) {
@@ -365,12 +435,6 @@ export function useConfigBackupRestore(
             return {
                 status: 'error',
                 message,
-            }
-        }
-        if (restoreLoading.value) {
-            return {
-                status: 'noop',
-                message: 'Backup restore is already in progress.',
             }
         }
         if (mode === 'full' && !selectedBackupHasTradeData.value) {
@@ -384,9 +448,14 @@ export function useConfigBackupRestore(
             }
         }
 
+        const generation = backupSelectionGeneration
+        const payload = selectedBackupPayload.value
         // Safety net: pre-classification runs on file selection, but a
         // blocked or unavailable preview must not wedge the restore.
         const classificationAllowed = await ensureClassification(mode)
+        if (generation !== backupSelectionGeneration) {
+            return { status: 'noop', message: 'Backup selection changed. Review it before restoring.' }
+        }
         if (!classificationAllowed) {
             return {
                 status: 'blocked',
@@ -417,13 +486,15 @@ export function useConfigBackupRestore(
             }
         }
 
-        restoreLoading.value = true
-        restoreReview.value = null
+        if (restoreReview.value?.code !== 'preview_unavailable') {
+            restoreReview.value = null
+            if (previewFailures.size > 0) updatePreviewFailure(mode, false)
+        }
         try {
             const response = await axios.post<RestoreResponse>(
                 options.apiUrl('/config/backup/restore'),
                 {
-                    backup: selectedBackupPayload.value,
+                    backup: payload,
                     restore_trade_data: mode === 'full',
                     confirm: true,
                 },
@@ -455,7 +526,12 @@ export function useConfigBackupRestore(
                 }
             }
         } catch (error) {
-            restoreReview.value = buildRestoreReview(error)
+            const review = buildRestoreReview(error)
+            if (review) {
+                restoreReview.value = previewFailures.size > 0
+                    ? { ...review, previewMessage: previewFailureMessage() }
+                    : review
+            } else if (previewFailures.size === 0) restoreReview.value = null
             const message = extractApiErrorMessage(
                 error,
                 'Backup restore failed.',
@@ -464,9 +540,19 @@ export function useConfigBackupRestore(
                 options.message.error(message)
             }
             return {
-                status: restoreReview.value ? 'blocked' : 'error',
+                status: review ? 'blocked' : 'error',
                 message,
             }
+        }
+    }
+
+    async function handleRestoreBackup(mode: BackupRestoreMode): Promise<OperationResult> {
+        if (restoreLoading.value) {
+            return { status: 'noop', message: 'Backup restore is already in progress.' }
+        }
+        restoreLoading.value = true
+        try {
+            return await performRestoreBackup(mode)
         } finally {
             restoreLoading.value = false
         }

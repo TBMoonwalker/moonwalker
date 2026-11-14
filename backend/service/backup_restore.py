@@ -147,7 +147,7 @@ class BackupService:
         restore_trade_data: bool,
     ) -> dict[str, Any]:
         """Restore config-only or full backup payloads."""
-        if backup_payload.get("schema_version", 1) not in {1, 2, 3}:
+        if backup_payload.get("schema_version", 1) not in (1, 2, 3):
             raise ValueError("Unsupported backup schema version.")
         config_rows = self._force_safe_restore_config(
             self._validate_config_rows(backup_payload.get("config"))
@@ -316,7 +316,7 @@ class BackupService:
         """
         findings: list[dict[str, Any]] = []
         schema_version = backup_payload.get("schema_version", 1)
-        if schema_version not in {1, 2, 3}:
+        if schema_version not in (1, 2, 3):
             findings.append(
                 _finding(
                     "unsupported_schema_version",
@@ -386,7 +386,7 @@ class BackupService:
                         )
                     )
                 if any(
-                    validated_trade_data[name] for name in ACCUMULATION_TABLE_MODELS
+                    validated_trade_data.get(name) for name in ACCUMULATION_TABLE_MODELS
                 ):
                     if not ACCUMULATION_TABLE_MODELS.keys() <= trade_data.keys():
                         findings.append(

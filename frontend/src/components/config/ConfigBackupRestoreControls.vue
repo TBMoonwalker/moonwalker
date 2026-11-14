@@ -134,6 +134,9 @@ function findingLabel(finding: ClassificationFinding): string {
         <div v-if="restoreReview.nextAction" class="restore-review-next-action">
             {{ restoreReview.nextAction }}
         </div>
+        <div v-if="restoreReview.previewMessage" class="restore-review-next-action">
+            {{ restoreReview.previewMessage }}
+        </div>
     </n-alert>
 
     <n-flex class="backup-restore-actions" align="center" :wrap="true" :size="[12, 12]">

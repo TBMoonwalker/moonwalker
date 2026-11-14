@@ -50,6 +50,9 @@ All notable changes to Moonwalker are documented in this file.
 
 ### Changed
 
+- Preserve the minimum-supported-version warning across restarts for existing
+  installations without a verified floor marker. Running newer software alone
+  does not mark legacy data as compatible or prune its migration history.
 - Pruned the startup migration ledgers on the first startup after an
   installation reached the minimum supported version: applied ledger rows
   older than the floor are removed once (the floor marker and live

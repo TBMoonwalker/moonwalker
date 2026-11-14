@@ -492,7 +492,7 @@ async def test_proactive_limit_placement_persists_intent_and_trade_metadata(
 ) -> None:
     await _init_database(tmp_path)
     try:
-        await model.OpenTrades.create(symbol="XPL/USDC")
+        await model.OpenTrades.create(symbol="XPL/USDC", deal_id="deal-prearm")
         lifecycle = DcaOrderLifecycle()
         fake_exchange = _FakeProactiveExchange()
         lifecycle.exchange = fake_exchange  # type: ignore[assignment]
@@ -513,7 +513,34 @@ async def test_proactive_limit_placement_persists_intent_and_trade_metadata(
         intent = await model.PlacementIntent.get(operation_id="durable-tp-arm")
         assert intent.state == PlacementIntentState.COMPLETED.value
         assert intent.exchange_order_id == "tp-limit-durable-1"
+        assert intent.deal_id == "deal-prearm"
+        assert intent.requested_amount == 2.0
         assert fake_exchange.closed is True
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_tp_cancel_intent_binds_open_deal_and_amount(tmp_path) -> None:
+    """Cancellation recovery retains the identity of the order's owning deal."""
+    await _init_database(tmp_path)
+    try:
+        await model.OpenTrades.create(
+            symbol="XPL/USDC",
+            deal_id="deal-cancel",
+            tp_limit_order_id="tp-1",
+            tp_limit_order_price=11.0,
+            tp_limit_order_amount=2.0,
+        )
+        lifecycle = DcaOrderLifecycle()
+        lifecycle.exchange = _FakeProactiveExchange()
+        assert await lifecycle.cancel_tp_limit_order(
+            "XPL/USDC", {"exchange": "binance", "dry_run": False}
+        )
+        intent = await model.PlacementIntent.get(action="cancel")
+        assert intent.deal_id == "deal-cancel"
+        assert intent.requested_amount == 2.0
+        assert intent.exchange_order_id == "tp-1"
     finally:
         await Tortoise.close_connections()
 
@@ -671,6 +698,39 @@ async def test_lost_compensation_response_is_not_submitted_twice(tmp_path) -> No
 
 
 @pytest.mark.asyncio
+async def test_compensation_intent_inherits_verified_parent_deal(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cancellation child retains the exact parent placement identity."""
+    await _init_database(tmp_path)
+    try:
+        await model.OpenTrades.create(symbol="XPL/USDC", deal_id="deal-parent")
+        lifecycle = DcaOrderLifecycle()
+        lifecycle.exchange = _FakeProactiveExchange(indeterminate_cancel=True)
+
+        async def fail_attachment(*_args: Any, **_kwargs: Any) -> bool:
+            return False
+
+        monkeypatch.setattr(lifecycle.trades, "set_tp_limit_order", fail_attachment)
+        assert not await lifecycle.arm_tp_limit_order(
+            {
+                "operation_id": "parent-tp",
+                "symbol": "XPL/USDC",
+                "total_amount": 2.0,
+                "limit_price": 11.0,
+            },
+            {"exchange": "binance", "dry_run": False},
+        )
+        parent = await model.PlacementIntent.get(operation_id="parent-tp")
+        child = await model.PlacementIntent.get(source_operation_id="parent-tp")
+        assert parent.deal_id == child.deal_id == "deal-parent"
+        assert child.requested_amount == 2.0
+        assert child.exchange_order_id == "tp-limit-durable-1"
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_definitive_sell_rejection_is_durable_and_not_retried(
     tmp_path,
 ) -> None:
@@ -750,7 +810,7 @@ async def test_lost_sell_response_stays_indeterminate(
             direction="long",
             side="buy",
         )
-        await model.OpenTrades.create(symbol="SOL/USDC")
+        await model.OpenTrades.create(symbol="SOL/USDC", deal_id="deal-lost-sell")
         lifecycle = DcaOrderLifecycle()
         fake_exchange = _FakeIndeterminateSellExchange()
         lifecycle.exchange = fake_exchange  # type: ignore[assignment]
@@ -775,6 +835,8 @@ async def test_lost_sell_response_stays_indeterminate(
         intent = await model.PlacementIntent.get(operation_id="durable-sell-lost")
         assert intent.state == PlacementIntentState.INDETERMINATE.value
         assert intent.reason_code == "exchange_response_lost"
+        assert intent.deal_id == "deal-lost-sell"
+        assert intent.requested_amount == 1.0
         assert fake_exchange.closed is True
     finally:
         await Tortoise.close_connections()

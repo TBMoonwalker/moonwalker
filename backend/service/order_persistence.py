@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 from uuid import uuid4
@@ -38,13 +39,16 @@ from service.persistence_records import (
     UnsellableTradePersistenceRecord,
 )
 from service.placement_intents import (
+    QuarantineResolution,
     mark_placement_persisted_in_transaction,
     mark_placements_persisted_in_transaction,
+    validate_repair_target_in_transaction,
 )
 from service.replay_candles import archive_replay_candles_for_deal
 from service.replay_repair_queue import replay_repair_queue
 from service.trade_math import parse_date_to_ms
 from tortoise.expressions import F
+from tortoise.functions import Sum
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger(
@@ -369,11 +373,13 @@ async def persist_buy_trade(
     create_open_trade: bool,
     entry_evaluation: AiTrustEntryGate | None = None,
     placement_operation_id: str | None = None,
+    resolution: QuarantineResolution | None = None,
 ) -> None:
     """Persist a filled buy trade and create the open-trade row when needed."""
 
     async def _persist_buy() -> None:
         async with in_transaction() as conn:
+            await validate_repair_target_in_transaction(resolution, conn, symbol=symbol)
             existing_open_trade = (
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
             )
@@ -456,6 +462,7 @@ async def persist_buy_trade(
             await mark_placement_persisted_in_transaction(
                 placement_operation_id,
                 conn,
+                **({"resolution": resolution} if resolution else {}),
             )
 
     await run_sqlite_write_with_retry(
@@ -480,6 +487,7 @@ async def persist_closed_trade(
     *,
     placement_operation_id: str | None = None,
     placement_operation_ids: Iterable[str] | None = None,
+    resolution: QuarantineResolution | None = None,
 ) -> None:
     """Persist a closed trade and remove its open-trade rows."""
 
@@ -490,6 +498,7 @@ async def persist_closed_trade(
     async def _persist_sell() -> None:
         nonlocal closed_close_date, closed_deal_id, closed_open_date
         async with in_transaction() as conn:
+            await validate_repair_target_in_transaction(resolution, conn, symbol=symbol)
             deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
             closed_deal_id = deal_id
             summary_payload = {
@@ -501,6 +510,8 @@ async def persist_closed_trade(
             source_holding = (
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
             )
+            if resolution is not None and source_holding is None:
+                raise ValueError("Cannot repair a sell without an open trade.")
             summary_payload["lifecycle_mode"] = (
                 source_holding.lifecycle_mode if source_holding is not None else None
             )
@@ -540,6 +551,7 @@ async def persist_closed_trade(
                     placement_operation_ids,
                 ),
                 conn,
+                **({"resolution": resolution} if resolution else {}),
             )
 
     await run_sqlite_write_with_retry(
@@ -633,6 +645,95 @@ async def persist_manual_buy_add(
     )
 
 
+async def _validate_recovered_partial_sell(
+    *,
+    conn: Any,
+    open_trade: Any,
+    symbol: str,
+    recovery_deal_id: str,
+    order_ids: list[str],
+    sold_amount: float,
+    sold_proceeds: float,
+) -> None:
+    """Require nonoverlapping executions and reliable remaining exposure."""
+    if not order_ids or any(not order_id for order_id in order_ids):
+        raise ValueError("Partial sell recovery requires execution identity.")
+    if len(set(order_ids)) != len(order_ids):
+        raise ValueError("Partial sell recovery has duplicate execution identity.")
+    if await (
+        model.TradeExecutions.filter(
+            deal_id=recovery_deal_id,
+            side="sell",
+            order_id__in=order_ids,
+        )
+        .using_db(conn)
+        .exists()
+    ):
+        raise ValueError("Partial sell recovery order was already recorded.")
+    totals = await (
+        model.Trades.filter(symbol=symbol)
+        .using_db(conn)
+        .annotate(total_amount=Sum(F("amount")))
+        .values_list("total_amount", flat=True)
+    )
+    total_amount = float(totals[0] or 0.0) if totals else 0.0
+    already_sold = float(open_trade.sold_amount or 0.0)
+    recovered_amount = float(sold_amount)
+    already_realized = float(open_trade.sold_proceeds or 0.0)
+    recovered_proceeds = float(sold_proceeds)
+    if (
+        not math.isfinite(already_realized)
+        or already_realized < 0
+        or not math.isfinite(recovered_proceeds)
+        or recovered_proceeds < 0
+        or not math.isfinite(already_realized + recovered_proceeds)
+    ):
+        raise ValueError("Partial sell recovery has invalid total proceeds.")
+    prior_sales = (
+        await model.TradeExecutions.filter(deal_id=recovery_deal_id, side="sell")
+        .using_db(conn)
+        .values("order_id", "amount", "ordersize")
+    )
+    prior_total = 0.0
+    prior_proceeds = 0.0
+    for prior in prior_sales:
+        order_id = str(prior.get("order_id") or "").strip()
+        prior_amount = float(prior.get("amount") or 0.0)
+        prior_cost = float(prior.get("ordersize") or 0.0)
+        if (
+            not order_id
+            or not math.isfinite(prior_amount)
+            or prior_amount <= 0
+            or not math.isfinite(prior_cost)
+            or prior_cost <= 0
+        ):
+            raise ValueError("Prior sell execution identity is incomplete.")
+        prior_total += prior_amount
+        prior_proceeds += prior_cost
+    if not math.isclose(prior_total, already_sold, rel_tol=1e-12, abs_tol=0.0):
+        raise ValueError("Prior sell executions do not reconcile with sold amount.")
+    if not math.isclose(prior_proceeds, already_realized, rel_tol=1e-12, abs_tol=0.0):
+        raise ValueError("Prior sell executions do not reconcile with sold proceeds.")
+    if (
+        not all(
+            math.isfinite(value)
+            for value in (total_amount, already_sold, recovered_amount)
+        )
+        or total_amount <= 0
+        or already_sold < 0
+        or recovered_amount <= 0
+        or (
+            already_sold + recovered_amount >= total_amount
+            or math.isclose(
+                already_sold + recovered_amount,
+                total_amount,
+                rel_tol=1e-12,
+            )
+        )
+    ):
+        raise ValueError("Partial sell recovery exceeds available exposure.")
+
+
 async def persist_partial_sell_execution(
     symbol: str,
     sold_amount: float,
@@ -641,6 +742,9 @@ async def persist_partial_sell_execution(
     *,
     placement_operation_id: str | None = None,
     placement_operation_ids: Iterable[str] | None = None,
+    resolution: QuarantineResolution | None = None,
+    recovery_deal_id: str | None = None,
+    recovery_tp_order_id: str | None = None,
 ) -> None:
     """Accumulate partial sell totals and append execution rows."""
     execution_rows = [
@@ -651,15 +755,44 @@ async def persist_partial_sell_execution(
 
     async def _persist_partial_sell_execution() -> None:
         async with in_transaction() as conn:
+            await validate_repair_target_in_transaction(resolution, conn, symbol=symbol)
             open_trade = (
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
             )
             if open_trade is None:
+                if resolution is not None or recovery_deal_id is not None:
+                    raise ValueError(
+                        "Cannot repair a partial sell without an open trade."
+                    )
                 return
 
+            if recovery_deal_id is not None or recovery_tp_order_id is not None:
+                if not recovery_deal_id or open_trade.deal_id != recovery_deal_id:
+                    raise ValueError("Partial sell recovery cannot verify its deal.")
+                active_tp = open_trade.tp_limit_order_id
+                if active_tp and active_tp != recovery_tp_order_id:
+                    raise ValueError(
+                        "Partial sell recovery cannot clear a different TP order."
+                    )
+                order_ids = [
+                    str(execution.get("order_id") or "").strip()
+                    for execution in execution_rows
+                ]
+                await _validate_recovered_partial_sell(
+                    conn=conn,
+                    open_trade=open_trade,
+                    symbol=symbol,
+                    recovery_deal_id=recovery_deal_id,
+                    order_ids=order_ids,
+                    sold_amount=sold_amount,
+                    sold_proceeds=sold_proceeds,
+                )
+
             deal_id = open_trade.deal_id or _create_deal_id()
-            history_complete = bool(open_trade.execution_history_complete) and bool(
-                execution_rows
+            history_complete = (
+                bool(open_trade.execution_history_complete)
+                and bool(execution_rows)
+                and recovery_deal_id is None
             )
             await (
                 model.OpenTrades.filter(symbol=symbol)
@@ -669,6 +802,17 @@ async def persist_partial_sell_execution(
                     execution_history_complete=history_complete,
                     sold_amount=F("sold_amount") + float(sold_amount),
                     sold_proceeds=F("sold_proceeds") + float(sold_proceeds),
+                    **(
+                        {
+                            "tp_limit_order_id": None,
+                            "tp_limit_order_price": None,
+                            "tp_limit_order_amount": None,
+                            "tp_limit_order_armed_at": None,
+                        }
+                        if recovery_tp_order_id
+                        and open_trade.tp_limit_order_id == recovery_tp_order_id
+                        else {}
+                    ),
                 )
             )
 
@@ -708,6 +852,7 @@ async def persist_partial_sell_execution(
                     placement_operation_ids,
                 ),
                 conn,
+                **({"resolution": resolution} if resolution else {}),
             )
 
     await run_sqlite_write_with_retry(
@@ -721,31 +866,74 @@ async def persist_tp_limit_cancellation(
     exchange_status: dict[str, Any] | None,
     *,
     placement_operation_id: str | None = None,
+    resolution: QuarantineResolution | None = None,
+    recovery: bool = False,
+    recovery_deal_id: str | None = None,
+    recovery_tp_order_id: str | None = None,
 ) -> bool:
     """Atomically record a cancel fill, clear TP metadata, and persist intent."""
     status = exchange_status or {}
     filled_amount = max(0.0, float(status.get("filled") or 0.0))
     average_price = float(status.get("average") or status.get("price") or 0.0)
-    if (
-        filled_amount > 0
-        and average_price <= 0
-        and float(status.get("cost") or 0.0) > 0
-    ):
+    if filled_amount > 0 and float(status.get("cost") or 0.0) > 0:
         average_price = float(status["cost"]) / filled_amount
     proceeds = float(status.get("cost") or filled_amount * average_price)
 
     async def _persist_tp_limit_cancellation() -> bool:
         async with in_transaction() as conn:
+            await validate_repair_target_in_transaction(resolution, conn, symbol=symbol)
             open_trade = (
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
             )
             if open_trade is None:
+                if resolution is not None or recovery:
+                    raise ValueError(
+                        "Cannot recover a cancellation without an open trade."
+                    )
                 await mark_placement_persisted_in_transaction(
                     placement_operation_id,
                     conn,
                 )
                 return placement_operation_id is not None
 
+            if recovery:
+                if (
+                    not recovery_deal_id
+                    or open_trade.deal_id != recovery_deal_id
+                    or not recovery_tp_order_id
+                    or open_trade.tp_limit_order_id != recovery_tp_order_id
+                ):
+                    raise ValueError(
+                        "Cancellation recovery cannot verify its deal and TP order."
+                    )
+                if filled_amount > 0:
+                    await _validate_recovered_partial_sell(
+                        conn=conn,
+                        open_trade=open_trade,
+                        symbol=symbol,
+                        recovery_deal_id=recovery_deal_id,
+                        order_ids=[recovery_tp_order_id],
+                        sold_amount=filled_amount,
+                        sold_proceeds=proceeds,
+                    )
+            if recovery or resolution is not None:
+                already_sold = float(open_trade.sold_amount or 0.0)
+                already_realized = float(open_trade.sold_proceeds or 0.0)
+                values = (filled_amount, proceeds, already_sold, already_realized)
+                if (
+                    not all(math.isfinite(value) and value >= 0 for value in values)
+                    or not math.isfinite(already_sold + filled_amount)
+                    or not math.isfinite(already_realized + proceeds)
+                    or (
+                        filled_amount > 0
+                        and (
+                            not math.isfinite(average_price)
+                            or average_price <= 0
+                            or proceeds <= 0
+                        )
+                    )
+                ):
+                    raise ValueError("Cancellation recovery has invalid fill totals.")
             deal_id = open_trade.deal_id or _create_deal_id()
             updates: dict[str, Any] = {
                 "deal_id": deal_id,
@@ -796,6 +984,7 @@ async def persist_tp_limit_cancellation(
             await mark_placement_persisted_in_transaction(
                 placement_operation_id,
                 conn,
+                **({"resolution": resolution} if resolution else {}),
             )
             return True
 
@@ -817,6 +1006,7 @@ async def persist_unsellable_remainder(
     closed_trade_payload: ClosedTradeSummaryRecord | None = None,
     placement_operation_id: str | None = None,
     placement_operation_ids: Iterable[str] | None = None,
+    resolution: QuarantineResolution | None = None,
 ) -> None:
     """Atomically persist a partial close, remainder, and placement state."""
     execution_rows = [
@@ -827,10 +1017,13 @@ async def persist_unsellable_remainder(
 
     async def _persist_unsellable_remainder() -> None:
         async with in_transaction() as conn:
+            await validate_repair_target_in_transaction(resolution, conn, symbol=symbol)
             deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
             open_trade = (
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
             )
+            if resolution is not None and open_trade is None:
+                raise ValueError("Cannot repair a sell without an open trade.")
             if partial_amount > 0:
                 history_complete = history_complete and bool(execution_rows)
                 ledger_rows = execution_rows or [
@@ -890,6 +1083,7 @@ async def persist_unsellable_remainder(
                     placement_operation_ids,
                 ),
                 conn,
+                **({"resolution": resolution} if resolution else {}),
             )
 
     await run_sqlite_write_with_retry(

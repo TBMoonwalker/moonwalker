@@ -120,6 +120,7 @@ class TradeExecutionPayload(TypedDict, total=False):
 class PartialSellStatus(TypedDict, total=False):
     """Partial or unsellable sell status result."""
 
+    id: str
     type: str
     symbol: str
     close_reason: str | None
@@ -136,6 +137,8 @@ class PartialSellStatus(TypedDict, total=False):
     unsellable_min_notional: float | None
     unsellable_estimated_notional: float | None
     executions: list[TradeExecutionPayload]
+    recovery_deal_id: str
+    recovery_tp_order_id: str | None
 
 
 class MarketFallbackStatus(TypedDict, total=False):

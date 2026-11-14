@@ -1,5 +1,6 @@
 """Tests for the per-trade denylist deny endpoint."""
 
+import asyncio
 import os
 
 import pytest
@@ -84,3 +85,40 @@ async def test_deny_symbol_endpoint_rejects_missing_symbol(
     assert int(result.status_code) == 400
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_deny_response_keeps_its_list_and_revision_together(
+    tmp_path, monkeypatch
+):
+    """A second writer cannot pair its newer revision with the first list."""
+    config = await _make_instance(tmp_path, monkeypatch)
+    first_committed = asyncio.Event()
+    second_committed = asyncio.Event()
+    original = config.append_denylist_token_with_revision
+
+    async def interleaved(symbol):
+        result = await original(symbol)
+        if symbol == "FOO/USDT":
+            first_committed.set()
+            await second_committed.wait()
+        return result
+
+    monkeypatch.setattr(config, "append_denylist_token_with_revision", interleaved)
+
+    async def second_writer():
+        await first_committed.wait()
+        await original("ETH/USDT")
+        second_committed.set()
+
+    try:
+        first, _ = await asyncio.gather(
+            deny_symbol.fn(DenySymbolRequest(symbol="FOO/USDT")), second_writer()
+        )
+        assert first["pair_denylist"] == ["FOO"]
+        assert first["config_revision"] == 1
+        current, revision = await config.snapshot_with_revision()
+        assert current["pair_denylist"] == "FOO,ETH"
+        assert revision == 2
+    finally:
+        await Tortoise.close_connections()

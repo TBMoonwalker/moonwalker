@@ -322,7 +322,10 @@ async def test_limit_sell_tp_guard_uses_live_price_for_market_fallback(
 ) -> None:
     exchange = Exchange()
 
-    async def fake_get_price_for_symbol(_symbol: str) -> float:
+    async def fake_get_price_for_symbol(
+        _symbol: str, *, prefer_bid: bool = False
+    ) -> float:
+        assert prefer_bid
         return 2.274
 
     monkeypatch.setattr(
@@ -389,7 +392,10 @@ async def test_create_spot_market_sell_skips_below_notional(monkeypatch) -> None
 async def test_market_fallback_guard_uses_live_price_lookup(monkeypatch) -> None:
     exchange = Exchange()
 
-    async def fake_get_price_for_symbol(_symbol: str) -> str:
+    async def fake_get_price_for_symbol(
+        _symbol: str, *, prefer_bid: bool = False
+    ) -> str:
+        assert prefer_bid
         return "0.02582"
 
     monkeypatch.setattr(
@@ -743,3 +749,67 @@ async def test_build_spot_sell_order_status_returns_unsellable_partial_for_preci
     assert status["unsellable"] is True
     assert status["unsellable_reason"] == "amount_precision"
     assert status["partial_proceeds"] == pytest.approx(11.035)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf"])
+async def test_exit_timeout_guard_rejects_nonfinite_bid(monkeypatch, bad):
+    exchange = Exchange()
+
+    async def fake_get_price(*args, **kwargs):
+        return bad
+
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price)
+    allowed = await exchange._can_fallback_after_exit_timeout(
+        {"symbol": "YB/USDC", "sell_reason": "stop_loss", "exit_guard_max_price": 95.0},
+        {},
+        "limit_order_timeout",
+    )
+    assert allowed is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf", "0", "-1", "invalid"])
+@pytest.mark.parametrize("bad_field", ["bid", "floor"])
+async def test_tp_fallback_rejects_invalid_bid_or_floor_without_market_order(
+    monkeypatch, bad, bad_field
+):
+    """Malformed live TP floor evidence never authorizes fallback."""
+    exchange = Exchange()
+    market_calls = []
+
+    async def fake_limit(*args, **kwargs):
+        return {
+            "requires_market_fallback": True,
+            "limit_cancel_confirmed": True,
+            "fallback_reason": "limit_order_timeout",
+            "symbol": "YB/USDC",
+            "remaining_amount": 1.0,
+            "partial_filled_amount": 0.4,
+            "partial_avg_price": 10,
+        }
+
+    async def fake_market(*args, **kwargs):
+        market_calls.append(True)
+        return {"path": "market"}
+
+    async def fake_price(*args, **kwargs):
+        return bad if bad_field == "bid" else "11"
+
+    monkeypatch.setattr(exchange, "create_spot_limit_sell", fake_limit)
+    monkeypatch.setattr(exchange, "create_spot_market_sell", fake_market)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_price)
+    result = await exchange.create_spot_sell(
+        {
+            "symbol": "YB/USDC",
+            "sell_reason": "take_profit",
+            "fallback_min_price": bad if bad_field == "floor" else 10,
+        },
+        {
+            "sell_order_type": "limit",
+            "limit_sell_fallback_to_market": True,
+            "tp_floor_live_price_fallback": True,
+        },
+    )
+    assert result["type"] == "partial_sell"
+    assert market_calls == []

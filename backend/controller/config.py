@@ -835,8 +835,7 @@ async def deny_symbol(data: JSONBody[DenySymbolRequest]) -> Any:
         )
 
     config = await Config.instance()
-    tokens = await config.append_denylist_token(symbol)
-    _, revision = await config.snapshot_with_revision()
+    tokens, revision = await config.append_denylist_token_with_revision(symbol)
     logging.info(
         "Symbol %s denied from new signal entries. Denylist now: %s",
         symbol,

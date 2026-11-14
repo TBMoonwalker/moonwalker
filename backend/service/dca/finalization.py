@@ -11,6 +11,7 @@ invalidate or notify.
 """
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, TypeGuard
@@ -38,6 +39,7 @@ from service.order_persistence import (
     persist_closed_trade,
     persist_partial_sell_execution,
 )
+from service.placement_intents import QuarantineResolution
 from service.placement_workflow import PlacementWorkflow
 from service.trades import Trades
 from tortoise.exceptions import ConfigurationError
@@ -122,6 +124,7 @@ async def finalize_buy_order(
     original_order: dict[str, Any],
     dependencies: DcaFinalizationContext,
     placement_operation_id: str | None = None,
+    resolution: QuarantineResolution | None = None,
 ) -> bool:
     """Persist a filled buy order and emit monitoring."""
     logging.debug(
@@ -182,6 +185,8 @@ async def finalize_buy_order(
     }
     if placement_operation_id:
         persistence_options["placement_operation_id"] = placement_operation_id
+    if resolution is not None:
+        persistence_options["resolution"] = resolution
     await persist_buy_trade(
         order_status["symbol"],
         payload,
@@ -309,6 +314,7 @@ async def finalize_completed_sell(
     dependencies: DcaFinalizationContext,
     placement_operation_id: str | None = None,
     placement_operation_ids: list[str] | None = None,
+    resolution: QuarantineResolution | None = None,
 ) -> None:
     """Persist a completed sell status and emit monitoring."""
     normalized_close_reason = normalize_close_reason(order_status.get("close_reason"))
@@ -317,11 +323,42 @@ async def finalize_completed_sell(
         order_status,
         dependencies=dependencies,
     )
+    payload = close_context["payload"]
+    for field in (
+        "amount",
+        "cost",
+        "tp_price",
+        "avg_price",
+        "profit",
+        "profit_percent",
+    ):
+        value = payload.get(field)
+        if isinstance(value, bool):
+            raise ValueError(f"Invalid closed-trade {field}.")
+        try:
+            if not math.isfinite(float(value)):
+                raise ValueError(f"Invalid closed-trade {field}.")
+        except (TypeError, OverflowError) as exc:
+            raise ValueError(f"Invalid closed-trade {field}.") from exc
+    for execution in payload.get("sell_executions") or []:
+        for field in ("price", "amount", "ordersize", "fee"):
+            value = execution.get(field)
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                raise ValueError(f"Invalid sell execution {field}.")
+            try:
+                if not math.isfinite(float(value)):
+                    raise ValueError(f"Invalid sell execution {field}.")
+            except (TypeError, OverflowError) as exc:
+                raise ValueError(f"Invalid sell execution {field}.") from exc
     close_options: dict[str, Any] = {}
     if placement_operation_id:
         close_options["placement_operation_id"] = placement_operation_id
     if placement_operation_ids:
         close_options["placement_operation_ids"] = placement_operation_ids
+    if resolution is not None:
+        close_options["resolution"] = resolution
     await persist_closed_trade(
         order_status["symbol"],
         close_context["payload"],
@@ -351,12 +388,18 @@ async def persist_reconciled_limit_fallback(
     operation_id: str,
     *,
     dependencies: DcaFinalizationContext,
+    resolution: QuarantineResolution | None = None,
 ) -> bool:
     """Persist a recovered partial limit fill without replaying fallback."""
     partial_status = build_partial_status_from_fallback(
         limit_status,
         default_symbol=str(limit_status.get("symbol") or ""),
     )
+    if "recovery_deal_id" in limit_status:
+        partial_status["recovery_deal_id"] = limit_status["recovery_deal_id"]
+        partial_status["recovery_tp_order_id"] = limit_status.get(
+            "recovery_tp_order_id"
+        )
     if float(partial_status.get("partial_filled_amount") or 0.0) <= 0:
         return False
     await handle_partial_sell_status(
@@ -364,6 +407,7 @@ async def persist_reconciled_limit_fallback(
         config,
         dependencies=dependencies,
         placement_operation_id=operation_id,
+        **({"resolution": resolution} if resolution else {}),
     )
     return True
 
@@ -375,6 +419,7 @@ async def handle_partial_sell_status(
     dependencies: DcaFinalizationContext,
     placement_operation_id: str | None = None,
     placement_operation_ids: list[str] | None = None,
+    resolution: QuarantineResolution | None = None,
 ) -> None:
     """Persist partial sell execution while keeping the trade open."""
     if bool(order_status.get("unsellable", False)):
@@ -394,6 +439,7 @@ async def handle_partial_sell_status(
             ),
             placement_operation_id=placement_operation_id,
             placement_operation_ids=placement_operation_ids,
+            **({"resolution": resolution} if resolution else {}),
         )
         return
 
@@ -405,6 +451,13 @@ async def handle_partial_sell_status(
             partial_options["placement_operation_id"] = placement_operation_id
         if placement_operation_ids:
             partial_options["placement_operation_ids"] = placement_operation_ids
+        if resolution is not None:
+            partial_options["resolution"] = resolution
+        if "recovery_deal_id" in order_status:
+            partial_options["recovery_deal_id"] = order_status["recovery_deal_id"]
+            partial_options["recovery_tp_order_id"] = order_status.get(
+                "recovery_tp_order_id"
+            )
         await persist_partial_sell_execution(
             order_status["symbol"],
             partial_amount,

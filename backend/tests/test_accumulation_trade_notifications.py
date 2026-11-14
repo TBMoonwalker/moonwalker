@@ -177,6 +177,21 @@ async def test_settled_buy_notifies_trade_buy(accounting_db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_canceled_zero_fill_does_not_notify_trade(accounting_db, monkeypatch):
+    calls = _record_notifications(monkeypatch)
+    await _buy()
+    result = await persist_accumulation_order(
+        "buy-1",
+        _order(status="canceled", filled="0", cost="0"),
+        account_scope="account-1",
+        exchange_name="binance",
+        config=CONFIG,
+    )
+    assert result.settled
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_settled_sell_notifies_trade_sell(accounting_db, monkeypatch):
     calls = _record_notifications(monkeypatch)
     activation, _, _ = await _buy()

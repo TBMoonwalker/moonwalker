@@ -62,14 +62,13 @@ have reached the floor.
 The preflight reports three outcomes:
 
 - `supported` — the install's configuration ledger already contains the
-  `2026-11-msv-floor-6-3-v1` migration row, so it has run at or after the
-  floor.
-- `unsupported` — the install has schema history (it is not fresh) but its
-  configuration ledger predates the floor. Startup logs a `WARNING` with the
+  `2026-11-msv-floor-6-3-v1` migration row.
+- `unsupported` — the install has schema history or legacy trade-mode keys,
+  but its configuration ledger has no floor marker. Startup logs a `WARNING` with the
   upgrade path and the dashboard reports the same state at
   `GET /monitoring/msv`.
-- `fresh` — no ledger history at all. Treated as supported; it will receive the
-  current migrations on the same startup.
+- `fresh` — no ledger history or legacy trade-mode keys. Treated as supported;
+  it will receive the current migrations on the same startup.
 
 ### Why the configuration ledger is the floor signal
 
@@ -77,13 +76,15 @@ The floor release deliberately added no schema migration, so a database from
 the release before the floor and one from the floor release share an identical
 schema ledger and cannot be told apart structurally. The non-self-healing
 marker that an install reached the floor is the `2026-11-msv-floor-6-3-v1` row
-in the `config_migrations` ledger. It is written on the first run of at-floor
-software: a fresh install is marked before schema history exists (so an
-interrupted startup cannot leave a false pre-floor baseline), and an existing
-install is marked on its first at-floor startup, after the preflight has
-already fired the one-time pre-floor warning. Every fresh database is marked
-on its first at-floor startup, so the row stays a true floor signal rather
-than a self-healing one.
+in the `config_migrations` ledger. A clean fresh install is marked before
+schema history exists, so an interrupted startup cannot create a false
+pre-floor baseline. A fresh database carrying legacy trade-mode keys is not
+marked. An existing database without the marker is not automatically marked:
+running newer software alone does not establish that its old data is compatible.
+Earlier versions could write this marker automatically on an existing
+installation. An already-present marker therefore does not prove that legacy
+trade or strategy data was converted, and this change cannot reconstruct the
+prior baseline after the marker was written.
 
 ### What the 6.3.0.0 floor gates
 
@@ -107,14 +108,16 @@ data-compat shims be removed:
 ### Upgrade path for a pre-floor install
 
 1. Upgrade the installation to `6.3.0.0`.
-2. Save the configuration and export a fresh full backup through the backup tool,
-   so the removed legacy shapes are gone from the persisted data.
+2. Review any legacy trade, strategy and configuration data, and export a
+   full backup through the backup tool before making changes. A new backup
+   alone does not convert or verify the existing data.
 
 Installs below the floor still load and run (report-only), but their pre-floor
 data shapes — unmarked CSV trade rows, four-column accumulation declarations,
 and legacy-shape accumulation preset documents — are no longer supported. The
-pre-floor warning fires on the first at-floor startup, and later startups
-report `supported`.
+pre-floor warning persists on later startups when the floor marker is absent.
+Saving configuration and exporting a backup do not by themselves establish the
+provenance of existing trade or strategy data, or automatically clear the warning.
 
 > **Changelog drift reconciled (B2 removal pass, 2026-11-01).** The
 > `4.0.0.0` changelog entry claimed the legacy trade-mode config keys
@@ -384,7 +387,11 @@ each intent can be resolved with an operator action:
   credentials and applies the confirmed terminal state through the same
   recovery path startup reconciliation uses. Nothing is submitted, cancelled,
   or otherwise changed on the exchange. Inconclusive evidence leaves the
-  intent quarantined so the operator can retry or dismiss it.
+  intent quarantined so the operator can retry or dismiss it. Applying a
+  confirmed local effect and resolving its intent are one database transaction.
+  Repair also checks the recorded account and original deal, and will not
+  replace or clear a different tracked take-profit order. Older intents without
+  enough identity evidence remain quarantined for operator review.
 - **Dismiss** records an explicit operator decision, with a required note
   stored on the row as the audit trail, as a terminal disposition without
   touching the exchange.

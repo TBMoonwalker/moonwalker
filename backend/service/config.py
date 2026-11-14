@@ -670,16 +670,14 @@ class Config:
         return True
 
     async def append_denylist_token(self, symbol: str) -> list[str]:
-        """Atomically append one base token to the pair_denylist.
+        """Atomically append a base token and return the resulting denylist."""
+        tokens, _ = await self.append_denylist_token_with_revision(symbol)
+        return tokens
 
-        Reads the current list, de-duplicates the appended token, and writes the
-        whole list back under the config write lock so concurrent appends from
-        multiple dashboard clients cannot clobber each other. The existing open
-        trades for the symbol are untouched; only future signal entries are gated.
-
-        Returns:
-            The resulting de-duplicated denylist tokens.
-        """
+    async def append_denylist_token_with_revision(
+        self, symbol: str
+    ) -> tuple[list[str], int]:
+        """Append a base token and return its denylist and revision together."""
         lock = await self._acquire_write_lock()
         async with lock:
             current = self.get("pair_denylist")
@@ -691,7 +689,8 @@ class Config:
             await self._set_locked(
                 "pair_denylist", {"value": serialized, "type": "str"}
             )
-            return tokens
+            row = await ConfigRevision.filter(id=1).first()
+            return tokens, int(row.revision) if row else 0
 
     def subscribe(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Subscribe a callback function to configuration changes.

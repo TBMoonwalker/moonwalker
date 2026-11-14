@@ -19,9 +19,19 @@ from service.placement_intents import (
     PlacementAction,
     PlacementIntentService,
     PlacementIntentState,
+    deserialize_placement_payload,
     has_execution_scope,
     is_exchange_placement_enabled,
     placement_scope_matches,
+)
+from service.placement_repair import (
+    has_complete_sell_fill,
+    has_confirmed_sell_proceeds,
+    has_reliable_cancel_evidence,
+    has_terminal_partial_sell,
+    has_valid_stored_partial_sell,
+    placement_lookup_identity_matches,
+    validated_buy_filled_amount,
 )
 
 logging = helper.LoggerFactory.get_logger(
@@ -172,6 +182,32 @@ class PlacementReconciler:
             )
             return PlacementIntentState.COMPLETED.value
         if state == PlacementIntentState.FILLED.value:
+            action = str(intent.action)
+            if action in {
+                PlacementAction.SELL.value,
+                PlacementAction.LIMIT_SELL.value,
+                PlacementAction.CANCEL.value,
+            }:
+                evidence = deserialize_placement_payload(intent.result_json)
+                if not (
+                    has_complete_sell_fill(intent, evidence)
+                    or (
+                        action != PlacementAction.CANCEL.value
+                        and (
+                            has_terminal_partial_sell(intent, evidence)
+                            or has_valid_stored_partial_sell(intent, evidence)
+                        )
+                    )
+                ) or (
+                    action == PlacementAction.CANCEL.value
+                    and not has_confirmed_sell_proceeds(evidence)
+                ):
+                    await self._quarantine(
+                        operation_id,
+                        reason_code="sell_fill_unconfirmed",
+                        error_message="Stored sell evidence does not prove a complete fill.",
+                    )
+                    return PlacementIntentState.QUARANTINED.value
             return await self._resume_or_quarantine(intent, {}, config)
 
         if (
@@ -271,6 +307,13 @@ class PlacementReconciler:
             return PlacementIntentState.QUARANTINED.value
 
         order = lookup.order
+        if not placement_lookup_identity_matches(intent, order):
+            await self._quarantine(
+                operation_id,
+                reason_code="exchange_identity_mismatch",
+                error_message="Exchange response does not verify the placement identity.",
+            )
+            return PlacementIntentState.QUARANTINED.value
         exchange_state = str(order.get("status") or "").strip().lower()
         action = str(intent.action)
         terminal_states = {
@@ -323,6 +366,13 @@ class PlacementReconciler:
                 return PlacementIntentState.QUARANTINED.value
         if exchange_state in {"canceled", "cancelled", "rejected", "expired"}:
             if action == PlacementAction.CANCEL.value:
+                if not has_reliable_cancel_evidence(intent, order):
+                    await self._quarantine(
+                        operation_id,
+                        reason_code="cancel_fill_unconfirmed",
+                        error_message="Cancel evidence has an unreliable fill amount or proceeds.",
+                    )
+                    return PlacementIntentState.QUARANTINED.value
                 await self.intents.transition(
                     operation_id,
                     PlacementIntentState.ACCEPTED,
@@ -330,6 +380,23 @@ class PlacementReconciler:
                     result=order,
                 )
                 return await self._resume_or_quarantine(intent, order, config)
+            if action in {PlacementAction.SELL.value, PlacementAction.LIMIT_SELL.value}:
+                raw_filled = order.get("filled")
+                try:
+                    if raw_filled is None or isinstance(raw_filled, bool):
+                        raise ValueError("Missing sell fill evidence")
+                    sell_filled = float(raw_filled)
+                    if not math.isfinite(sell_filled) or sell_filled < 0:
+                        raise ValueError("Invalid sell fill evidence")
+                except (TypeError, ValueError):
+                    sell_filled = None
+                if sell_filled is None or sell_filled > 0:
+                    await self._quarantine(
+                        operation_id,
+                        reason_code="sell_fill_unconfirmed",
+                        error_message="Canceled sell may have an unapplied fill.",
+                    )
+                    return PlacementIntentState.QUARANTINED.value
             await self.intents.transition(
                 operation_id,
                 PlacementIntentState.REJECTED,
@@ -339,12 +406,37 @@ class PlacementReconciler:
             )
             return PlacementIntentState.REJECTED.value
 
-        filled = float(order.get("filled") or 0.0)
-        amount = float(order.get("amount") or 0.0)
+        parsed_filled = validated_buy_filled_amount(order)
+        parsed_amount = validated_buy_filled_amount({"filled": order.get("amount")})
+        filled = parsed_filled if parsed_filled is not None else 0.0
+        amount = parsed_amount if parsed_amount is not None else 0.0
         is_filled = exchange_state in {"closed", "filled"} or (
             amount > 0 and filled >= amount
         )
         if is_filled:
+            if action in {
+                PlacementAction.SELL.value,
+                PlacementAction.LIMIT_SELL.value,
+                PlacementAction.CANCEL.value,
+            } and (
+                not (
+                    has_complete_sell_fill(intent, order)
+                    or (
+                        action != PlacementAction.CANCEL.value
+                        and has_terminal_partial_sell(intent, order)
+                    )
+                )
+                or (
+                    action == PlacementAction.CANCEL.value
+                    and not has_confirmed_sell_proceeds(order)
+                )
+            ):
+                await self._quarantine(
+                    operation_id,
+                    reason_code="sell_fill_unconfirmed",
+                    error_message="Exchange evidence does not prove a complete sell fill.",
+                )
+                return PlacementIntentState.QUARANTINED.value
             await self.intents.transition(
                 operation_id,
                 PlacementIntentState.FILLED,

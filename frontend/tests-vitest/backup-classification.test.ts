@@ -92,6 +92,103 @@ afterEach(() => {
 })
 
 describe('backup classification preview', () => {
+    it.each([
+        ['config only', 'config', true],
+        ['full backup', 'full', false],
+    ] as const)('retains a failed %s preview until that scope succeeds', async (label, failedMode, configFails) => {
+        if (configFails) {
+            post.mockRejectedValueOnce(new Error('config preview unavailable'))
+            post.mockResolvedValueOnce(classifyResponse([]))
+        } else {
+            post.mockResolvedValueOnce(classifyResponse([]))
+            post.mockRejectedValueOnce(new Error('full preview unavailable'))
+        }
+        post.mockResolvedValueOnce(classifyResponse([]))
+        vi.spyOn(window, 'confirm').mockReturnValue(false)
+        const { flow } = createFlow()
+        await selectBackup(flow, { schema_version: 3, config: [], trade_data: {} })
+
+        expect(flow.restoreReview.value?.message).toContain(label)
+        expect(flow.backupClassifications.value[failedMode]).toBeUndefined()
+
+        const result = await flow.handleRestoreBackup(failedMode)
+        expect(result.status).toBe('noop')
+        expect(flow.backupClassifications.value[failedMode]?.blocking).toBe(false)
+        expect(flow.restoreReview.value).toBeNull()
+        expect(restoreCalls()).toHaveLength(0)
+    })
+
+    it.each([
+        ['empty response', {}],
+        ['missing findings', { classification: { schema_version: 3, trade_mode_era: 'dynamic_dca', includes_accumulation: false } }],
+        ['unknown severity', classifyResponse([{ code: 'risk', severity: 'critical', message: 'Review required.' }]).data],
+        ['malformed finding', classifyResponse([{ code: 'risk', severity: 'blocking' }]).data],
+    ])('blocks restore on a malformed successful preview: %s', async (_label, data) => {
+        post.mockResolvedValue({ status: 200, data })
+        const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+        const { flow } = createFlow()
+        await selectBackup(flow, { schema_version: 3, config: [] })
+
+        const result = await flow.handleRestoreBackup('config')
+
+        expect(result.status).toBe('blocked')
+        expect(flow.restoreReview.value?.code).toBe('preview_unavailable')
+        expect(flow.backupClassifications.value.config).toBeUndefined()
+        expect(confirm).not.toHaveBeenCalled()
+        expect(restoreCalls()).toHaveLength(0)
+    })
+
+    it('does not reuse a pending preview after the selected backup changes', async () => {
+        let resolveFirst!: (value: ReturnType<typeof classifyResponse>) => void
+        post.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+        post.mockResolvedValueOnce(classifyResponse([
+            { code: 'invalid_trade_data', severity: 'blocking', message: 'Invalid backup.' },
+        ]))
+        const { flow } = createFlow()
+        const first = selectBackup(flow, { schema_version: 3, config: [], marker: 'first' })
+        await vi.waitFor(() => expect(classifyCalls()).toHaveLength(1))
+        const second = selectBackup(flow, { schema_version: 3, config: [], marker: 'second' })
+        await vi.waitFor(() => expect(flow.selectedBackupPayload.value).toEqual(expect.objectContaining({ marker: 'second' })))
+        resolveFirst(classifyResponse([]))
+        await Promise.all([first, second])
+
+        expect(classifyCalls()).toHaveLength(2)
+        expect(flow.backupClassifications.value.config?.blocking).toBe(true)
+    })
+
+    it('does not restore or retain a preview after the selection is cleared', async () => {
+        let resolvePreview!: (value: ReturnType<typeof classifyResponse>) => void
+        post.mockImplementationOnce(() => new Promise(resolve => { resolvePreview = resolve }))
+        const { flow } = createFlow()
+        const selection = selectBackup(flow, { schema_version: 3, config: [] })
+        await vi.waitFor(() => expect(classifyCalls()).toHaveLength(1))
+        const restore = flow.handleRestoreBackup('config')
+        flow.clearSelectedBackup()
+        resolvePreview(classifyResponse([]))
+        await selection
+        expect((await restore).status).toBe('noop')
+        expect(restoreCalls()).toHaveLength(0)
+        expect(flow.backupClassifications.value).toEqual({})
+        expect(flow.classificationLoading.value).toBe(false)
+    })
+
+    it('does not submit two restores while the preview is pending', async () => {
+        let resolvePreview!: (value: ReturnType<typeof classifyResponse>) => void
+        post.mockImplementationOnce(() => new Promise(resolve => { resolvePreview = resolve }))
+        post.mockResolvedValueOnce(restoreResponse())
+        vi.spyOn(window, 'confirm').mockReturnValue(true)
+        const { flow } = createFlow()
+        const selection = selectBackup(flow, { schema_version: 3, config: [] })
+        await vi.waitFor(() => expect(classifyCalls()).toHaveLength(1))
+        const first = flow.handleRestoreBackup('config')
+        const second = flow.handleRestoreBackup('config')
+        resolvePreview(classifyResponse([]))
+        await selection
+        const outcomes = await Promise.all([first, second])
+        expect(outcomes.map(outcome => outcome.status).sort()).toEqual(['noop', 'success'])
+        expect(restoreCalls()).toHaveLength(1)
+    })
+
     it('classifies per mode before the confirmation and then restores', async () => {
         post.mockResolvedValueOnce(
             classifyResponse([
@@ -204,6 +301,25 @@ describe('backup classification preview', () => {
 
         expect(result.status).toBe('success')
         expect(message.warning).toHaveBeenCalled()
+    })
+
+    it('blocks restore visibly when classification remains unavailable without toasts', async () => {
+        post.mockRejectedValue(new Error('preview unavailable'))
+        vi.spyOn(window, 'confirm').mockReturnValue(true)
+        const message = { error: vi.fn(), success: vi.fn(), warning: vi.fn() }
+        const flow = useConfigBackupRestore({
+            apiUrl: path => path,
+            hasUnsavedChanges: () => false,
+            message,
+            onBeforeReload: vi.fn(),
+            reloadConfig: vi.fn(async () => {}),
+            surfaceMessages: false,
+        })
+        await selectBackup(flow, { schema_version: 3, config: [] })
+        const result = await flow.handleRestoreBackup('config')
+        expect(result.status).toBe('blocked')
+        expect(flow.restoreReview.value?.message).toContain('review is unavailable')
+        expect(restoreCalls()).toHaveLength(0)
     })
 
     it('resets the classification when the selection is cleared', async () => {
@@ -321,6 +437,27 @@ describe('backup download and file selection', () => {
 })
 
 describe('restore outcome handling', () => {
+    it('preserves a failed preview alongside a different restore review', async () => {
+        post.mockRejectedValueOnce(new Error('config preview unavailable'))
+        post.mockResolvedValueOnce(classifyResponse([]))
+        post.mockRejectedValueOnce({
+            isAxiosError: true,
+            response: { status: 409, data: { migration_error: {
+                code: 'campaign_residue', message: 'Clear campaign residue first.',
+                next_action: 'See docs/operations.md.',
+            } } },
+        })
+        vi.spyOn(window, 'confirm').mockReturnValue(true)
+        const { flow } = createFlow()
+        await selectBackup(flow, { schema_version: 3, config: [], trade_data: {} })
+        expect((await flow.handleRestoreBackup('full')).status).toBe('blocked')
+        expect(flow.restoreReview.value?.message).toContain('Clear campaign residue')
+        expect(flow.restoreReview.value?.previewMessage).toContain('config only')
+        post.mockResolvedValueOnce(restoreResponse())
+        expect((await flow.handleRestoreBackup('full')).status).toBe('success')
+        expect(flow.restoreReview.value?.message).toContain('config only')
+    })
+
     it('surfaces a migration error as a blocked review state', async () => {
         post.mockResolvedValueOnce(classifyResponse([]))
         post.mockRejectedValueOnce({
@@ -425,6 +562,20 @@ describe('backup classification panel', () => {
             selectedBackupHasTradeData: true,
         }
     }
+
+    it('renders both a restore review and an unavailable preview', () => {
+        const wrapper = mount(ConfigBackupRestoreControls, {
+            props: {
+                ...baseProps(),
+                restoreReview: {
+                    code: 'campaign_residue', message: 'Clear campaign residue first.',
+                    nextAction: null, previewMessage: 'Backup review is unavailable for config only.',
+                },
+            },
+        })
+        expect(wrapper.text()).toContain('Clear campaign residue first.')
+        expect(wrapper.text()).toContain('Backup review is unavailable for config only.')
+    })
 
     it('renders the findings and disables only the blocked restore mode', () => {
         const classification = blockingClassification([

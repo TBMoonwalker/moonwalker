@@ -51,6 +51,12 @@
             {{ intent.state === 'quarantined' ? 'Quarantined' : 'Restored quarantined' }}
           </n-tag>
         </div>
+        <p v-if="intent.exchange_order_id" class="intent-reason">
+          Exchange order ID: {{ intent.exchange_order_id }}
+        </p>
+        <p v-if="intent.client_order_id" class="intent-reason">
+          Client order ID: {{ intent.client_order_id }}
+        </p>
         <p class="intent-reason">{{ intent.error_message || intent.reason_code || 'No reason recorded.' }}</p>
         <p
           v-if="resultFor(intent)"
@@ -188,7 +194,7 @@ function resultLabel(status: PlacementRecoveryActionStatus): string {
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat('en-US', { maximumSignificantDigits: 8 }).format(value)
+  return String(value)
 }
 
 // Keyboard flow: opening the form moves focus to the required note, and

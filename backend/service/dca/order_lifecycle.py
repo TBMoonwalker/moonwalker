@@ -68,6 +68,7 @@ from service.placement_intents import (
     ensure_operation_id,
     is_exchange_placement_enabled,
     is_terminal_placement_state,
+    placement_scope_matches,
 )
 from service.placement_reconciliation import PlacementReconciler
 from service.placement_recovery import PlacementRecoveryHandler
@@ -198,12 +199,13 @@ class DcaOrderLifecycle:
                     dependencies=self.finalization,
                 )
             ),
-            persist_limit_fallback=lambda limit_status, config, operation_id: (
+            persist_limit_fallback=lambda limit_status, config, operation_id, **kwargs: (
                 persist_reconciled_limit_fallback(
                     limit_status,
                     config,
                     operation_id,
                     dependencies=self.finalization,
+                    **kwargs,
                 )
             ),
         )
@@ -375,6 +377,7 @@ class DcaOrderLifecycle:
             "symbol": symbol,
             "side": "sell",
             "ordertype": "limit",
+            "deal_id": (open_trade or {}).get("deal_id"),
             "operation_id": build_derived_operation_id(
                 PlacementAction.CANCEL,
                 config.get("exchange"),
@@ -389,6 +392,9 @@ class DcaOrderLifecycle:
             side="sell",
             order_type="limit",
             exchange_order_id=order_id,
+            requested_amount=float(
+                (open_trade or {}).get("tp_limit_order_amount") or 0.0
+            ),
         )
         if placement.completed:
             return True
@@ -582,6 +588,13 @@ class DcaOrderLifecycle:
                 return False
             return await self._arm_tp_limit_order(order, config)
 
+    async def _bind_order_to_open_deal(self, order: dict[str, Any]) -> None:
+        """Bind recoverable placement evidence to the current locked deal."""
+        order.pop("deal_id", None)
+        rows = await self.trades.get_open_trades_by_symbol(str(order["symbol"]))
+        if len(rows) == 1 and rows[0].get("deal_id"):
+            order["deal_id"] = str(rows[0]["deal_id"])
+
     async def _arm_tp_limit_order(
         self,
         order: dict[str, Any],
@@ -594,6 +607,7 @@ class DcaOrderLifecycle:
                 return False
             if not await self.routing.order_snapshot_is_current(order, config):
                 return False
+            await self._bind_order_to_open_deal(order)
             placement = await self.placement_workflow.begin(
                 order,
                 config,
@@ -748,6 +762,19 @@ class DcaOrderLifecycle:
         source_operation_id: str | None,
     ) -> str:
         """Durably compensate a limit order whose local metadata was not saved."""
+        source = (
+            await self.placement_intents.get(source_operation_id)
+            if source_operation_id
+            else None
+        )
+        source_matches = bool(
+            source is not None
+            and str(source.symbol) == symbol
+            and str(source.exchange_name).lower()
+            == str(config.get("exchange") or "").lower()
+            and str(source.exchange_order_id or "") == order_id
+            and placement_scope_matches(source, config)
+        )
         cancel_order = {
             "symbol": symbol,
             "side": "sell",
@@ -759,6 +786,9 @@ class DcaOrderLifecycle:
                 order_id,
             ),
             "source_operation_id": source_operation_id,
+            "deal_id": str(source.deal_id)
+            if source_matches and source.deal_id
+            else None,
         }
         cancellation = await self.placement_workflow.begin(
             cancel_order,
@@ -767,6 +797,9 @@ class DcaOrderLifecycle:
             side="sell",
             order_type="limit",
             exchange_order_id=order_id,
+            requested_amount=float(source.requested_amount or 0.0)
+            if source_matches
+            else 0.0,
         )
         if cancellation.completed:
             return "limit_metadata_persistence_failed_compensated"
@@ -882,6 +915,7 @@ class DcaOrderLifecycle:
                     return False
                 if not await self.routing.order_snapshot_is_current(order, config):
                     return False
+                await self._bind_order_to_open_deal(order)
                 if not bool(order.get("skip_tp_limit_cancel", False)):
                     canceled = await self._cancel_tp_limit_order_locked(
                         order["symbol"],
@@ -1250,6 +1284,8 @@ class DcaOrderLifecycle:
         config: dict[str, Any],
     ) -> tuple[bool, dict[str, Any] | None]:
         """Run capital-budget preflight, exchange buy, and persistence."""
+        if bool(order.get("safetyorder")):
+            await self._bind_order_to_open_deal(order)
         if config.get("exchange") in {
             "bybit",
             "bybiteu",

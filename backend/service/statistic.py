@@ -490,7 +490,6 @@ class Statistic:
         # resamples from; drop this instance's cached timeline and advance
         # the shared generation so other instances rebuild too.
         self.invalidate_timeline_cache()
-        _advance_timeline_generation()
 
     @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
     async def _get_profit_base_cached(self) -> dict[str, Any]:
@@ -728,7 +727,6 @@ class Statistic:
             # shared generation so every cached resample (this instance or
             # another Statistic's) is dropped until rebuilt.
             self.invalidate_timeline_cache()
-            _advance_timeline_generation()
         except BaseORMException as e:
             # Broad catch to avoid stats persistence failures affecting websocket data.
             logging.error("Error storing uPNL snapshot: %s", e)
@@ -757,8 +755,9 @@ class Statistic:
         return upnl_data
 
     def invalidate_timeline_cache(self) -> None:
-        """Drop this instance's cached timeline so the next fetch re-resamples."""
+        """Invalidate cached and in-flight timelines across all instances."""
         self._timeline_cache = None
+        _advance_timeline_generation()
 
     @staticmethod
     def _timeline_cache_valid(

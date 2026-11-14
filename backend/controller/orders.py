@@ -207,6 +207,7 @@ async def repair_placement_intent(operation_id: FromPath[str]) -> Any:
         return await placement_repair.repair(
             operation_id,
             config_service.snapshot(),
+            config_provider=config_service.snapshot,
         )
     except PlacementRepairError as exc:
         return _placement_repair_error_response(exc)

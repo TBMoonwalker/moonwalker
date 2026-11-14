@@ -345,3 +345,36 @@ async def test_limit_sell_mode_skips_exit_price_fetch(monkeypatch) -> None:
     assert sell_calls[0]["current_price"] == pytest.approx(111.0)
     assert sell_calls[0]["limit_price"] == pytest.approx(110.0)
     assert sell_calls[0]["exit_guard_min_price"] == pytest.approx(110.0)
+
+
+@pytest.mark.parametrize(
+    "reason,bound", [("take_profit", "min_price"), ("stop_loss", "max_price")]
+)
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0])
+def test_exit_price_guard_rejects_invalid_price_and_bounds(reason, bound, bad):
+    from service.dca.decision import evaluate_exit_price_guard
+
+    assert evaluate_exit_price_guard(
+        sell_reason=reason, fresh_price=bad, **{bound: 100.0}
+    ) == (False, "guard_unavailable")
+    assert evaluate_exit_price_guard(
+        sell_reason=reason, fresh_price=100.0, **{bound: bad}
+    ) == (False, "guard_unavailable")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf"])
+async def test_market_exit_rejects_nonfinite_bid(monkeypatch, bad):
+    dca = Dca()
+    _configure_dca(dca)
+    sells = []
+
+    async def fake_sell(order, config):
+        sells.append(order)
+
+    monkeypatch.setattr(dca.order_lifecycle, "receive_sell_order", fake_sell)
+    stats = []
+    _patch_engine(dca, monkeypatch, bid_price=bad, stat_payloads=stats)
+    await dca._Dca__calculate_tp(110.5, _build_trades(), _build_policy())
+    assert sells == []
+    assert stats[-1]["current_price"] == 110.5

@@ -690,13 +690,18 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             "SELECT version FROM config_migrations ORDER BY version"
         ).fetchall()
 
-    # The direct jump fully migrated on startup 2 (schema + data steps), and
-    # the ledger-hygiene prune that ran in the same startup left only its own
-    # row: every older row is retired, and the retire rule keeps the
-    # definitions from re-creating them on startup 3.
-    assert ledger_rows == [(LEDGER_PRUNE_VERSION, MIGRATION_STATUS_APPLIED)]
-    # The floor marker survives the prune: it is the floor signal itself.
-    assert config_rows == [(FLOOR_CONFIG_MIGRATION_ROW,)]
+    # An unverified pre-floor install keeps its migration history and warning.
+    assert (LEDGER_PRUNE_VERSION, MIGRATION_STATUS_APPLIED) in ledger_rows
+    assert (
+        "2026-10-17-009-accumulation-foundation",
+        MIGRATION_STATUS_APPLIED,
+    ) in ledger_rows
+    assert (
+        "2026-11-04-022-legacy-closed-trade-attribution",
+        MIGRATION_STATUS_APPLIED,
+    ) in ledger_rows
+    assert all(status == MIGRATION_STATUS_APPLIED for _, status in ledger_rows)
+    assert (FLOOR_CONFIG_MIGRATION_ROW,) not in config_rows
     assert accumulation_defaults == ("classic_dca", None, None, None)
     assert len(accumulation_tables) == 9
     assert open_trade is not None
@@ -839,9 +844,13 @@ async def test_contract_drop_migration_resumes_after_interruption(
             "SELECT symbol, deal_id, close_reason FROM closedtrades "
             "WHERE symbol = 'ETH/USDC'"
         ).fetchone()
-    # The interrupted drop completed on resume (columns gone, rows kept), and
-    # the ledger-hygiene prune that followed left only its own ledger row.
-    assert ledger_rows == [(LEDGER_PRUNE_VERSION, MIGRATION_STATUS_APPLIED)]
+    # The interrupted drop completed; pre-floor migration history is retained.
+    assert (
+        "2026-11-01-021-campaign-column-drop",
+        MIGRATION_STATUS_APPLIED,
+    ) in ledger_rows
+    assert (LEDGER_PRUNE_VERSION, MIGRATION_STATUS_APPLIED) in ledger_rows
+    assert all(status == MIGRATION_STATUS_APPLIED for _, status in ledger_rows)
     assert "campaign_id" not in open_trade_columns
     assert open_trade == (
         "BTC/USDC",
@@ -1544,6 +1553,50 @@ async def test_prune_resumes_after_interruption(
     rows = await SchemaMigration.all()
     assert [row.version for row in rows] == [LEDGER_PRUNE_VERSION]
     assert rows[0].status == MIGRATION_STATUS_APPLIED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("interruption", "expected"),
+    [(SystemExit, SystemExit), (OSError, RuntimeError)],
+)
+async def test_prune_commit_survives_interruption_before_runner_save(
+    _migration_database, monkeypatch: pytest.MonkeyPatch, interruption, expected
+) -> None:
+    """A crash after pruning cannot replace the accumulation-era timestamp."""
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._run_schema_init_steps()
+    await SchemaMigration.filter(
+        version="2026-10-17-009-accumulation-foundation"
+    ).update(applied_at=datetime(2020, 1, 1, tzinfo=timezone.utc))
+    await model.AccumulationActivation.create(symbol="BTC/USDC", account_scope="test")
+    closed = await model.ClosedTrades.create(
+        symbol="ETH/USDC", close_date="2021-01-01 00:00:00+00:00"
+    )
+    await ConfigMigration.create(version=FLOOR_CONFIG_MIGRATION_ROW, backup_json="[]")
+
+    original_prune = Database._prune_legacy_ledger_rows
+
+    async def crash_after_commit(self: Database) -> None:
+        await original_prune(self)
+        raise interruption("simulated crash after prune commit")
+
+    monkeypatch.setattr(Database, "_prune_legacy_ledger_rows", crash_after_commit)
+    with pytest.raises(expected):
+        await database._run_backfill_init_steps()
+    assert (await SchemaMigration.get(version=LEDGER_PRUNE_VERSION)).status == (
+        MIGRATION_STATUS_APPLIED
+    )
+
+    monkeypatch.setattr(Database, "_prune_legacy_ledger_rows", original_prune)
+    await database._run_schema_init_steps()
+    await database._run_backfill_init_steps()
+    await closed.refresh_from_db()
+    assert closed.lifecycle_mode is None
+    assert not await SchemaMigration.filter(
+        version="2026-10-17-009-accumulation-foundation"
+    ).exists()
 
 
 @pytest.mark.asyncio

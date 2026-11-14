@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from model import ConfigMigration, SchemaMigration
+from model import AppConfig, ConfigMigration, SchemaMigration
 from tortoise.transactions import in_transaction
 
 MINIMUM_SUPPORTED_VERSION = "6.3.0.0"
@@ -30,6 +30,9 @@ MINIMUM_SUPPORTED_VERSION = "6.3.0.0"
 # presence in the ledger outlives the install that wrote it.  The literal is
 # owned here: the floor meaning belongs to msv, not to any migration module.
 FLOOR_CONFIG_MIGRATION_ROW = "2026-11-msv-floor-6-3-v1"
+LEGACY_TRADE_MODE_KEYS = frozenset(
+    {"trade_lifecycle_mode", "dynamic_dca", "sidestep_campaign_enabled"}
+)
 
 UPGRADE_GUIDANCE = (
     "Upgrade through 6.3.0.0 (the release that removed the remaining legacy "
@@ -80,6 +83,11 @@ class MsvBaseline:
             )
         if self.status == MsvStatus.FRESH:
             return "fresh database; no migration history yet (assumed supported)"
+        if not self.schema_history_present:
+            return (
+                f"baseline pre-MSV {supported}; legacy configuration present "
+                f"but floor config migration {self.floor_config_migration} not found"
+            )
         return (
             f"baseline pre-MSV {supported}; "
             "schema history present but floor config migration "
@@ -90,24 +98,27 @@ class MsvBaseline:
 def evaluate_msv_baseline(
     floor_applied: bool,
     schema_history_present: bool,
+    legacy_keys_present: bool = False,
 ) -> MsvBaseline:
     """Derive a baseline from pre-migration ledger state.
 
     A floor row proves the install last ran at or after the floor.  Its absence
-    on a non-fresh database means the install pre-dates the floor.  A fresh
-    database carries neither the floor row nor any schema history, so it is
-    treated as supported and will receive every current migration.
+    on a non-fresh database means the install pre-dates the floor. A database
+    with legacy trade-mode keys is also unsupported without a floor row, even
+    when it has no schema history. A clean fresh database is treated as
+    supported and will receive every current migration.
 
     Args:
         floor_applied: Whether the floor config migration is in the ledger.
         schema_history_present: Whether any schema migration is recorded.
+        legacy_keys_present: Whether legacy trade-mode configuration exists.
 
     Returns:
         A frozen :class:`MsvBaseline` describing the install.
     """
     if floor_applied:
         status = MsvStatus.SUPPORTED
-    elif schema_history_present:
+    elif schema_history_present or legacy_keys_present:
         status = MsvStatus.UNSUPPORTED
     else:
         status = MsvStatus.FRESH
@@ -130,7 +141,12 @@ async def preflight_msv() -> MsvBaseline:
         version=FLOOR_CONFIG_MIGRATION_ROW
     ).exists()
     schema_history_present = await SchemaMigration.filter().exists()
-    baseline = evaluate_msv_baseline(floor_applied, schema_history_present)
+    legacy_keys_present = await AppConfig.filter(
+        key__in=list(LEGACY_TRADE_MODE_KEYS)
+    ).exists()
+    baseline = evaluate_msv_baseline(
+        floor_applied, schema_history_present, legacy_keys_present
+    )
     set_msv_baseline(baseline)
     return baseline
 
@@ -147,25 +163,29 @@ def get_msv_baseline() -> MsvBaseline | None:
 
 
 async def record_msv_floor_marker(baseline: MsvBaseline | None) -> None:
-    """Record the floor marker on the first run of at-floor software.
+    """Record the floor marker for a clean fresh installation.
 
     Called during database init immediately after the preflight and before
     schema migrations commit their rows. A fresh install (no pre-migration
     schema history) is marked here so an interrupted startup cannot leave
     schema history without the marker and misreport ``unsupported`` on the
-    next boot. An existing install (schema history already present at
-    preflight) is marked on its first at-floor startup: the pre-floor warning
-    has already fired at preflight time, and running the floor release is
-    precisely what reaches the floor, so later boots report ``supported``.
+    next boot. Existing installations without a verified floor marker remain
+    unsupported; running newer software alone does not prove data compatibility.
 
     Args:
         baseline: The preflight baseline, or ``None`` when the preflight did
             not run. When unavailable the marker is withheld (fail closed).
     """
-    if baseline is None:
+    if baseline is None or baseline.status != MsvStatus.FRESH:
         return
 
     async with in_transaction() as connection:
+        if (
+            await AppConfig.filter(key__in=list(LEGACY_TRADE_MODE_KEYS))
+            .using_db(connection)
+            .exists()
+        ):
+            return
         already_applied = (
             await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW)
             .using_db(connection)

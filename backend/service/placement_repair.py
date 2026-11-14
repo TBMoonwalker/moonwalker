@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from collections.abc import Callable
 from typing import Any
 
 import ccxt.async_support as ccxt
@@ -19,6 +20,7 @@ import helper
 from service.exchange_capabilities import (
     ExchangeOrderLookupResult,
     ExchangeOrderLookupStatus,
+    exchange_execution_scope,
 )
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
@@ -26,6 +28,7 @@ from service.placement_intents import (
     PlacementAction,
     PlacementIntentService,
     PlacementIntentState,
+    QuarantineResolution,
     deserialize_placement_payload,
     has_execution_scope,
     is_exchange_placement_enabled,
@@ -121,10 +124,12 @@ class PlacementRepairService:
         self,
         operation_id: str,
         config: dict[str, Any],
+        *,
+        config_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Look up one quarantined intent and apply its terminal evidence."""
         async with self._lock_for_operation(operation_id):
-            result = await self._repair_locked(operation_id, config)
+            result = await self._repair_locked(operation_id, config, config_provider)
             self._evict_settled(operation_id, result)
             return result
 
@@ -143,6 +148,7 @@ class PlacementRepairService:
         self,
         operation_id: str,
         config: dict[str, Any],
+        config_provider: Callable[[], dict[str, Any]] | None,
     ) -> dict[str, Any]:
         """Apply one repair while the per-operation lock is held."""
         intent = await self._load_quarantined(operation_id)
@@ -186,6 +192,12 @@ class PlacementRepairService:
                 "the exchange manually and dismiss it when safe.",
             )
         lookup = await self._lookup(intent, config)
+        provider = config_provider or (lambda: config)
+        if not placement_scope_matches(intent, provider()):
+            return self._unchanged(
+                intent,
+                "The exchange account scope changed during lookup. Retry with the correct account.",
+            )
         if lookup.status == ExchangeOrderLookupStatus.NOT_FOUND:
             released = await self.intents.release_quarantine(
                 str(intent.operation_id),
@@ -206,7 +218,13 @@ class PlacementRepairService:
                 f"({lookup.error_message or 'no status'}). Retry when the "
                 "exchange is reachable, or dismiss after manual review.",
             )
-        return await self._apply_found_evidence(intent, lookup.order, config)
+        order = lookup.order
+        if not placement_lookup_identity_matches(intent, order):
+            return self._unchanged(
+                intent,
+                "The exchange response does not verify the placement identity.",
+            )
+        return await self._apply_found_evidence(intent, order, config, provider)
 
     async def dismiss(self, operation_id: str, note: str) -> dict[str, Any]:
         """Record one explicit operator dismissal as a terminal disposition."""
@@ -299,6 +317,7 @@ class PlacementRepairService:
         intent: Any,
         order: dict[str, Any],
         config: dict[str, Any],
+        config_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Map one found order to the same terminal states the reconciler uses."""
         operation_id = str(intent.operation_id)
@@ -306,19 +325,26 @@ class PlacementRepairService:
         exchange_state = str(order.get("status") or "").strip().lower()
         if exchange_state in {"canceled", "cancelled", "rejected", "expired"}:
             if action == PlacementAction.CANCEL.value:
-                if not await self._resume(intent, order, config):
+                if not has_reliable_cancel_evidence(intent, order):
+                    return self._unchanged(
+                        intent,
+                        "The canceled order has no reliable fill amount or proceeds. "
+                        "Review the exchange order before resolving it.",
+                    )
+                if not await self._resume(
+                    intent,
+                    order,
+                    config,
+                    "operator_repair_cancel_confirmed",
+                    config_provider,
+                ):
                     return self._unchanged(
                         intent,
                         "The cancel is confirmed but its local effect could "
                         "not be resumed. Review the trade, then retry or "
                         "dismiss.",
                     )
-                released = await self.intents.release_quarantine(
-                    operation_id,
-                    PlacementIntentState.COMPLETED,
-                    reason_code="operator_repair_cancel_confirmed",
-                    result=order,
-                )
+                released = await self.intents.get(operation_id)
                 return self._result(
                     released,
                     "completed",
@@ -326,25 +352,40 @@ class PlacementRepairService:
                 )
             if action == PlacementAction.BUY.value:
                 buy_filled = validated_buy_filled_amount(order)
+                if buy_filled is None:
+                    return self._unchanged(
+                        intent,
+                        "The canceled order has no reliable fill amount. "
+                        "Review the exchange order before resolving it.",
+                    )
                 if buy_filled is not None and buy_filled > 0:
-                    if not await self._resume(intent, order, config):
+                    if not await self._resume(
+                        intent,
+                        order,
+                        config,
+                        "operator_repair_cancel_partial_fill_resumed",
+                        config_provider,
+                    ):
                         return self._unchanged(
                             intent,
                             "The canceled order's partial fill could not be "
                             "resumed into local trade state. Review the "
                             "trade, then retry or dismiss.",
                         )
-                    released = await self.intents.release_quarantine(
-                        operation_id,
-                        PlacementIntentState.COMPLETED,
-                        reason_code="operator_repair_cancel_partial_fill_resumed",
-                        result=order,
-                    )
+                    released = await self.intents.get(operation_id)
                     return self._result(
                         released,
                         "completed",
                         "The canceled order's partial fill was resumed into "
                         "local trade state.",
+                    )
+            if action in {PlacementAction.SELL.value, PlacementAction.LIMIT_SELL.value}:
+                sell_filled = validated_buy_filled_amount(order)
+                if sell_filled is None or sell_filled > 0:
+                    return self._unchanged(
+                        intent,
+                        "The canceled sell may have a fill that needs manual "
+                        "reconciliation. Review the exchange order before resolving it.",
                     )
             released = await self.intents.release_quarantine(
                 operation_id,
@@ -360,50 +401,84 @@ class PlacementRepairService:
                 f"The exchange order is {exchange_state}; the intent is "
                 "recorded as rejected.",
             )
-        filled = float(order.get("filled") or 0.0)
-        amount = float(order.get("amount") or 0.0)
+        filled_value = validated_buy_filled_amount(order)
+        amount_value = validated_buy_filled_amount({"filled": order.get("amount")})
+        filled = filled_value if filled_value is not None else 0.0
+        amount = amount_value if amount_value is not None else 0.0
         is_filled = exchange_state in {"closed", "filled"} or (
             amount > 0 and filled >= amount
         )
         if is_filled:
-            if action == PlacementAction.BUY.value and filled <= 0:
+            if action == PlacementAction.BUY.value and (
+                filled_value is None or filled <= 0
+            ):
                 return self._unchanged(
                     intent,
                     "The exchange order is terminal but carries no fill "
                     "evidence. Verify the fill on the exchange and retry, "
                     "or dismiss.",
                 )
-            if not await self._resume(intent, order, config):
+            if action in {
+                PlacementAction.SELL.value,
+                PlacementAction.LIMIT_SELL.value,
+                PlacementAction.CANCEL.value,
+            }:
+                if not (
+                    has_complete_sell_fill(intent, order)
+                    or (
+                        action != PlacementAction.CANCEL.value
+                        and has_terminal_partial_sell(intent, order)
+                    )
+                ) or (
+                    action == PlacementAction.CANCEL.value
+                    and not has_confirmed_sell_proceeds(order)
+                ):
+                    return self._unchanged(
+                        intent,
+                        "The exchange evidence does not prove a complete sell fill. "
+                        "Review the order before resolving it.",
+                    )
+            if not await self._resume(
+                intent, order, config, "operator_repair_fill_resumed", config_provider
+            ):
                 return self._unchanged(
                     intent,
                     "The exchange fill could not be resumed into local trade "
                     "state (the matching trade may be gone). Review the "
                     "trade before dismissing.",
                 )
-            released = await self.intents.release_quarantine(
-                operation_id,
-                PlacementIntentState.COMPLETED,
-                reason_code="operator_repair_fill_resumed",
-                result=order,
+            released = await self.intents.get(operation_id)
+            message = (
+                "Exchange fill evidence was applied; the remaining position stays open."
+                if action != PlacementAction.CANCEL.value
+                and has_terminal_partial_sell(intent, order)
+                else "Exchange fill evidence was applied and the trade finalized."
             )
             return self._result(
                 released,
                 "completed",
-                "Exchange fill evidence was applied and the trade finalized.",
+                message,
             )
         if action == PlacementAction.LIMIT_SELL.value and exchange_state == "open":
-            if not await self._resume(intent, order, config):
+            if not str(order.get("id") or intent.exchange_order_id or "").strip():
+                return self._unchanged(
+                    intent,
+                    "The open limit sell has no exchange order ID. "
+                    "Review the exchange order before resolving it.",
+                )
+            if not await self._resume(
+                intent,
+                order,
+                config,
+                "operator_repair_open_limit_reattached",
+                config_provider,
+            ):
                 return self._unchanged(
                     intent,
                     "The limit sell is still open but could not be re-attached "
                     "to an open trade. Review the trade before dismissing.",
                 )
-            released = await self.intents.release_quarantine(
-                operation_id,
-                PlacementIntentState.COMPLETED,
-                reason_code="operator_repair_open_limit_reattached",
-                result=order,
-            )
+            released = await self.intents.get(operation_id)
             return self._result(
                 released,
                 "completed",
@@ -421,6 +496,8 @@ class PlacementRepairService:
         intent: Any,
         order: dict[str, Any],
         config: dict[str, Any],
+        reason_code: str,
+        config_provider: Callable[[], dict[str, Any]] | None,
     ) -> bool:
         """Resume local persistence from found evidence, mirroring startup.
 
@@ -440,7 +517,67 @@ class PlacementRepairService:
                         str(intent.operation_id),
                     )
                     return False
-                return bool(await self.resume_placement(intent, order, config))
+                current = await self.intents.get(str(intent.operation_id))
+                if (
+                    current is None
+                    or str(current.state) not in QUARANTINED_STATES
+                    or current.request_json != intent.request_json
+                    or any(
+                        getattr(current, field) != getattr(intent, field)
+                        for field in (
+                            "symbol",
+                            "action",
+                            "exchange_name",
+                            "deal_id",
+                            "exchange_order_id",
+                            "client_order_id",
+                        )
+                    )
+                    or not placement_scope_matches(
+                        current, (config_provider or (lambda: config))()
+                    )
+                    or (await load_lifecycle_route(str(current.symbol))).route
+                    != LifecycleRoute.CLASSIC_DCA
+                ):
+                    return False
+                resolution = QuarantineResolution(
+                    operation_id=str(current.operation_id),
+                    request_json=str(current.request_json),
+                    symbol=str(current.symbol),
+                    action=str(current.action),
+                    exchange_name=str(current.exchange_name),
+                    expected_exchange_order_id=(
+                        str(current.exchange_order_id)
+                        if current.exchange_order_id is not None
+                        else None
+                    ),
+                    client_order_id=(
+                        str(current.client_order_id)
+                        if current.client_order_id is not None
+                        else None
+                    ),
+                    exchange_order_id=(
+                        str(order.get("id") or current.exchange_order_id)
+                        if order.get("id") or current.exchange_order_id
+                        else None
+                    ),
+                    deal_id=str(current.deal_id) if current.deal_id else None,
+                    base_buy=(
+                        str(current.action) == PlacementAction.BUY.value
+                        and bool(
+                            deserialize_placement_payload(current.request_json).get(
+                                "baseorder"
+                            )
+                        )
+                    ),
+                    execution_scope=exchange_execution_scope(config),
+                    config_provider=config_provider or (lambda: config),
+                    reason_code=reason_code,
+                    result=dict(order),
+                )
+                await self.resume_placement(
+                    current, order, config, resolution=resolution
+                )
         except Exception as exc:  # noqa: BLE001 - a failure keeps quarantine.
             logging.error(
                 "Placement repair resume failed for %s: %s",
@@ -448,7 +585,12 @@ class PlacementRepairService:
                 exc,
                 exc_info=True,
             )
-            return False
+        current = await self.intents.get(str(intent.operation_id))
+        return bool(
+            current is not None
+            and str(current.state) == PlacementIntentState.COMPLETED.value
+            and current.reason_code == reason_code
+        )
 
     async def _describe(self, intent: Any) -> dict[str, Any]:
         request = deserialize_placement_payload(intent.request_json)
@@ -476,6 +618,11 @@ class PlacementRepairService:
             "exchange_order_id": (
                 str(intent.exchange_order_id)
                 if intent.exchange_order_id is not None
+                else None
+            ),
+            "client_order_id": (
+                str(intent.client_order_id)
+                if intent.client_order_id is not None
                 else None
             ),
             "has_lookup_identity": bool(
@@ -525,6 +672,31 @@ class PlacementRepairService:
         }
 
 
+def placement_lookup_identity_matches(intent: Any, order: dict[str, Any]) -> bool:
+    """Verify lookup evidence against the durable exchange or client identity."""
+    if order.get("symbol") is not None and order["symbol"] != intent.symbol:
+        return False
+    if order.get("side") is not None and (
+        str(order["side"]).strip().lower() != str(intent.side).strip().lower()
+    ):
+        return False
+    exchange_id = str(intent.exchange_order_id or "").strip()
+    if exchange_id:
+        return str(order.get("id") or "").strip() == exchange_id
+    expected_client_id = str(intent.client_order_id or "").strip()
+    if not expected_client_id:
+        return False
+    info = order.get("info")
+    info = info if isinstance(info, dict) else {}
+    client_id = (
+        order.get("clientOrderId")
+        or info.get("orderLinkId")
+        or info.get("clientOrderId")
+        or info.get("origClientOrderId")
+    )
+    return str(client_id or "").strip() == expected_client_id
+
+
 def validated_buy_filled_amount(order: dict[str, Any]) -> float | None:
     """Return a validated non-negative buy fill amount, or ``None``.
 
@@ -543,6 +715,165 @@ def validated_buy_filled_amount(order: dict[str, Any]) -> float | None:
     if not math.isfinite(filled) or filled < 0:
         return None
     return filled
+
+
+def has_confirmed_sell_proceeds(order: dict[str, Any]) -> bool:
+    """Require positive finite execution cost or average for a partial fill."""
+    filled = validated_buy_filled_amount(order)
+    if filled is None or filled <= 0:
+        return False
+    selected_price = order.get("average") or order.get("price")
+    price = 0.0
+    if selected_price is not None:
+        if isinstance(selected_price, bool):
+            return False
+        try:
+            price = float(selected_price)
+            if not math.isfinite(price):
+                return False
+        except (TypeError, ValueError):
+            return False
+    cost = order.get("cost")
+    if cost is not None:
+        if isinstance(cost, bool):
+            return False
+        try:
+            parsed_cost = float(cost)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(parsed_cost) or parsed_cost < 0:
+            return False
+        if parsed_cost > 0:
+            derived_price = parsed_cost / filled
+            return math.isfinite(derived_price) and derived_price > 0
+    return (
+        bool(order.get("average"))
+        and price > 0
+        and math.isfinite(filled * price)
+        and filled * price > 0
+    )
+
+
+def has_reliable_cancel_evidence(intent: Any, order: dict[str, Any]) -> bool:
+    """Require consistent cancellation quantities and real partial proceeds."""
+    filled = validated_buy_filled_amount(order)
+    requested = validated_buy_filled_amount({"filled": intent.requested_amount})
+    amount = validated_buy_filled_amount({"filled": order.get("amount")})
+    return bool(
+        filled is not None
+        and requested is not None
+        and requested > 0
+        and filled <= requested
+        and (order.get("amount") is None or amount == requested)
+        and (filled == 0 or has_confirmed_sell_proceeds(order))
+    )
+
+
+def has_complete_sell_fill(intent: Any, order: dict[str, Any]) -> bool:
+    """Require the confirmed fill to cover the durable sell quantity."""
+    filled = validated_buy_filled_amount(order)
+    requested = validated_buy_filled_amount({"filled": intent.requested_amount})
+    amount = validated_buy_filled_amount({"filled": order.get("amount")})
+    return bool(
+        filled is not None
+        and requested is not None
+        and requested > 0
+        and filled == requested
+        and (order.get("amount") is None or amount == requested)
+    )
+
+
+def has_valid_stored_partial_sell(intent: Any, order: dict[str, Any]) -> bool:
+    """Validate one durable normalized partial before replaying its local effect."""
+    if order.get("type") != "partial_sell" and not (
+        order.get("requires_market_fallback") is True
+        and order.get("limit_cancel_confirmed") is True
+    ):
+        return False
+    if order.get("unsellable") or order.get("symbol") != intent.symbol:
+        return False
+    if not str(intent.deal_id or "").strip():
+        return False
+    identity = str(intent.exchange_order_id or "").strip()
+    executions = order.get("executions")
+    if not identity or not isinstance(executions, list) or len(executions) != 1:
+        return False
+    execution = executions[0]
+    if not isinstance(execution, dict):
+        return False
+    if (
+        str(execution.get("order_id") or "").strip() != identity
+        or execution.get("symbol") != intent.symbol
+        or str(execution.get("side") or "").lower() != "sell"
+    ):
+        return False
+    if order.get("exchange_order_id") not in (None, identity):
+        return False
+    amount = validated_buy_filled_amount({"filled": order.get("partial_filled_amount")})
+    remaining = validated_buy_filled_amount({"filled": order.get("remaining_amount")})
+    requested = validated_buy_filled_amount({"filled": intent.requested_amount})
+    price = validated_buy_filled_amount({"filled": order.get("partial_avg_price")})
+    execution_amount = validated_buy_filled_amount({"filled": execution.get("amount")})
+    execution_price = validated_buy_filled_amount({"filled": execution.get("price")})
+    proceeds = validated_buy_filled_amount({"filled": execution.get("ordersize")})
+    fee = validated_buy_filled_amount({"filled": execution.get("fee", 0)})
+    if any(
+        value is None
+        for value in (
+            amount,
+            remaining,
+            requested,
+            price,
+            execution_amount,
+            execution_price,
+            proceeds,
+            fee,
+        )
+    ):
+        return False
+    assert amount is not None and remaining is not None and requested is not None
+    assert (
+        price is not None
+        and execution_amount is not None
+        and execution_price is not None
+        and proceeds is not None
+    )
+    if amount <= 0 or remaining <= 0 or requested <= 0 or price <= 0 or proceeds <= 0:
+        return False
+    if not math.isfinite(amount * price):
+        return False
+    if not all(
+        (
+            math.isclose(amount + remaining, requested, rel_tol=1e-9),
+            math.isclose(execution_amount, amount, rel_tol=1e-12),
+            math.isclose(execution_price, price, rel_tol=1e-8),
+            math.isclose(proceeds, amount * price, rel_tol=1e-8),
+        )
+    ):
+        return False
+    if order.get("partial_proceeds") is not None:
+        recorded = validated_buy_filled_amount({"filled": order["partial_proceeds"]})
+        if recorded is None or not math.isclose(recorded, proceeds, rel_tol=1e-8):
+            return False
+    return True
+
+
+def has_terminal_partial_sell(intent: Any, order: dict[str, Any]) -> bool:
+    """Prove a submitted terminal sell filled less than the original exposure."""
+    filled = validated_buy_filled_amount(order)
+    requested = validated_buy_filled_amount({"filled": intent.requested_amount})
+    amount = validated_buy_filled_amount({"filled": order.get("amount")})
+    return bool(
+        str(order.get("status") or "").lower() in {"closed", "filled"}
+        and filled is not None
+        and amount is not None
+        and requested is not None
+        and 0 < filled == amount < requested
+        and bool(str(order.get("id") or "").strip())
+        and (not order.get("symbol") or order["symbol"] == intent.symbol)
+        and (not order.get("side") or str(order["side"]).lower() == "sell")
+        and has_confirmed_sell_proceeds(order)
+    )
 
 
 def lookup_error_from_order(order: dict[str, Any]) -> str | None:

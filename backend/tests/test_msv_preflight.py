@@ -152,44 +152,34 @@ async def test_floor_marker_keeps_a_fresh_install_supported_on_later_startups() 
 
 
 @pytest.mark.asyncio
-async def test_floor_marker_is_written_for_a_fresh_install_with_inert_legacy_rows() -> (
-    None
-):
-    """A fresh database with inert pre-4.9 bridge rows is marked at the floor.
-
-    The bridge keys are no longer a compatibility surface: pre-4.9 backups
-    are refused on restore, so a fresh install carrying such rows is handled
-    exactly like any other fresh install.
-    """
+async def test_floor_marker_is_withheld_for_fresh_install_with_legacy_rows() -> None:
+    """A database with legacy rows must not be self-marked as supported."""
     await AppConfig.create(
         key="trade_lifecycle_mode", value="classic_dca", value_type="str"
     )
     baseline = await preflight_msv()
-    assert baseline.status == MsvStatus.FRESH
+    assert baseline.status == MsvStatus.UNSUPPORTED
+    assert not baseline.supported
+    assert baseline.upgrade_guidance
     await record_msv_floor_marker(baseline)
 
-    assert await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
+    assert not await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
     await _seed_schema_history()
     baseline2 = await preflight_msv()
-    assert baseline2.status == MsvStatus.SUPPORTED
-    assert baseline2.floor_applied is True
+    assert baseline2.status == MsvStatus.UNSUPPORTED
+    assert baseline2.floor_applied is False
 
 
 @pytest.mark.asyncio
-async def test_floor_marker_is_written_for_a_pre_floor_install_on_first_at_floor_run() -> (
-    None
-):
-    """An existing install that runs at-floor software is marked after its warning.
-
-    The pre-floor warning fires at preflight time (the last-known state), and
-    running the floor release is what reaches the floor, so the marker is
-    written on the first at-floor startup and later boots report
-    ``supported``. Inert pre-4.9 bridge rows on an existing database do not
-    change the pre-floor outcome.
-    """
-    await AppConfig.create(
-        key="trade_lifecycle_mode", value="classic_dca", value_type="str"
-    )
+@pytest.mark.parametrize("legacy_rows", [False, True])
+async def test_floor_marker_preserves_pre_floor_warning_across_startups(
+    legacy_rows: bool,
+) -> None:
+    """Starting newer software alone cannot prove old data is compatible."""
+    if legacy_rows:
+        await AppConfig.create(
+            key="trade_lifecycle_mode", value="classic_dca", value_type="str"
+        )
     await _seed_schema_history()
     baseline = await preflight_msv()
     assert baseline.status == MsvStatus.UNSUPPORTED
@@ -197,12 +187,12 @@ async def test_floor_marker_is_written_for_a_pre_floor_install_on_first_at_floor
 
     await record_msv_floor_marker(baseline)
 
-    assert await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
+    assert not await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
     baseline2 = await preflight_msv()
-    assert baseline2.status == MsvStatus.SUPPORTED
-    assert baseline2.floor_applied is True
-    assert baseline2.supported is True
-    assert baseline2.upgrade_guidance == ""
+    assert baseline2.status == MsvStatus.UNSUPPORTED
+    assert baseline2.floor_applied is False
+    assert baseline2.supported is False
+    assert baseline2.upgrade_guidance
 
 
 @pytest.mark.asyncio

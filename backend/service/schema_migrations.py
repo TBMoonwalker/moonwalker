@@ -115,6 +115,15 @@ async def _mark_failed(
     exc: BaseException,
 ) -> None:
     """Persist a bounded failure diagnostic so startup can resume visibly."""
+    if (
+        ledger_row.version == LEDGER_PRUNE_VERSION
+        and await SchemaMigration.filter(
+            version=LEDGER_PRUNE_VERSION, status=MIGRATION_STATUS_APPLIED
+        ).exists()
+    ):
+        # The prune commits its marker with its deletions; a later exception
+        # must not erase that durable retirement boundary.
+        return
     ledger_row.status = MIGRATION_STATUS_FAILED
     ledger_row.error = str(exc)[:MAX_MIGRATION_ERROR_LENGTH]
     ledger_row.applied_at = None

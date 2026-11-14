@@ -8,7 +8,7 @@ import sqlite3
 from asyncio import sleep
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -1746,6 +1746,20 @@ class Database:
                 "DELETE FROM config_migrations WHERE version IN (?)",
                 [INERT_CONFIG_MIGRATION_ROW],
             )
+            # Retirement must become durable with the deletions. Otherwise a
+            # crash before the runner's final save replays old migrations and
+            # gives the accumulation era a false, newer timestamp.
+            updated = (
+                await model.SchemaMigration.filter(version=LEDGER_PRUNE_VERSION)
+                .using_db(connection)
+                .update(
+                    status=MIGRATION_STATUS_APPLIED,
+                    error=None,
+                    applied_at=datetime.now(timezone.utc),
+                )
+            )
+            if updated != 1:
+                raise RuntimeError("Ledger prune marker is missing.")
         if deleted_schema or deleted_config:
             logging.info(
                 "Ledger hygiene: pruned %s schema-migration row(s) and %s "

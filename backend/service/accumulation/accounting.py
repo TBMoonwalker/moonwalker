@@ -550,7 +550,7 @@ async def persist_accumulation_order(
             quote_cost=report.quote_cost,
         )
     accumulation_input_notifications.publish()
-    if newly_settled:
+    if newly_settled and Decimal(report.filled) > 0:
         await notify_accumulation_trade(report, config)
     return result
 

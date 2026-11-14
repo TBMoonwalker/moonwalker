@@ -151,7 +151,12 @@ def _handler() -> tuple[
 @pytest.mark.asyncio
 async def test_recovered_buy_is_normalized_and_persisted() -> None:
     handler, exchange, _trades, _intents, buys, _sells, _partials = _handler()
-    exchange.buy_result = {"symbol": "BTC/USDC", "price": 100.0, "amount": 0.1}
+    exchange.buy_result = {
+        "symbol": "BTC/USDC",
+        "price": 100.0,
+        "amount": 0.1,
+        "ordersize": 10.0,
+    }
 
     result = await handler.resume(
         _intent(PlacementAction.BUY, request={"symbol": "BTC/USDC"}),
@@ -162,6 +167,84 @@ async def test_recovered_buy_is_normalized_and_persisted() -> None:
     assert result is True
     assert exchange.buy_calls == 1
     assert buys[0]["amount"] == 0.1
+
+
+@pytest.mark.asyncio
+async def test_repair_normalizes_raw_partial_buy_before_persistence() -> None:
+    """Raw requested amount must not be mistaken for its smaller fill."""
+    handler, exchange, _trades, _intents, buys, _sells, _partials = _handler()
+    exchange.buy_result = {
+        "symbol": "BTC/USDC",
+        "price": 100.0,
+        "amount": 0.25,
+        "ordersize": 25.0,
+    }
+    result = await handler.resume(
+        _intent(PlacementAction.BUY, request={"symbol": "BTC/USDC"}),
+        {
+            "status": "canceled",
+            "amount": 1.0,
+            "filled": 0.25,
+            "fees": [],
+            "precision": 8,
+        },
+        {},
+        resolution=SimpleNamespace(),
+    )
+    assert result is True
+    assert exchange.buy_calls == 1
+    assert buys[0]["amount"] == 0.25
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"price": float("inf")},
+        {"price": float("nan")},
+        {"price": 0},
+        {"amount": float("inf")},
+        {"ordersize": float("inf")},
+        {"ordersize": 0},
+        {"symbol": "ETH/USDC"},
+        {"side": "sell"},
+    ],
+)
+async def test_startup_buy_rejects_invalid_normalized_values(bad):
+    """Startup must not persist a buy with invalid economics or ownership."""
+    handler, exchange, _trades, _intents, buys, _sells, _partials = _handler()
+    exchange.buy_result = {
+        "symbol": "BTC/USDC",
+        "side": "buy",
+        "price": 100,
+        "amount": 0.1,
+        "ordersize": 10,
+        **bad,
+    }
+    assert not await handler.resume(
+        _intent(PlacementAction.BUY),
+        {"id": "buy", "status": "closed", "filled": 0.1},
+        {},
+    )
+    assert buys == []
+
+
+@pytest.mark.asyncio
+async def test_buy_recovery_accepts_net_base_fee_amount():
+    """A base-denominated fee reduces credited amount while preserving fill proof."""
+    handler, exchange, _trades, _intents, buys, _sells, _partials = _handler()
+    exchange.buy_result = {
+        "symbol": "BTC/USDC",
+        "side": "buy",
+        "price": 100,
+        "amount": 0.99,
+        "amount_fee": 0.01,
+        "ordersize": 100,
+    }
+    assert await handler.resume(
+        _intent(PlacementAction.BUY), {"id": "buy", "status": "closed", "filled": 1}, {}
+    )
+    assert buys[0]["amount"] == 0.99
 
 
 @pytest.mark.asyncio
@@ -276,7 +359,13 @@ async def test_legacy_base_buy_without_percentage_keeps_unknown_value() -> None:
     handler, _exchange, _trades, _intents, buys, _sells, _partials = _handler()
     assert await handler.resume(
         _intent(PlacementAction.BUY, request={"baseorder": True}),
-        {"fees": 0.001, "precision": 4, "amount": 0.1, "price": 100.0},
+        {
+            "fees": 0.001,
+            "precision": 4,
+            "amount": 0.1,
+            "price": 100.0,
+            "ordersize": 10.0,
+        },
         {},
     )
     assert buys[0]["so_percentage"] is None
@@ -289,6 +378,8 @@ async def test_recovered_market_sell_is_persisted() -> None:
         "type": "sold_check",
         "symbol": "BTC/USDC",
         "total_amount": 1.0,
+        "price": 100.0,
+        "total_cost": 90.0,
     }
 
     result = await handler.resume(
@@ -300,6 +391,221 @@ async def test_recovered_market_sell_is_persisted() -> None:
     assert result is True
     assert exchange.sell_calls == 1
     assert sells[0]["type"] == "sold_check"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action", [PlacementAction.SELL, PlacementAction.LIMIT_SELL, PlacementAction.CANCEL]
+)
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"price": float("inf")},
+        {"price": float("nan")},
+        {"price": 0},
+        {"total_amount": float("inf")},
+        {"total_amount": 0},
+        {"total_amount": 1e308, "price": 1e308},
+        {"total_cost": float("inf")},
+        {"total_cost": -1},
+    ],
+)
+async def test_full_sell_recovery_rejects_invalid_normalized_values(action, bad):
+    """No recovery route may finalize malformed or overflowing sell totals."""
+    handler, exchange, trades, _intents, _buys, sells, _partials = _handler()
+    trades.trade_data = {"symbol": "BTC/USDC", "total_cost": 90.0}
+    exchange.sell_result = {
+        "type": "sold_check",
+        "symbol": "BTC/USDC",
+        "total_amount": 1.5,
+        "price": 100.0,
+        "total_cost": 90.0,
+        **bad,
+    }
+    result = await handler.resume(
+        _intent(action),
+        {
+            "id": "exchange-order",
+            "status": "closed",
+            "filled": 1.5,
+            "amount": 1.5,
+            "type": "market",
+        },
+        {},
+    )
+    assert result is False
+    assert sells == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action", [PlacementAction.SELL, PlacementAction.LIMIT_SELL, PlacementAction.CANCEL]
+)
+@pytest.mark.parametrize("wrong", [{"symbol": "ETH/USDC"}, {"side": "buy"}])
+async def test_full_sell_recovery_rejects_wrong_normalized_identity(action, wrong):
+    """A normalized result cannot redirect persistence to another trade or side."""
+    handler, exchange, trades, _intents, _buys, sells, _partials = _handler()
+    trades.trade_data = {"symbol": "BTC/USDC", "total_cost": 90.0}
+    exchange.sell_result = {
+        "type": "sold_check",
+        "symbol": "BTC/USDC",
+        "side": "sell",
+        "total_amount": 1.5,
+        "price": 100.0,
+        "total_cost": 90.0,
+        **wrong,
+    }
+    assert not await handler.resume(
+        _intent(action),
+        {
+            "id": "exchange-order",
+            "status": "closed",
+            "filled": 1.5,
+            "amount": 1.5,
+            "type": "market",
+        },
+        {},
+    )
+    assert sells == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        {"price": float("inf")},
+        {"price": 100.0, "cost": 10.0, "average": 100.0},
+    ],
+)
+async def test_real_full_sell_repair_rejects_invalid_price(
+    tmp_path, monkeypatch, evidence
+):
+    """A malformed sell must not close or poison an actual SQLite trade."""
+    import model
+    from service.dca.order_lifecycle import DcaOrderLifecycle
+    from service.exchange_capabilities import (
+        ExchangeOrderLookupResult,
+        ExchangeOrderLookupStatus,
+    )
+    from service.placement_recovery_entry import PlacementRecoveryEntry
+    from test_placement_repair import (
+        REPAIR_CONFIG,
+        REPAIR_SCOPE,
+        _classic_route,
+        _FakeExchange,
+        _init_database,
+    )
+    from tortoise import Tortoise
+
+    await _init_database(tmp_path)
+    try:
+        _classic_route(monkeypatch)
+        await model.Trades.create(
+            timestamp="1778000000000",
+            ordersize=10,
+            fee=0,
+            precision=8,
+            amount=1,
+            amount_fee=0,
+            price=10,
+            symbol="BTC/USDC",
+            orderid="buy",
+            bot="test",
+            ordertype="market",
+            baseorder=True,
+            safetyorder=False,
+            order_count=0,
+            so_percentage=None,
+            direction="long",
+            side="buy",
+            deal_id="deal",
+        )
+        await model.OpenTrades.create(
+            symbol="BTC/USDC", deal_id="deal", amount=1, cost=10
+        )
+        await model.PlacementIntent.create(
+            operation_id="inf-sell",
+            client_order_id="mw-sell",
+            exchange_order_id="sell-1",
+            exchange_name="binance",
+            symbol="BTC/USDC",
+            action="sell",
+            side="sell",
+            order_type="market",
+            state="quarantined",
+            deal_id="deal",
+            requested_amount=1,
+            request_json=json.dumps({"_execution_scope": REPAIR_SCOPE}),
+        )
+        lifecycle = DcaOrderLifecycle()
+        lifecycle.exchange = _FakeExchange(
+            ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.FOUND,
+                order={
+                    "id": "sell-1",
+                    "type": "sold_check",
+                    "symbol": "BTC/USDC",
+                    "status": "closed",
+                    "filled": 1,
+                    "amount": 1,
+                    "total_amount": 1,
+                    **evidence,
+                    "total_cost": 10,
+                    "timestamp": "1778000001000",
+                },
+            )
+        )
+        result = (
+            await PlacementRecoveryEntry(lifecycle=lifecycle)
+            .build_placement_repair()
+            .repair("inf-sell", REPAIR_CONFIG)
+        )
+        assert result["status"] == "unchanged"
+        assert await model.OpenTrades.filter(symbol="BTC/USDC").exists()
+        assert not await model.ClosedTrades.filter(symbol="BTC/USDC").exists()
+        assert (
+            await model.PlacementIntent.get(operation_id="inf-sell")
+        ).state == "quarantined"
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field", ["profit", "profit_percent", "tp_price", "avg_price", "amount", "cost"]
+)
+async def test_common_sell_finalization_rejects_nonfinite_derived_totals(
+    monkeypatch, field
+):
+    """Neither normal trading nor recovery may persist overflowing close arithmetic."""
+    from unittest.mock import AsyncMock, Mock
+
+    from service.dca import finalization
+
+    payload = {
+        "amount": 1,
+        "cost": 90,
+        "tp_price": 100,
+        "avg_price": 90,
+        "profit": 10,
+        "profit_percent": 11,
+        "sell_executions": [],
+    }
+    payload[field] = float("inf")
+    calc = AsyncMock(return_value={"payload": payload, "monitor_payload": {}})
+    persist = AsyncMock()
+    monkeypatch.setattr(finalization, "calculate_closed_trade_stats", calc)
+    monkeypatch.setattr(finalization, "persist_closed_trade", persist)
+    deps = SimpleNamespace(
+        placement_workflow=Mock(),
+        trades=SimpleNamespace(invalidate_trade_caches=AsyncMock()),
+        monitoring=SimpleNamespace(notify_trade=AsyncMock()),
+    )
+    with pytest.raises(ValueError, match="Invalid closed-trade"):
+        await finalization.finalize_completed_sell(
+            {"symbol": "BTC/USDC"}, {}, dependencies=deps
+        )
+    persist.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -330,6 +636,91 @@ async def test_recovered_open_limit_sell_restores_trade_metadata() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"id": ""},
+        {"price": 0},
+        {"price": "nan"},
+        {"price": -1},
+        {"amount": 0},
+        {"amount": "inf"},
+        {"amount": -1},
+        {"amount": 2.0},
+    ],
+)
+async def test_recovered_open_limit_rejects_invalid_or_oversized_evidence(
+    changes: dict[str, Any],
+) -> None:
+    """Invalid open orders must not be attached or treated as recovered."""
+    handler, _exchange, trades, _intents, _buys, _sells, _partials = _handler()
+    intent = _intent(PlacementAction.LIMIT_SELL)
+    if "id" in changes:
+        intent.exchange_order_id = None
+    evidence = {"id": "limit-1", "status": "open", "price": 101, "amount": 1.5}
+    evidence.update(changes)
+    assert await handler.resume(intent, evidence, {}) is False
+    assert trades.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_recovered_open_limit_allows_missing_fields_and_exchange_rounding() -> (
+    None
+):
+    """Missing fields use recorded values; exchange rounding stays authoritative."""
+    handler, _exchange, trades, _intents, _buys, _sells, _partials = _handler()
+    intent = _intent(
+        PlacementAction.LIMIT_SELL,
+        request={"limit_price": 101.123, "total_amount": 1.5},
+    )
+    assert await handler.resume(intent, {"id": "limit-1", "status": "open"}, {})
+    assert trades.set_calls[-1]["price"] == 101.123
+    assert trades.set_calls[-1]["amount"] == 1.5
+    assert await handler.resume(
+        intent,
+        {"id": "limit-1", "status": "open", "price": 101.12, "amount": 1.49},
+        {},
+    )
+    assert trades.set_calls[-1]["price"] == 101.12
+    assert trades.set_calls[-1]["amount"] == 1.49
+
+
+@pytest.mark.asyncio
+async def test_canceled_full_fill_without_exchange_amount_is_finalized() -> None:
+    """A complete canceled fill cannot be recorded as merely partial."""
+    handler, exchange, trades, _intents, _buys, sells, _partials = _handler()
+    trades.trade_data = {"symbol": "BTC/USDC", "total_cost": 90.0}
+    exchange.sell_result = {
+        "type": "sold_check",
+        "symbol": "BTC/USDC",
+        "total_amount": 1.5,
+        "price": 100.0,
+        "total_cost": 90.0,
+    }
+    result = await handler.resume(
+        _intent(PlacementAction.CANCEL),
+        {"id": "exchange-order", "status": "canceled", "filled": 1.5},
+        {},
+    )
+    assert result is True
+    assert len(sells) == 1
+    assert trades.clear_calls == []
+
+
+@pytest.mark.asyncio
+async def test_canceled_fill_without_any_order_amount_stays_unresolved() -> None:
+    """A positive fill needs an order amount to distinguish full from partial."""
+    handler, _exchange, trades, _intents, _buys, sells, _partials = _handler()
+    intent = _intent(PlacementAction.CANCEL)
+    intent.requested_amount = 0
+    assert not await handler.resume(
+        intent, {"id": "exchange-order", "status": "canceled", "filled": 1}, {}
+    )
+    assert trades.clear_calls == []
+    assert sells == []
+
+
+@pytest.mark.asyncio
 async def test_recovered_filled_limit_sell_closes_trade() -> None:
     handler, exchange, trades, _intents, _buys, sells, _partials = _handler()
     trades.trade_data = {"symbol": "BTC/USDC", "total_cost": 90.0}
@@ -337,6 +728,8 @@ async def test_recovered_filled_limit_sell_closes_trade() -> None:
         "type": "sold_check",
         "symbol": "BTC/USDC",
         "total_amount": 1.0,
+        "price": 100.0,
+        "total_cost": 90.0,
     }
 
     result = await handler.resume(
@@ -366,6 +759,9 @@ async def test_recovered_cancel_persists_partial_and_marks_intent() -> None:
         {
             "symbol": "BTC/USDC",
             "placement_operation_id": "cancel-operation",
+            "recovery": True,
+            "recovery_deal_id": None,
+            "recovery_tp_order_id": "limit-3",
             "exchange_status": {
                 "id": "limit-3",
                 "status": "canceled",
@@ -383,6 +779,8 @@ async def test_recovered_cancel_that_filled_closes_trade() -> None:
         "type": "sold_check",
         "symbol": "BTC/USDC",
         "total_amount": 1.0,
+        "price": 100.0,
+        "total_cost": 90.0,
     }
 
     result = await handler.resume(

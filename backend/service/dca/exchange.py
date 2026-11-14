@@ -516,17 +516,21 @@ class DcaExchange(Exchange):
             return True
 
         fallback_min_price = order.get("fallback_min_price")
-        if fallback_min_price in (None, False):
+        if fallback_min_price is None or fallback_min_price is False:
             return True
 
         try:
+            if isinstance(fallback_min_price, bool):
+                return False
             min_price = float(fallback_min_price)
         except (TypeError, ValueError):
-            return True
+            return False
 
         try:
-            current_price = float(await self._get_price_for_symbol(order["symbol"]))
-        except (ccxt.BaseError, RuntimeError, TypeError, ValueError) as exc:
+            current_price = float(
+                await self._get_price_for_symbol(order["symbol"], prefer_bid=True)
+            )
+        except (ccxt.BaseError, RetryError, RuntimeError, TypeError, ValueError) as exc:
             logging.warning(
                 "Skipping market fallback for %s: could not determine current price (%s).",
                 order.get("symbol"),
@@ -534,17 +538,19 @@ class DcaExchange(Exchange):
             )
             return False
 
-        if current_price < min_price:
+        justified, reason = evaluate_exit_price_guard(
+            sell_reason="take_profit", fresh_price=current_price, min_price=min_price
+        )
+        if not justified:
             logging.info(
-                "Skipping market fallback for %s: current price %.10f is below "
-                "minimum fallback price %.10f.",
+                "Skipping market fallback for %s: bid %.10f and minimum "
+                "price %.10f failed the take-profit guard (%s).",
                 order.get("symbol"),
                 current_price,
                 min_price,
+                reason,
             )
-            return False
-
-        return True
+        return justified
 
     async def _can_fallback_after_exit_timeout(
         self,
@@ -658,7 +664,7 @@ class DcaExchange(Exchange):
             reference_price=reference_price,
             is_market_order=str(order.get("ordertype") or "").lower() != "limit",
         )
-        return build_partial_sell_status(
+        partial = build_partial_sell_status(
             symbol=symbol,
             partial_amount=sold_amount,
             partial_avg_price=reference_price,
@@ -669,6 +675,10 @@ class DcaExchange(Exchange):
             unsellable_min_notional=unsellable_min_notional,
             unsellable_estimated_notional=unsellable_estimated_notional,
         )
+        order_id = finalized_status.get("orderid") or order.get("id")
+        if order_id:
+            partial["id"] = str(order_id)
+        return partial
 
     def _classify_sell_remainder(
         self,

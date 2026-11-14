@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -43,6 +44,26 @@ class PlacementAction(StrEnum):
     SELL = "sell"
     LIMIT_SELL = "limit_sell"
     CANCEL = "cancel"
+
+
+@dataclass(frozen=True)
+class QuarantineResolution:
+    """Bind one verified repair to the unchanged durable placement identity."""
+
+    operation_id: str
+    request_json: str
+    symbol: str
+    action: str
+    exchange_name: str
+    exchange_order_id: str | None
+    expected_exchange_order_id: str | None
+    client_order_id: str | None
+    deal_id: str | None
+    base_buy: bool
+    execution_scope: str
+    config_provider: Callable[[], dict[str, Any]]
+    reason_code: str
+    result: dict[str, Any]
 
 
 TERMINAL_PLACEMENT_STATES = frozenset(
@@ -737,14 +758,55 @@ class PlacementIntentService:
 async def mark_placement_persisted_in_transaction(
     operation_id: str | None,
     connection: Any,
+    *,
+    resolution: QuarantineResolution | None = None,
 ) -> None:
     """Atomically mark local business persistence in its owning transaction."""
-    await mark_placements_persisted_in_transaction([operation_id], connection)
+    await mark_placements_persisted_in_transaction(
+        [operation_id], connection, resolution=resolution
+    )
+
+
+async def validate_repair_target_in_transaction(
+    resolution: QuarantineResolution | None, connection: Any, *, symbol: str
+) -> None:
+    """Ensure a repair cannot mutate a different symbol or deal."""
+    if resolution is None:
+        return
+    if symbol != resolution.symbol:
+        raise ValueError("Repair target symbol does not match its placement.")
+    trade = (
+        await model.OpenTrades.filter(symbol=resolution.symbol)
+        .using_db(connection)
+        .first()
+    )
+    if resolution.base_buy:
+        if trade is not None:
+            raise ValueError("Cannot repair a base buy over an open deal.")
+        return
+    if not resolution.deal_id or trade is None or trade.deal_id != resolution.deal_id:
+        raise ValueError("Repair cannot verify the original open deal identity.")
+    if resolution.action == PlacementAction.BUY.value and trade.tp_limit_order_id:
+        raise ValueError("Repair cannot add to a deal with an active TP order.")
+    if resolution.action == PlacementAction.SELL.value and trade.tp_limit_order_id:
+        raise ValueError("Repair cannot close a deal with an active TP order.")
+    if resolution.action == PlacementAction.CANCEL.value:
+        if not resolution.exchange_order_id or (
+            trade.tp_limit_order_id != resolution.exchange_order_id
+        ):
+            raise ValueError("Repair cannot verify the canceled TP order identity.")
+    if resolution.action == PlacementAction.LIMIT_SELL.value:
+        if trade.tp_limit_order_id and (
+            trade.tp_limit_order_id != resolution.exchange_order_id
+        ):
+            raise ValueError("Repair would overwrite a different TP order.")
 
 
 async def mark_placements_persisted_in_transaction(
     operation_ids: list[str | None],
     connection: Any,
+    *,
+    resolution: QuarantineResolution | None = None,
 ) -> None:
     """Atomically mark every placement represented by one business write."""
     normalized_ids = list(
@@ -754,7 +816,47 @@ async def mark_placements_persisted_in_transaction(
             if str(operation_id or "").strip()
         )
     )
+    if resolution is not None and normalized_ids != [resolution.operation_id]:
+        raise ValueError("Repair resolution must match exactly one placement.")
     for operation_id in normalized_ids:
+        if resolution is not None:
+            if (
+                exchange_execution_scope(resolution.config_provider())
+                != resolution.execution_scope
+            ):
+                raise ValueError(
+                    "Exchange account scope changed during placement repair."
+                )
+            updated = (
+                await model.PlacementIntent.filter(
+                    operation_id=operation_id,
+                    state__in=[
+                        PlacementIntentState.QUARANTINED.value,
+                        PlacementIntentState.RESTORED_QUARANTINED.value,
+                    ],
+                    request_json=resolution.request_json,
+                    symbol=resolution.symbol,
+                    action=resolution.action,
+                    exchange_name=resolution.exchange_name,
+                    deal_id=resolution.deal_id,
+                    exchange_order_id=resolution.expected_exchange_order_id,
+                    client_order_id=resolution.client_order_id,
+                )
+                .using_db(connection)
+                .update(
+                    state=PlacementIntentState.COMPLETED.value,
+                    reason_code=resolution.reason_code,
+                    result_json=serialize_placement_payload(resolution.result),
+                    exchange_order_id=resolution.exchange_order_id,
+                    completed_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+            if updated != 1:
+                raise ValueError(
+                    "Quarantined placement changed before repair committed."
+                )
+            continue
         updated = (
             await model.PlacementIntent.filter(
                 operation_id=operation_id,

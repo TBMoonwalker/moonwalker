@@ -7,7 +7,6 @@ from typing import Any
 
 import model
 import pytest
-from service import statistic as statistic_module
 from service.housekeeper import Housekeeper
 from service.statistic import Statistic
 from tortoise import Tortoise
@@ -396,10 +395,9 @@ async def test_timeline_rebuild_racing_invalidation_is_not_cached(
 
         async def racing(now: datetime) -> Any:
             if not raced[0]:
-                # A snapshot write or retention prune on another instance
-                # advances the shared generation mid-rebuild.
+                # The housekeeper uses this callback after pruning history.
                 raced[0] = True
-                statistic_module._advance_timeline_generation()
+                statistic.invalidate_timeline_cache()
             return await counting(now)
 
         statistic._fetch_profit_overall_timeline = racing  # type: ignore[method-assign]

@@ -265,7 +265,9 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
     monkeypatch.setattr(
         app_module, "build_accumulation_runtime", lambda _provider: accumulation
     )
-    monkeypatch.setattr(app_module, "runtime_state", app_module.RuntimeState())
+    monkeypatch.setattr(
+        app_module, "runtime_state", app_module.RuntimeState(recovery_mode="placement")
+    )
     monkeypatch.setattr(app_module, "start_redis", lambda: object())
     monkeypatch.setattr(app_module, "redis_client", _FakeRedisClient())
     monkeypatch.setattr(
@@ -959,3 +961,83 @@ async def test_lifespan_stays_fatal_when_placement_only_mode_would_hide_accumula
 
     assert app_module.runtime_state.recovery_mode is None
     assert app_module.runtime_state.controller_services is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["placement", "accumulation"])
+async def test_recovery_middleware_allows_only_known_spa_deep_links(monkeypatch, mode):
+    """Recovery permits dashboard entry points without reopening APIs."""
+    monkeypatch.setattr(app_module.runtime_state, "recovery_mode", mode)
+    downstream = AsyncMock()
+    send = AsyncMock()
+    middleware = app_module.RecoveryOnlyMiddleware()(downstream)
+    routes = (
+        "/",
+        "/index.html",
+        "/control-center",
+        "/control-center/autopilot",
+        "/backtest",
+        "/monitoring",
+        "/stats",
+        "/statistics",
+        "/config",
+        "/settings",
+    )
+    for method in ("GET", "HEAD"):
+        for path in routes:
+            downstream.reset_mock()
+            send.reset_mock()
+            scope = {"type": "http", "method": method, "path": path}
+            receive = AsyncMock()
+            await middleware(scope, receive, send)
+            downstream.assert_awaited_once_with(scope, receive, send)
+            send.assert_not_awaited()
+
+    for method, path, status in (
+        ("GET", "/control-center/unknown", 503),
+        ("GET", "/trades/open", 503),
+        ("GET", "/config/freshness", 503),
+        ("POST", "/control-center", 409),
+        ("PUT", "/config/all", 409),
+    ):
+        downstream.reset_mock()
+        send.reset_mock()
+        await middleware(
+            {"type": "http", "method": method, "path": path}, AsyncMock(), send
+        )
+        downstream.assert_not_awaited()
+        assert send.await_args_list[0].args[0]["status"] == status
+        assert b'"recovery_only"' in send.await_args_list[1].args[0]["body"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["placement", "accumulation"])
+async def test_recovery_deep_links_serve_spa_over_http(tmp_path, monkeypatch, mode):
+    """Real SPA routes remain available while API requests stay restricted."""
+    from controller import frontend
+
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    (template_dir / "index.html").write_text("<html>recovery dashboard</html>")
+    monkeypatch.setattr(frontend, "TEMPLATE_DIR", template_dir)
+    monkeypatch.setattr(frontend, "STATIC_DIR", tmp_path / "static")
+    monkeypatch.setattr(app_module.runtime_state, "recovery_mode", mode)
+
+    @get(path="/trades/open")
+    async def blocked_api() -> dict[str, bool]:
+        return {"unexpected": True}
+
+    application = Litestar(
+        route_handlers=[blocked_api, *frontend.route_handlers],
+        middleware=[app_module.RecoveryOnlyMiddleware()],
+        openapi_config=None,
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://localhost"
+    ) as client:
+        for path in ("/control-center", "/control-center/autopilot", "/stats"):
+            response = await client.get(path)
+            assert response.status_code == 200
+            assert "recovery dashboard" in response.text
+        assert (await client.get("/trades/open")).status_code == 503
+        assert (await client.get("/unknown-dashboard-path")).status_code == 503

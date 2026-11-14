@@ -126,6 +126,14 @@ class RecoveryOnlyMiddleware(ASGIMiddleware):
         reads = {
             "/",
             "/index.html",
+            "/control-center",
+            "/control-center/autopilot",
+            "/backtest",
+            "/monitoring",
+            "/stats",
+            "/statistics",
+            "/config",
+            "/settings",
             "/config/all",
             "/orders/placement-recovery",
         }
@@ -198,6 +206,7 @@ async def _run_startup_step(
 
 async def startup() -> None:
     """Initialize core services before the lifespan starts runtime tasks."""
+    runtime_state.recovery_mode = None
     started_at = time.perf_counter()
     logging.info("Moonwalker startup sequence started.")
     staging_warning = await asyncio.to_thread(frontend_staging_warning)

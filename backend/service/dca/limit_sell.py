@@ -66,10 +66,15 @@ def build_partial_status_from_fallback(
     default_symbol: str,
 ) -> PartialSellStatus:
     """Convert a fallback status payload into a partial sell status."""
-    return build_partial_sell_status(
+    status = build_partial_sell_status(
         symbol=str(fallback_status.get("symbol", default_symbol)),
         partial_amount=float(fallback_status.get("partial_filled_amount") or 0.0),
         partial_avg_price=float(fallback_status.get("partial_avg_price") or 0.0),
         remaining_amount=float(fallback_status.get("remaining_amount") or 0.0),
         executions=list(fallback_status.get("executions") or []),
     )
+
+    order_id = fallback_status.get("exchange_order_id")
+    if order_id:
+        status["id"] = str(order_id)
+    return status

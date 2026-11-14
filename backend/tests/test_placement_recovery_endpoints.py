@@ -60,8 +60,11 @@ class _FakeRepairService:
         self,
         operation_id: str,
         config: dict[str, Any],
+        *,
+        config_provider: Any,
     ) -> dict[str, Any]:
         self.repair_calls.append((operation_id, config))
+        assert callable(config_provider)
         if self.repair_error is not None:
             raise self.repair_error
         assert self.repair_result is not None

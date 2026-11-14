@@ -405,6 +405,8 @@ All three endpoints answer with `{"operation_id", "status", "state",
 `404` (`not_found`), `409` (`conflict`, including intents owned by the
 accumulation route), or `400` (`invalid_request`, including a dismissal
 without a note). Dismissal requires a JSON body `{"note": "..."}`.
+Each listed intent includes `exchange_order_id` and `client_order_id` when
+available, so an operator can match the placement against exchange records.
 
 The sell, buy, and stop endpoints retain their legacy `result` field and also
 return a typed `mutation` object. Its `status` is one of `applied`,

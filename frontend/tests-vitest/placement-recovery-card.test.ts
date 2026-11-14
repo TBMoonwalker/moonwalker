@@ -27,6 +27,7 @@ function intent(overrides: Record<string, unknown> = {}) {
     reason_code: 'reconciliation_account_scope_unverified',
     error_message: 'Order account/environment does not match verified server configuration.',
     exchange_order_id: '7788',
+    client_order_id: 'mw-test-identity',
     has_lookup_identity: true,
     limit_price: 0.2,
     amount: 0.6,
@@ -132,6 +133,25 @@ describe('placement recovery card', () => {
     expect(wrapper.text()).toContain('portable_restore_quarantine')
     expect(wrapper.findAll('button').some((button) => button.text() === 'Repair')).toBe(true)
     expect(wrapper.findAll('button').some((button) => button.text() === 'Dismiss…')).toBe(true)
+  })
+
+  it('shows the received order identity and full numeric precision', async () => {
+    api.fetchPlacementRecoveryIntents.mockResolvedValue({
+      intents: [intent({ amount: 123456789, limit_price: 0.000123456789, exchange_order_id: 'order-123' })],
+    })
+    const wrapper = render()
+    await settle()
+    expect(wrapper.text()).toContain('123456789 BTC @ 0.000123456789 USDC')
+    expect(wrapper.text()).toContain('Exchange order ID: order-123')
+  })
+
+  it('shows the client order ID when exchange identity is unavailable', async () => {
+    api.fetchPlacementRecoveryIntents.mockResolvedValue({
+      intents: [intent({ exchange_order_id: null, client_order_id: 'client-only' })],
+    })
+    const wrapper = render()
+    await settle()
+    expect(wrapper.text()).toContain('Client order ID: client-only')
   })
 
   it('applies a completed repair result and hides the actions for that intent', async () => {
