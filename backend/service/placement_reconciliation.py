@@ -29,6 +29,7 @@ from service.placement_repair import (
     has_confirmed_sell_proceeds,
     has_reliable_cancel_evidence,
     has_terminal_partial_sell,
+    has_valid_stored_full_sell,
     has_valid_stored_partial_sell,
     placement_lookup_identity_matches,
     validated_buy_filled_amount,
@@ -191,6 +192,10 @@ class PlacementReconciler:
                 evidence = deserialize_placement_payload(intent.result_json)
                 if not (
                     has_complete_sell_fill(intent, evidence)
+                    or (
+                        action == PlacementAction.SELL.value
+                        and has_valid_stored_full_sell(intent, evidence)
+                    )
                     or (
                         action != PlacementAction.CANCEL.value
                         and (

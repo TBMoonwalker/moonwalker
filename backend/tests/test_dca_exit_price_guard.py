@@ -70,7 +70,7 @@ def _patch_engine(
         if stat_payloads is not None:
             stat_payloads.append(payload)
 
-    async def fake_get_bid_price_for_symbol(symbol: str) -> str:
+    async def fake_get_bid_price_for_symbol(symbol: str, _config: dict) -> str:
         if fetch_error is not None:
             raise fetch_error
         if fetch_calls is not None:
@@ -242,7 +242,7 @@ async def test_trailing_peak_survives_guard_abort_until_bid_recovers(
     cancel_calls = []
     bids = iter([first_bid, "109.5"])
 
-    async def fetch_bid(_symbol):
+    async def fetch_bid(_symbol, _config):
         bid = next(bids)
         if bid is None:
             raise RuntimeError("bid unavailable")

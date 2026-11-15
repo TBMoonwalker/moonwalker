@@ -817,7 +817,7 @@ class Dca:
         if str(config.get("sell_order_type", "market")).lower() != "market":
             return True, trigger_price
         try:
-            raw_price = await self.exchange.get_bid_price_for_symbol(symbol)
+            raw_price = await self.exchange.get_bid_price_for_symbol(symbol, config)
         except (ccxt.BaseError, RetryError, RuntimeError, TypeError, ValueError):
             logging.error(
                 "Aborting market sell for %s: exit price guard fetch failed "

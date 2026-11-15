@@ -32,6 +32,30 @@ async def _resolve(_symbol: str) -> str:
     return "BTC/USDC"
 
 
+@pytest.mark.asyncio
+async def test_bid_fetch_initializes_client_and_markets(monkeypatch) -> None:
+    exchange = Exchange()
+    client = _TickerExchange({"bid": 100.0})
+    events = []
+
+    async def ensure_client(config):
+        events.append(("client", config))
+        exchange.exchange = client
+
+    async def ensure_markets():
+        assert exchange.exchange is client
+        events.append(("markets",))
+
+    monkeypatch.setattr(exchange, "_ensure_exchange", ensure_client)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", ensure_markets)
+    monkeypatch.setattr(exchange, "_resolve_symbol_with_refresh", _resolve)
+    config = {"exchange": "binance"}
+
+    assert await exchange.get_bid_price_for_symbol("BTC/USDC", config) == "100.00000000"
+    assert events == [("client", config), ("markets",)]
+    assert client.fetched_symbols == ["BTC/USDC"]
+
+
 def _neutralize_retry(exchange: Exchange, monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail a missing price immediately instead of waiting through retries.
 

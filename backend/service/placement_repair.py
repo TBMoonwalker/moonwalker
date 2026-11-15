@@ -11,6 +11,7 @@ nothing here submits, cancels, or otherwise changes exchange state.
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 from collections.abc import Callable
 from typing import Any
@@ -781,6 +782,42 @@ def has_complete_sell_fill(intent: Any, order: dict[str, Any]) -> bool:
         and filled == requested
         and (order.get("amount") is None or amount == requested)
     )
+
+
+def has_valid_stored_full_sell(intent: Any, order: dict[str, Any]) -> bool:
+    """Verify normalized sell values against their durable execution report."""
+    try:
+        metadata = json.loads(order.get("metadata_json") or "")
+        report = metadata["execution_report"]
+        if not isinstance(report, dict):
+            return False
+        identity = str(intent.exchange_order_id or "").strip()
+        requested = validated_buy_filled_amount({"filled": intent.requested_amount})
+        filled = validated_buy_filled_amount({"filled": report.get("filled")})
+        amount = validated_buy_filled_amount({"filled": order.get("total_amount")})
+        cost = float(report["quote_cost"])
+        proceeds = float(order["ordersize"])
+        price = float(order["price"])
+        return bool(
+            identity
+            and report.get("order_id") == identity
+            and str(order.get("orderid") or "") == identity
+            and report.get("symbol") == order.get("symbol") == intent.symbol
+            and report.get("side") == order.get("side") == "sell"
+            and report.get("terminal") is True
+            and requested is not None
+            and requested > 0
+            and filled == requested == amount
+            and math.isfinite(cost)
+            and cost > 0
+            and math.isfinite(proceeds)
+            and math.isfinite(price)
+            and price > 0
+            and math.isclose(cost, proceeds, rel_tol=1e-8)
+            and math.isclose(cost, price * amount, rel_tol=1e-8)
+        )
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
 
 
 def has_valid_stored_partial_sell(intent: Any, order: dict[str, Any]) -> bool:

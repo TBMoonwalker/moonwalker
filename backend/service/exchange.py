@@ -673,12 +673,14 @@ class Exchange:
 
         return result
 
-    async def get_bid_price_for_symbol(self, pair: str) -> str:
+    async def get_bid_price_for_symbol(self, pair: str, config: dict[str, Any]) -> str:
         """Return the best executable bid price for a symbol.
 
         Exit price guards compare a pending market sell against this price
         because it is the price an immediate market sell would realize.
         """
+        await self._ensure_exchange(config)
+        await self._ensure_markets_loaded()
         return await self._get_price_for_symbol(pair, prefer_bid=True)
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))

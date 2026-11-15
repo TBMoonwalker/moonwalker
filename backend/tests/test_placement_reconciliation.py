@@ -12,6 +12,7 @@ from service.exchange_capabilities import (
     ExchangeOrderLookupResult,
     ExchangeOrderLookupStatus,
 )
+from service.exchange_order_lookup import build_parsed_order_status
 from service.placement_intents import (
     PlacementAction,
     PlacementIntentService,
@@ -351,6 +352,62 @@ async def test_startup_stored_filled_sell_requires_complete_evidence(
         summary = await PlacementReconciler(exchange, resume, service).reconcile(config)
         assert summary.ready is expected_ready
         assert len(calls) == int(expected_ready)
+        assert exchange.calls == []
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrupt", [None, "identity", "quantity", "proceeds"])
+async def test_startup_replays_normalized_sell_only_with_matching_report(
+    tmp_path, corrupt
+):
+    await _init_database(tmp_path)
+    try:
+        service = PlacementIntentService()
+        config = {"exchange": "binance", "market": "spot", "dry_run": False}
+        prepared = await _prepare_live_intent(service, "normalized-sell")
+        assert await service.claim_submission(prepared.operation_id)
+        evidence = build_parsed_order_status(
+            {
+                "id": "sell-1",
+                "symbol": "BTC/USDC",
+                "side": "sell",
+                "status": "closed",
+                "filled": 1,
+                "amount": 1,
+                "cost": 120,
+                "timestamp": 1,
+            },
+            None,
+        )
+        if corrupt == "identity":
+            evidence["orderid"] = "other"
+        elif corrupt == "quantity":
+            evidence["total_amount"] = 0.5
+        elif corrupt == "proceeds":
+            evidence["ordersize"] = 60
+        await service.transition(
+            prepared.operation_id,
+            PlacementIntentState.FILLED,
+            exchange_order_id="sell-1",
+            result=evidence,
+        )
+        calls = []
+
+        async def resume(intent, order, config):
+            calls.append(intent.operation_id)
+            await service.transition(
+                intent.operation_id, PlacementIntentState.PERSISTED
+            )
+            return True
+
+        exchange = _FakeExchange(
+            ExchangeOrderLookupResult(status=ExchangeOrderLookupStatus.UNAVAILABLE)
+        )
+        summary = await PlacementReconciler(exchange, resume, service).reconcile(config)
+        assert summary.ready is (corrupt is None)
+        assert len(calls) == int(corrupt is None)
         assert exchange.calls == []
     finally:
         await Tortoise.close_connections()

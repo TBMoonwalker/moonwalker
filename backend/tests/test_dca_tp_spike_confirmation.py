@@ -95,7 +95,7 @@ async def test_tp_spike_confirmation_sells_after_duration_and_tick_filter(
     async def fake_update_statistic_data(_payload) -> None:
         return None
 
-    async def fake_get_bid_price_for_symbol(_symbol: str) -> str:
+    async def fake_get_bid_price_for_symbol(_symbol: str, _config: dict) -> str:
         return "111.4"
 
     monkeypatch.setattr(
@@ -133,7 +133,7 @@ async def test_tp_spike_confirmation_restarts_after_fade_below_tp(monkeypatch) -
     async def fake_update_statistic_data(_payload) -> None:
         return None
 
-    async def fake_get_bid_price_for_symbol(_symbol: str) -> str:
+    async def fake_get_bid_price_for_symbol(_symbol: str, _config: dict) -> str:
         return "111.3"
 
     monkeypatch.setattr(
@@ -172,7 +172,7 @@ async def test_tp_spike_confirmation_does_not_delay_stop_loss(monkeypatch) -> No
     async def fake_update_statistic_data(_payload) -> None:
         return None
 
-    async def fake_get_bid_price_for_symbol(_symbol: str) -> str:
+    async def fake_get_bid_price_for_symbol(_symbol: str, _config: dict) -> str:
         return "94.0"
 
     monkeypatch.setattr(
