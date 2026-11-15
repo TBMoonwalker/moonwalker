@@ -2,10 +2,10 @@
 
 ``Statistic._fetch_profit_overall_timeline`` resolves each resample bucket
 with an indexed ``LIMIT 1`` seek for its last verified snapshot. These
-tests prove that its output is point-for-point identical to the original
-full-history ``resample(...).last()`` pipeline (kept below as a reference
-implementation) across adversarial boundary, duplicate, sparse and empty
-fixtures, for both aligned and sub-second-offset rebuild times.
+tests compare its output with the original full-history resample pipeline,
+using a stable merge so newer slices deterministically win label collisions.
+They cover adversarial boundary, duplicate, sparse and empty fixtures, for
+both aligned and sub-second-offset rebuild times.
 """
 
 import os
@@ -85,10 +85,10 @@ def reference_timeline(
 ) -> list[dict[str, Any]]:
     """The original full-history resample pipeline, kept as a test oracle.
 
-    Mirrors the pre-2026-11 implementation of
-    ``Statistic._build_profit_overall_timeline_sync``: resample each slice
-    of the verified horizon with pandas ``last()``, then concatenate in
-    ascending slice order with later slices winning on equal labels.
+    Resample each slice of the verified horizon with pandas ``last()``, then
+    concatenate in ascending slice order with later slices winning on equal
+    labels. The original pipeline's default unstable sort did not guarantee
+    that intended tie-break; this oracle uses a stable sort explicitly.
     """
     df = pd.DataFrame(
         rows,
@@ -124,7 +124,7 @@ def reference_timeline(
     if not frames:
         return []
 
-    merged = pd.concat(frames).sort_index()
+    merged = pd.concat(frames).sort_index(kind="stable")
     merged = merged[~merged.index.duplicated(keep="last")]
 
     return [

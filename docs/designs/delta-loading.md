@@ -120,8 +120,8 @@ ORDER BY timestamp DESC, id DESC LIMIT 1
   exact-timestamp dedup produced.
 - **Merge.** A bucket label that appears in two slices (for example a
   Sunday-midnight week label and a day label on the same instant) keeps the
-  newer slice's value, mirroring the original
-  `concat`/`sort_index`/`dedup(keep="last")` order.
+  newer slice's value, preserving the original concatenation order. The old
+  sort was unstable and did not guarantee that tie-break for equal labels.
 - **Boundaries.** Query bounds are formatted exactly like the stored
   strings — space-separated, ``+00:00`` suffix, fractional seconds
   omitted only when the microsecond is zero, the form Tortoise persists
