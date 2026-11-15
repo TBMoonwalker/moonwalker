@@ -1,7 +1,7 @@
 import os
 
 import pytest
-from service.orders import Orders
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from tortoise import Tortoise
 
 
@@ -45,7 +45,7 @@ async def test_receive_sell_order_archives_unsellable_remainder(
         open_date="1773580000000",
     )
 
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     notified_events: list[tuple[str, dict]] = []
 
     async def fake_create_spot_sell(_order, _config):
@@ -67,11 +67,11 @@ async def test_receive_sell_order_archives_unsellable_remainder(
     async def fake_notify(event_type: str, payload: dict, _config: dict) -> None:
         notified_events.append((event_type, payload))
 
-    monkeypatch.setattr(orders.exchange, "create_spot_sell", fake_create_spot_sell)
-    monkeypatch.setattr(orders.exchange, "close", fake_close)
-    monkeypatch.setattr(orders.monitoring, "notify_trade", fake_notify)
+    monkeypatch.setattr(lifecycle.exchange, "create_spot_sell", fake_create_spot_sell)
+    monkeypatch.setattr(lifecycle.exchange, "close", fake_close)
+    monkeypatch.setattr(lifecycle.monitoring, "notify_trade", fake_notify)
 
-    await orders.receive_sell_order(
+    await lifecycle.receive_sell_order(
         {
             "symbol": "LPT/USDC",
             "direction": "long",

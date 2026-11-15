@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -264,3 +265,63 @@ def evaluate_exit_action_decision(
     ):
         return DcaAction.ARM_TP_LIMIT, "tp_limit_prearm_ready", None
     return DcaAction.WAIT, "no_exit_trigger", None
+
+
+EXIT_GUARD_MIN_PRICE_REASONS = frozenset(
+    {"take_profit", "trailing_take_profit", "autopilot_timeout"}
+)
+EXIT_GUARD_MAX_PRICE_REASONS = frozenset({"stop_loss"})
+
+
+def evaluate_exit_price_guard(
+    *,
+    sell_reason: str,
+    fresh_price: float | None,
+    min_price: float | None = None,
+    max_price: float | None = None,
+) -> tuple[bool, str]:
+    """Return whether a freshly fetched price still justifies a pending exit.
+
+    The engine records the live-price bounds that keep a selected exit
+    justified. Execution call sites fetch one live price and compare it
+    against those bounds before a market order can be sent, so a stale
+    trigger price cannot execute a sell into a moved market.
+
+    Args:
+        sell_reason: Engine exit reason that selected the pending sell.
+        fresh_price: Live exchange price fetched at execution time.
+        min_price: The fresh price must be at or above this bound.
+        max_price: The fresh price must be at or below this bound.
+
+    Returns:
+        Tuple of (still_justified, reason_code). An unknown reason, missing
+        or inconsistent bounds, or a missing fresh price are reported as
+        unavailable so callers fail closed instead of selling on stale data.
+    """
+
+    def valid_price(value: float | None) -> bool:
+        return (
+            value is not None
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and value > 0
+        )
+
+    if not valid_price(fresh_price):
+        return False, "guard_unavailable"
+    assert fresh_price is not None
+    if sell_reason in EXIT_GUARD_MIN_PRICE_REASONS:
+        if not valid_price(min_price) or max_price is not None:
+            return False, "guard_unavailable"
+        assert min_price is not None
+        if fresh_price < min_price:
+            return False, "fresh_price_below_min"
+        return True, "exit_price_ok"
+    if sell_reason in EXIT_GUARD_MAX_PRICE_REASONS:
+        if not valid_price(max_price) or min_price is not None:
+            return False, "guard_unavailable"
+        assert max_price is not None
+        if fresh_price > max_price:
+            return False, "fresh_price_above_max"
+        return True, "exit_price_ok"
+    return False, "guard_unavailable"

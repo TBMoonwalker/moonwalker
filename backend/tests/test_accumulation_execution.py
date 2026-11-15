@@ -720,6 +720,7 @@ async def test_fee_incomplete_partial_fill_retains_commitment(env):
         {**client.response, "fees": [{"currency": "USDC", "cost": "0.1"}]},
         account_scope=accumulation_account_scope(config),
         exchange_name="binance",
+        config=config,
     )
     assert Decimal(
         (await model.OpenTrades.all().first()).accumulation_remaining_cost
@@ -1806,7 +1807,6 @@ async def test_restored_quarantine_has_lookup_only_http_repair_access(env, monke
     from controller import accumulation as controller
     from httpx import ASGITransport, AsyncClient
     from litestar import Litestar, get, post, put
-    from litestar.middleware import DefineMiddleware
 
     adapter, client, *_ = env
     buy_id = await prepared(env)
@@ -1846,7 +1846,7 @@ async def test_restored_quarantine_has_lookup_only_http_repair_access(env, monke
 
     config = SimpleNamespace(snapshot=lambda: env[3])
     db = SimpleNamespace(init=AsyncMock(), run_with_context=context)
-    orders = SimpleNamespace(
+    recovery_entry = SimpleNamespace(
         reconcile_placement_intents=AsyncMock(
             return_value=SimpleNamespace(ready=False, action_required=(buy_id,))
         )
@@ -1857,7 +1857,9 @@ async def test_restored_quarantine_has_lookup_only_http_repair_access(env, monke
     monkeypatch.setattr(
         app_module, "Config", SimpleNamespace(instance=AsyncMock(return_value=config))
     )
-    monkeypatch.setattr(app_module, "Orders", lambda: orders)
+    monkeypatch.setattr(
+        app_module, "PlacementRecoveryEntry", lambda lifecycle: recovery_entry
+    )
     monkeypatch.setattr(
         app_module, "build_accumulation_runtime", lambda provider: runtime
     )
@@ -1897,7 +1899,7 @@ async def test_restored_quarantine_has_lookup_only_http_repair_access(env, monke
             forbidden_config,
             forbidden_history,
         ],
-        middleware=[DefineMiddleware(app_module.AccumulationRepairOnlyMiddleware)],
+        middleware=[app_module.RecoveryOnlyMiddleware()],
         openapi_config=None,
     )
     async with (
@@ -1946,7 +1948,7 @@ async def test_restored_quarantine_has_lookup_only_http_repair_access(env, monke
         assert blocked_calls == []
         downstream = AsyncMock()
         sent = AsyncMock()
-        await app_module.AccumulationRepairOnlyMiddleware(downstream)(
+        await app_module.RecoveryOnlyMiddleware()(downstream)(
             {"type": "websocket", "path": "/trades/ws"}, AsyncMock(), sent
         )
         sent.assert_awaited_once_with({"type": "websocket.close", "code": 1013})
@@ -2258,7 +2260,12 @@ async def _entry_service(env, monkeypatch, *, signal="csv_signal"):
     return AccumulationEntryService(adapter, notified.append), notified
 
 
-ENTRY_CSV = "date;symbol;price;amount\n1970-01-02;BTC/USDC;60.000000000000000001;0.100000000000000001"
+# Fee-aware format since the four-column legacy format was removed (MSV
+# 6.3.0.0); the empty fee cells keep the unknown-fee declaration semantics.
+ENTRY_CSV = (
+    "date;symbol;price;amount;fee;fee_currency;amount_type\n"
+    "1970-01-02;BTC/USDC;60.000000000000000001;0.100000000000000001;;;net"
+)
 
 
 async def _staged_payload(
@@ -2492,7 +2499,7 @@ async def test_csv_restart_does_not_reimport_or_enable_staged_inventory(
 
 
 @pytest.mark.asyncio
-async def test_legacy_csv_cannot_adopt_a_stopped_accumulation_symbol(env):
+async def test_csv_import_cannot_adopt_a_stopped_accumulation_symbol(env):
     from service.csv_signal_import import CSVSignalImportService
 
     activation, _ = await setup_activation(env)
@@ -3006,8 +3013,6 @@ async def test_http_staged_commands_use_snapshot_revision_and_explicit_validatio
 
 @pytest.mark.asyncio
 async def test_runtime_strategy_switch_retains_purchase_guard_and_pause(env):
-    from service.shared_accumulation import legacy_accumulation_graph
-
     buy_id = await prepared(env)
     await AccumulationBuyExecutor(env[0]).execute(buy_id)
     activation = await model.AccumulationActivation.get()
@@ -3021,14 +3026,15 @@ async def test_runtime_strategy_switch_retains_purchase_guard_and_pause(env):
         activation.consumption_revision,
         activation.strategy_version_id,
     )
+    # The raw legacy-shape document is exactly what pre-floor databases
+    # pin; the runtime must keep loading it after the editor view removal.
     document = build_accumulation_strategy_document(
         AccumulationParameters(spacing_atr="2")
     )
-    graph = legacy_accumulation_graph(document, "custom_patient", "Patient dip", False)
     version = await model.StrategyVersion.create(
         strategy_slug="custom_patient",
         version=1,
-        ir_json=json.dumps(graph),
+        ir_json=json.dumps(document),
         validation_json=json.dumps({"status": "valid"}),
         explanation="shared fixture",
     )
@@ -4913,6 +4919,7 @@ async def test_accumulation_order_logs_report_real_effects_without_duplicate_fil
             json.loads(intent.result_json),
             account_scope=accumulation_account_scope(config),
             exchange_name="binance",
+            config=config,
         )
     before = len([item for item in caplog.records if item.name == "orders"])
     await executor.execute(operation)
@@ -4952,8 +4959,10 @@ async def test_csv_purchase_history_keeps_declared_base_and_native_buy_separate(
 
     service, _ = await _entry_service(env, monkeypatch)
     env[1].balance["free"]["BTC"] = "5"
-    header = "date;symbol;price;amount" + (";fee;fee_currency" if fee_columns else "")
-    row = "1970-01-02;BTC/USDC;60;1" + (";0.1;USDC" if fee_columns else "")
+    # The four-column format is gone (MSV 6.3.0.0); unknown fees are now
+    # declared with blank fee cells in the fee-aware format.
+    header = "date;symbol;price;amount;fee;fee_currency"
+    row = "1970-01-02;BTC/USDC;60;1" + (";0.1;USDC" if fee_columns else ";;")
     await service.csv(header + "\n" + row)
     holding = await model.OpenTrades.get()
     history = await declared_purchase_history(holding.deal_id)
@@ -5002,14 +5011,19 @@ async def test_csv_history_accepts_large_valid_declaration_without_status_payloa
 
     service, _ = await _entry_service(env, monkeypatch)
     env[1].balance["free"]["BTC"] = "5"
-    await service.csv("date;symbol;price;amount\n1970-01-02;BTC/USDC;60;1")
+    await service.csv(
+        "date;symbol;price;amount;fee;fee_currency;amount_type\n1970-01-02;BTC/USDC;60;1;;;net"
+    )
     holding = await model.OpenTrades.get()
     origins = await csv_inventory_origins(None, deal_id=holding.deal_id)
     key, origin = next(iter(origins.items()))
     declaration = AccumulationImport.from_dict(
         {
             "symbol": "BTC/USDC",
-            "entries": [(86400000 + index, "1", "1") for index in range(10000)],
+            "entries": [
+                (86400000 + index, "1", "1", None, None, "net", None)
+                for index in range(10000)
+            ],
             "quantity": "10000",
             "cost": "10000",
         }
@@ -5034,7 +5048,9 @@ async def test_csv_origin_query_requires_exact_adopted_deal_not_substring_receip
 
     service, _ = await _entry_service(env, monkeypatch)
     env[1].balance["free"]["BTC"] = "5"
-    await service.csv("date;symbol;price;amount\n1970-01-02;BTC/USDC;60;1")
+    await service.csv(
+        "date;symbol;price;amount;fee;fee_currency;amount_type\n1970-01-02;BTC/USDC;60;1;;;net"
+    )
     receipt = await model.AccumulationLifecycleOperation.get(action="activate")
     request = json.loads(receipt.request_json)
     other_deal = str(uuid4())

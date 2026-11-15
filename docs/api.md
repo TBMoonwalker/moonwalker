@@ -31,13 +31,14 @@ runtime and multiple concurrent dashboard clients.
 | `POST` | `/config/denylist/deny` | Append an open trade's base token to `pair_denylist` atomically, blocking future signal entries while existing open trades continue. |
 | `GET` | `/config/backup/export?include_trade_data=false` | Export config-only backup payload. |
 | `GET` | `/config/backup/export?include_trade_data=true` | Export full backup payload including trade data. |
+| `POST` | `/config/backup/classify` | Read-only preview that classifies a backup payload and lists what a restore would do to it, without touching any state. |
 | `POST` | `/config/backup/restore` | Restore config-only or full backup payloads. |
 
 Configuration editors must read `config_revision` from `GET /config/all` and
 send it as the decimal `X-Moonwalker-Config-Revision` header on either write
 endpoint. Successful writes return the new `config_revision`. A missing, invalid
-or stale revision returns HTTP 409; reload the form and reconcile changes before
-retrying. Older API clients must be updated to send the header. Configuration
+or stale revision returns HTTP 409; reload the form and re-apply the pending
+edits before retrying. Older API clients must be updated to send the header. Configuration
 restores and operational configuration changes also invalidate older revisions.
 
 Notes:
@@ -61,8 +62,9 @@ Notes:
   `autopilot_base_order_stretch_max_multiplier` for
   `autopilot_entry_stretch_max_multiplier`, and canonical `trade_mode` for
   the pre-4.9 bridge keys `trade_lifecycle_mode`, `dynamic_dca`, and
-  `sidestep_campaign_enabled`. Backup restore rejects removed keys other than
-  the three bridge keys, which it drops silently (see the restore section).
+  `sidestep_campaign_enabled`. Backup restore rejects removed keys, including
+  the three bridge keys, with a message that names the replacement (see the
+  restore section).
 - Generic config saves cannot switch `dry_run` from `true` to `false`; that
   transition is rejected unless it goes through `POST /config/live/activate`.
 - `POST /config/live/activate` expects `{"confirm": true}` and returns `409`
@@ -71,16 +73,19 @@ Notes:
    `{"confirm": true}`. Pausing blocks new exposure but does not block protective
   exits for existing positions.
 - `POST /config/denylist/deny` expects a JSON body like
-   `{"symbol": "FO0/USDT"}` and returns the resulting `pair_denylist` plus a
-   `denied` marker. The append de-duplicates the base token and writes under a
-  global config write lock so concurrent dashboard clients cannot clobber each
-  other's denylists. Reversal is done by editing `pair_denylist`.
+   `{"symbol": "FO0/USDT"}` and returns the resulting `pair_denylist`, a
+   `denied` marker, and the advanced `config_revision`. The append de-duplicates
+   the base token and writes under a global config write lock so concurrent
+  dashboard clients cannot clobber each other's denylists. Each append advances
+  the config revision, so a form save that predates it is rejected with 409
+  instead of overwriting the new entry. Reversal is done by editing
+  `pair_denylist` in a freshly loaded form.
 - `POST /config/backup/restore` expects a JSON body with `backup`,
   `confirm: true`, and optional `restore_trade_data`. Restore drains active
   exchange-order work, rejects new order work until replacement completes, and
   leaves the restored instance paused in dry-run mode. Backups containing
-  removed legacy config keys are rejected, except the three pre-4.9
-  trade-mode bridge keys, which are dropped silently.
+  removed legacy config keys are rejected with a message that names the
+  replacement key, including the three pre-4.9 trade-mode bridge keys.
 - Full backups use schema 3 and include accumulation ownership, exact balances,
   historical execution records and pinned strategy dependencies. Restore retains
   closing/stopped states and quarantines unfinished orders and commands. Strategy
@@ -90,6 +95,18 @@ Notes:
   its exact strategy dependency before any holding exists. Config-only restore
   does not replace trade or accumulation records and clears the initial pin so
   the operator must select a compatible local version.
+- `POST /config/backup/classify` expects the same `backup` and optional
+  `restore_trade_data` fields as restore (no `confirm`) and performs no reads
+  from or writes to the database. It returns a `classification` summary
+  (`schema_version`, `trade_mode_era`, `includes_accumulation`) plus a
+  `findings` list ordered blocking-first. Each finding carries `code`,
+  `severity` (`info` | `warning` | `blocking`), `message`, safe-field
+  `detail`, and an optional `next_action`. `blocking` findings mirror the
+  refusal the restore endpoint would raise; `warning` findings name the
+  silent drops the restore performs (row values whose columns no longer
+  exist, quarantined placement intents, config-only pin removal). The restore
+  endpoint remains the authoritative gate; the preview only makes its outcome
+  legible before confirmation.
 - Switching the signal plugin to `csv_signal` is rejected while open trades
   still exist.
 
@@ -370,6 +387,31 @@ All mutating order endpoints use `POST`.
 | `POST` | `/orders/buy/{symbol}/{ordersize}` | Trigger a manual buy / additional safety order. |
 | `POST` | `/orders/stop/{symbol}` | Close a DCA trade's ledger at its latest tracked market price, without selling coins. |
 | `POST` | `/orders/buy/manual` | Append a manual buy row without placing an exchange order. |
+| `GET` | `/orders/placement-recovery` | List quarantined placement intents that keep the startup gate closed. |
+| `POST` | `/orders/placement-recovery/{operation_id}/repair` | Look one quarantined intent up on the exchange and apply its confirmed terminal state. |
+| `POST` | `/orders/placement-recovery/{operation_id}/dismiss` | Record an explicit operator dismissal of one quarantined intent. |
+
+Placement recovery is the operator exit for quarantined classic-DCA placement
+intents. It stays reachable while the startup gate is closed (see
+[Startup Recovery](operations.md#startup-recovery)). Trading routes and
+configuration writes are blocked in that mode; `GET /config/all` remains
+available, and accumulation recovery mode permits its repair-specific reads
+and action. Repair is lookup-only: it never
+submits, cancels, or otherwise changes exchange state, and inconclusive
+evidence leaves the intent quarantined. Dismissal records a terminal
+disposition with the operator's note as the audit trail.
+
+The action endpoints return `{"operation_id", "status", "state", "message"}`
+(`status` is `completed`, `rejected`, `unchanged`, or `dismissed`). The list
+returns `{"intents": [...], "recovery_mode": ...}`. `recovery_mode` is
+`"placement"` or `"accumulation"` when the instance is serving that restricted
+recovery mode, and `null` during normal operation. A placement recovery mode
+requires a restart even when the intent list is empty. Errors use
+`404` (`not_found`), `409` (`conflict`, including intents owned by the
+accumulation route), or `400` (`invalid_request`, including a dismissal
+without a note). Dismissal requires a JSON body `{"note": "..."}`.
+Each listed intent includes `exchange_order_id` and `client_order_id` when
+available, so an operator can match the placement against exchange records.
 
 The sell, buy, and stop endpoints retain their legacy `result` field and also
 return a typed `mutation` object. Its `status` is one of `applied`,

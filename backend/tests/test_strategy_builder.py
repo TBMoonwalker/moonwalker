@@ -398,6 +398,45 @@ async def test_seed_leaves_legacy_custom_graphs_unmigrated() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("strategy_db")
+async def test_legacy_accumulation_preset_detail_is_raw_and_not_duplicable() -> None:
+    """The editor view was removed at MSV 6.3.0.0; the row stays readable.
+
+    The detail endpoint returns the legacy document as-is (no invented graph
+    or view metadata), and duplicating it is rejected with a clear error
+    instead of persisting a hybrid document.
+    """
+    from service.accumulation.strategy import build_accumulation_strategy_document
+
+    document = build_accumulation_strategy_document()
+    definition = await model.StrategyDefinition.create(
+        slug="accumulation_variant_dip_atr",
+        name="Accumulation dip",
+        description="",
+        is_builtin=True,
+        active_version=1,
+        draft_version=1,
+        validation_status="valid",
+    )
+    await model.StrategyVersion.create(
+        strategy_slug=definition.slug,
+        version=1,
+        ir_json=json.dumps(document),
+        validation_json=json.dumps({"status": "valid"}),
+        explanation="legacy preset",
+    )
+
+    detail = await get_strategy_detail(definition.slug)
+    assert detail is not None
+    assert detail["ir"] == document
+    assert "metadata" not in detail["ir"]
+
+    with pytest.raises(ValueError, match="legacy accumulation preset"):
+        await duplicate_strategy(definition.slug, "Dip copy")
+    assert await model.StrategyDefinition.filter(slug__startswith="dip").count() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("strategy_db")
 async def test_duplicate_then_promote_custom_strategy_uses_optimistic_lock() -> None:
     await seed_builtin_strategies()
     duplicate = await duplicate_strategy("ema_down", "Operator EMA copy")

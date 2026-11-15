@@ -28,6 +28,7 @@ export interface StrategyNode {
 }
 
 export interface StrategyIr {
+    capability?: string
     schema_version: number
     slug: string
     name: string

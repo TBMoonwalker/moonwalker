@@ -8,10 +8,10 @@ import socketio
 from service.autopilot import Autopilot
 from service.config import resolve_history_lookback_days
 from service.data import Data
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.external_volume import parse_external_volume
 from service.filter import Filter
 from service.indicators import Indicators
-from service.orders import Orders
 from service.signal_runtime import (
     build_common_runtime_settings,
     execute_signal_entry_batch,
@@ -45,7 +45,7 @@ class SignalPlugin:
     def __init__(self, watcher_queue: asyncio.Queue):
         self.utils = helper.Utils()
         self.autopilot = Autopilot()
-        self.orders = Orders()
+        self.order_lifecycle = DcaOrderLifecycle()
         self.statistic = Statistic()
         self.data = Data(persist_exchange=True)
         self.filter = Filter()
@@ -432,7 +432,7 @@ class SignalPlugin:
             self.statistic,
             self.autopilot,
             self.watcher_queue,
-            self.orders,
+            self.order_lifecycle,
             [symbol_full],
             signal_name=f"sym_signals:{event.get('signal_name_id')}",
             strategy_name=str(self.config.get("signal_strategy") or "") or None,
@@ -455,4 +455,4 @@ class SignalPlugin:
         """
         self.status = False
         await self.data.close()
-        await self.orders.close()
+        await self.order_lifecycle.close()

@@ -957,3 +957,17 @@ async def test_batched_history_paces_pages_and_dedupes(
 
     assert [int(c[0]) for c in candles] == [0, 60_000, 120_000]
     assert sleeps == [0.25]
+
+
+def test_backtest_route_rejects_malformed_json() -> None:
+    """POST /backtest/run must reject malformed JSON with a validation 400."""
+    app = Litestar(route_handlers=[backtest_controller.run_backtest])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/backtest/run",
+            content="{invalid",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert str(response.json()["detail"]).startswith("JSON is malformed")

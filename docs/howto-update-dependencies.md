@@ -6,7 +6,7 @@ and verify a focused dependency changeset.
 ## Prerequisites
 
 - A clean feature branch for the dependency update.
-- The repository's supported Python 3.14 and Node 24 runtimes; npm 11 and `uvx`
+- The repository's supported Python 3.14 and Node 26 runtimes; npm 11 and `uvx`
   for the documented lock compiler.
 - An existing development environment with audit tools. Runtime startup switches
   `.venv` between release slots, so it can remove access to development tools.
@@ -126,10 +126,10 @@ Run full CI from the scripts directory:
 
 ```bash
 cd scripts
-PATH="/opt/homebrew/opt/node@24/bin:$PATH" ./ci.sh
+PATH="/opt/homebrew/opt/node/bin:$PATH" ./ci.sh
 ```
 
-The PATH prefix supplies Homebrew Node 24 on macOS; on other systems it leaves
+The PATH prefix supplies Homebrew Node 26 on macOS; on other systems it leaves
 their normal PATH available. Run migration-specific regressions and browser checks
 when behavior changes justify them. Full CI includes vulnerability and registry
 verification, but does not replace the pre-install web and artifact review.

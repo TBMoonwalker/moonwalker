@@ -618,6 +618,137 @@ test('two clients preserve a draft when a stale configuration save conflicts', a
   await second.close()
 })
 
+test('a deny append rejects the stale form save until the operator reloads', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'two-client desktop workflow')
+  const second = await page.context().newPage()
+  let revision = 0
+  let updatedAt = '2026-07-25T12:00:00Z'
+  let storedDenylist = ''
+  const saveAttempts: { expected: string | null; pair_denylist: unknown }[] = []
+  for (const client of [page, second]) {
+    await client.route('**/config/all', route => route.fulfill({
+      // A one-shot websocket payload would be invalidated by the 20s stale
+      // timeout mid-test; the long timeout keeps the feed 'fresh'.
+      json: { ...completeDryRunConfig, ws_stale_timeout_ms: 3600000, config_revision: revision, config_updated_at: updatedAt, pair_denylist: storedDenylist },
+    }))
+    await client.route('**/config/freshness', route => route.fulfill({
+      json: { updated_at: updatedAt, config_revision: revision },
+    }))
+    await client.route('**/config/denylist/deny', async route => {
+      const body = route.request().postDataJSON() as { symbol: string }
+      const token = body.symbol.split('/')[0].toUpperCase()
+      storedDenylist = token
+      revision += 1
+      updatedAt = '2026-07-25T12:05:00Z'
+      await route.fulfill({
+        json: {
+          message: `Symbol '${body.symbol}' denied from new signal entries.`,
+          status: 'denied',
+          denied: body.symbol,
+          pair_denylist: [token],
+          config_revision: revision,
+        },
+      })
+    })
+    await client.route('**/config/multiple', async route => {
+      const expected = route.request().headers()['x-moonwalker-config-revision'] ?? null
+      const body = route.request().postDataJSON() as Record<string, { value: unknown }>
+      saveAttempts.push({ expected, pair_denylist: body.pair_denylist })
+      if (expected !== String(revision)) {
+        return route.fulfill({
+          status: 409,
+          json: { message: 'Configuration changed since this form was loaded. Reload before saving.' },
+        })
+      }
+      storedDenylist = typeof body.pair_denylist?.value === 'string' ? body.pair_denylist.value : ''
+      revision += 1
+      updatedAt = '2026-07-25T12:06:00Z'
+      return route.fulfill({ json: { message: 'Config updated', config_revision: revision } })
+    })
+  }
+  await second.routeWebSocket('**/trades/open*', socket => {
+    socket.send(JSON.stringify([openTrade]))
+  })
+  await second.routeWebSocket('**/trades/closed', socket => socket.send('[]'))
+  await second.routeWebSocket('**/trades/unsellable', socket => socket.send('[]'))
+  await second.routeWebSocket('**/trades/waiting', socket => socket.send('[]'))
+  await second.routeWebSocket('**/statistic/profit*', socket => {
+    socket.send(JSON.stringify({
+      profit_overall: 42.5,
+      upnl: 1,
+      funds_locked: 100,
+      funds_available: 500,
+      funds_tradable: 400,
+      autopilot: 'none',
+    }))
+  })
+  await second.route('**/analytics/overview**', route => route.fulfill({ json: analyticsOverview }))
+
+  // Client 1: the filter section loads generation 0 and starts a stale draft.
+  await page.goto('/control-center?mode=advanced&target=filter')
+  const denylistField = page.getByPlaceholder('Textarea')
+  await expect(denylistField).toBeVisible()
+  await denylistField.fill('STALE')
+
+  // Client 2: denies the open trade from the dashboard. The tab must be
+  // frontmost: background tabs drop websocket payloads while hidden.
+  await second.bringToFront()
+  await second.goto('/')
+  await expect(
+    second.getByRole('row', { name: 'Toggle trade details for BTC/USDC' }),
+  ).toBeVisible()
+  await expect(
+    second.getByText('Live trade data is refreshing.'),
+  ).toBeHidden()
+  await second.getByRole('button', { name: 'More trade actions' }).click()
+  // NDropdown renders its options as plain divs without ARIA roles.
+  await second.getByText('Deny from new entries', { exact: true }).click()
+  const denyDialog = second.getByRole('dialog')
+  await expect(denyDialog).toContainText('Deny symbol from new entries')
+  await denyDialog.getByRole('button', { name: 'Deny', exact: true }).click()
+  await expect(
+    second.getByText('BTC/USDC denied from new signal entries'),
+  ).toBeVisible()
+
+  // Client 1: the cross-tab invalidation arrived while hidden; returning
+  // to the tab and refocusing runs the freshness check that surfaces the
+  // stale-draft warning.
+  await page.bringToFront()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(
+    page.getByText('Another tab or client saved a newer configuration.'),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Reload latest config' })).toBeVisible()
+
+  // The stale full-form save is rejected; the draft and the newer deny
+  // both survive.
+  await page.getByRole('button', { name: 'Save changes', exact: true }).first().click()
+  await expect(page.getByRole('alert').getByText(/Configuration changed since this form was loaded/)).toBeVisible()
+  await expect(denylistField).toHaveValue('STALE')
+  expect(saveAttempts).toEqual([
+    { expected: '0', pair_denylist: { value: 'STALE/USDC', type: 'str' } },
+  ])
+  expect(revision).toBe(1)
+
+  // Reloading discards the draft, re-baselines the form on the new
+  // generation, and the intentional removal is accepted there.
+  page.once('dialog', dialog => void dialog.accept())
+  await page.getByRole('button', { name: 'Reload latest config' }).click()
+  await expect(
+    page.getByRole('alert').getByText('Loaded the latest configuration from another client.'),
+  ).toBeVisible()
+  await expect(denylistField).toHaveValue('BTC')
+  await denylistField.fill('')
+  await page.getByRole('button', { name: 'Save changes', exact: true }).first().click()
+  await expect(page.getByRole('alert').getByText('Configuration saved.')).toBeVisible()
+  expect(saveAttempts).toEqual([
+    { expected: '0', pair_denylist: { value: 'STALE/USDC', type: 'str' } },
+    { expected: '1', pair_denylist: { value: null, type: 'str' } },
+  ])
+  expect(storedDenylist).toBe('')
+  await second.close()
+})
+
 test('surfaces every typed sell failure from the mounted Open Trades UI', async ({
   page,
 }, testInfo) => {

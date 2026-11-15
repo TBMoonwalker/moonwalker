@@ -5,6 +5,10 @@ Moonwalker monitoring sends Telegram messages for executed trades:
 - `trade.buy`
 - `trade.sell`
 
+Both classic DCA trade finalization and accumulation fill settlement emit these
+events through the shared `MonitoringService`; there is one send path for both
+trading modes.
+
 The implementation uses [Telethon](https://docs.telethon.dev/en/stable/).
 
 ## Configuration Keys
@@ -68,13 +72,15 @@ The dashboard reports the installation's minimum-supported-version (MSV)
 baseline:
 
 - Endpoint: `GET /monitoring/msv`
-- The response carries the minimum supported version (`4.9.0.0`), the floor
-  config migration marker, the baseline status, and an operator-facing summary.
+- The response carries the minimum supported version, the floor config
+  migration marker, the baseline status, and an operator-facing summary.
 - Baseline status is one of:
-  - `supported` — the install has run at or after the floor release.
-  - `unsupported` — schema history exists but the floor config migration row
-    is missing; the response includes upgrade guidance.
-  - `fresh` — no migration history; treated as supported.
+  - `supported` — the floor config migration marker is present. Earlier
+    software could write that marker automatically, so it does not prove that
+    legacy data was converted.
+  - `unsupported` — the floor marker is missing and schema history or legacy
+    trade-mode keys are present; the response includes upgrade guidance.
+  - `fresh` — no schema history or legacy trade-mode keys; treated as supported.
   - `unknown` — the startup preflight has not established a baseline yet.
 - The startup preflight is report-only: it never blocks startup and never
   mutates a ledger. See [operations](operations.md#minimum-supported-version)

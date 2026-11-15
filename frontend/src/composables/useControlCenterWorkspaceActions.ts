@@ -84,6 +84,11 @@ export function useControlCenterWorkspaceActions(
             })
             options.announce(result.message)
         }
+        if (result.status === 'blocked') {
+            // The backup review panel already shows the findings; announce
+            // the outcome through the same live region as other results.
+            options.announce(result.message)
+        }
     }
 
     async function handleMonitoringTestAction(): Promise<void> {

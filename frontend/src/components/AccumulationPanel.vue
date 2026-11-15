@@ -130,7 +130,7 @@ watch([() => props.intent?.id, fresh], async () => {
       <p v-if="!detail.observations_initialized && detail.entry?.source === 'csv'">CSV amounts declare already-owned coins. {{ detail.entry.declaration?.historical_fees_known ? 'Historical fees are declared in the CSV.' : 'Historical fees remain unknown.' }} Correction does not enable buys.</p>
       <div v-if="actions.includes('correct_import')" class="accumulation-input">
         <label :for="fieldId('accumulation-csv')">Corrected CSV for {{ detail.symbol }}</label>
-        <n-input v-model:value="csv" type="textarea" :disabled="disabled" :input-props="{ id: fieldId('accumulation-csv') }" placeholder="date;symbol;price;amount" :autosize="{ minRows: 3, maxRows: 8 }" />
+        <n-input v-model:value="csv" type="textarea" :disabled="disabled" :input-props="{ id: fieldId('accumulation-csv') }" placeholder="date;symbol;price;amount;fee;fee_currency;amount_type" :autosize="{ minRows: 3, maxRows: 8 }" />
       </div>
       <details v-if="actions.includes('declare_ownership')" class="accumulation-input">
         <summary>Explicit ownership declaration</summary>

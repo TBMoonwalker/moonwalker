@@ -18,6 +18,7 @@ from service.order_close_context import (
 )
 from service.order_payloads import trade_datetime_from_ms
 from service.order_persistence import persist_unsellable_remainder
+from service.placement_intents import QuarantineResolution
 from service.trades import Trades
 
 
@@ -39,6 +40,7 @@ async def handle_unsellable_remainder(
     dependencies: DcaDustContext,
     placement_operation_id: str | None = None,
     placement_operation_ids: list[str] | None = None,
+    resolution: QuarantineResolution | None = None,
 ) -> None:
     """Record the partial close and archive dust before notifying observers."""
     snapshot = build_unsellable_status_snapshot(order_status)
@@ -75,6 +77,7 @@ async def handle_unsellable_remainder(
         closed_trade_payload=context.closed_trade_payload,
         placement_operation_id=placement_operation_id,
         placement_operation_ids=placement_operation_ids,
+        **({"resolution": resolution} if resolution else {}),
     )
     await dependencies.trades.invalidate_trade_caches()
 

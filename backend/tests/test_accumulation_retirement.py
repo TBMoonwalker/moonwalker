@@ -177,8 +177,10 @@ async def test_retired_csv_declaration_can_be_explicitly_validated_corrected_or_
     activation, target, adapter, payload = await setup_intent(
         "activate", initialized=False, state="validating"
     )
+    # Six columns with blank fees: the legacy four-column format was removed
+    # at MSV 6.3.0.0; blank fees keep the unknown-fee semantics.
     declaration = parse_accumulation_csv(
-        "1970-01-02;BTC/USDC;60;0.1", "USDC", now_ms=100000000
+        "1970-01-02;BTC/USDC;60;0.1;;", "USDC", now_ms=100000000
     )[0]
     target.request_json = json.dumps(
         {"source": "csv", "imported_inventory": declaration.to_dict()}
@@ -195,7 +197,7 @@ async def test_retired_csv_declaration_can_be_explicitly_validated_corrected_or_
         "previous_operation_id": target.operation_id,
     }
     if action == "correct_import":
-        command["csv_content"] = "1970-01-02;BTC/USDC;65;0.2"
+        command["csv_content"] = "1970-01-02;BTC/USDC;65;0.2;;"
     result = await stage_entry_command(
         StagedEntryCommand.from_dict(command, now_ms=100000000),
         account_scope="same-account",

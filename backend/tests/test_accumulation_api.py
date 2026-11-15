@@ -10,7 +10,6 @@ import pytest_asyncio
 from controller import accumulation as controller
 from httpx import ASGITransport, AsyncClient
 from litestar import Litestar
-from litestar.middleware import DefineMiddleware
 from service.accumulation.activity import ActivityChanged
 from service.accumulation.commands import AccumulationCommandResult
 from service.accumulation.imports import parse_accumulation_csv
@@ -24,7 +23,7 @@ from tortoise import Tortoise
 async def api_client():
     app = Litestar(
         route_handlers=controller.route_handlers,
-        middleware=[DefineMiddleware(TrustedLanHttpMiddleware)],
+        middleware=[TrustedLanHttpMiddleware()],
         openapi_config=None,
     )
     async with AsyncClient(
@@ -312,7 +311,7 @@ async def test_entry_detail_redacts_raw_requests_and_bounds_history(
         symbol="BTC/USDC", account_scope="private-scope", revision=25
     )
     imported = parse_accumulation_csv(
-        "1970-01-02;BTC/USDC;60.000000000000000001;0.1", "USDC", now_ms=100000000
+        "1970-01-02;BTC/USDC;60.000000000000000001;0.1;;", "USDC", now_ms=100000000
     )[0]
     for index in range(25):
         await model.AccumulationLifecycleOperation.create(

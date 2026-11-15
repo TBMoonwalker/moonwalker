@@ -2,42 +2,807 @@
 
 ## Next up
 
-### Periodic price re-evaluation for open trades
+### Upgrade to Litestar 3.x and pandas 4.x after release
 
-**Status:** Identified 2026-11-03 during the YB/USDC stuck-trade investigation (incident: the trade sat above its TP for ~23h without an exit evaluation, and the later manual sell filled ~15% below the stale displayed price).
+**Status:** Recorded 2026-11-07 as the follow-up of the completed "Prepare
+request bodies and OHLCV helpers for future major upgrades" entry. Neither
+major is released yet (litestar 2.25.0 and pandas 3.1.1 are current as of
+2026-11-07); start each only once upstream releases it. Second prep step
+landed 2026-11-07: all three custom ASGI middlewares
+(`AccumulationRepairOnlyMiddleware` in `app.py`,
+`TrustedLanHttpMiddleware`/`WebSocketOriginMiddleware` in
+`service/origin_policy.py`) now subclass `litestar.middleware.ASGIMiddleware`
+(the protocol litestar 3.0 requires: `handle(scope, receive, send, next_app)`,
+no `app` in the constructor, registered as direct instances) and no
+`DefineMiddleware` usage remains; verified working on 2.25.0 with full CI
+green.
 
-**What:** Classic DCA TP/SL checks run only when a `ticker_price` event arrives from the per-symbol trade stream; the watcher DCA queue worker is the single production caller of `DcaEngine.process_ticker_data`, and no background task refreshes prices via REST. A dead or silent stream (watchdog per-symbol budget is `max(1800s, candle timeframe)`, 1006 disconnects, quiet pairs, or demo/testnet books) leaves open trades unmanaged — including stops below the last known price — while the UI keeps showing stale prices. Add a periodic open-trade price refresh (e.g. batch REST ticker every N seconds for symbols with open trades) that pushes changed prices through the existing event pipeline, and document the API-load budget and the interaction with `watcher_ohlcv` mode.
+**What:** Upgrade the two held major-version Python dependencies in dedicated,
+separately tested changesets:
+- `litestar` 2.25.0 -> 3.x (implicit reserved-kwarg body inference is removed
+  in 3.0; the prep wave already marks all ten body parameters with
+  `JSONBody[...]` and the middlewares already use the 3.0 `ASGIMiddleware`
+  protocol, so the bump is expected to be validation of both plus the
+  `litestar[testing]` extra for the TestClient and full-suite re-verification
+  under the new major).
+- `pandas` 3.1.1 -> 4.x (PDEP-8 `inplace` keyword removal; the prep wave
+  already replaces all seven `inplace=True` calls in
+  `backend/service/data_ohlcv.py` with explicit reassignments).
 
-**Effort:** L
+**Why:** The prep wave is complete, but the upgrades themselves must not ride
+along: each is a major with its own compatibility review, and neither appears
+in `pip list --outdated` until it releases, so this entry is their backlog
+home.
+
+**Constraints:** No bundling into a lock refresh — each upgrade ships as its
+own changeset with the full backend CI green. The no-warning guard tests
+(app-creation Litestar guard, `Pandas4Warning` helper guard) must stay green;
+if pandas 4.0 renames or splits `Pandas4Warning`, update the guard's category
+match within the same changeset.
+
+**Depends on:** Upstream releases of litestar 3.x and pandas 4.x. The prep
+entry's plan of record carries the re-verification checklist.
 
 **Priority:** P2
 
-### Prepare request bodies and OHLCV helpers for future major upgrades
+### Upgrade frontend major dependency: TypeScript 7
 
-**Status:** Litestar 2.25.0 and pandas 3.1.0 expose deprecation warnings during
-CI on 2026-10-23. All 1,855 backend tests pass on these versions.
+**Status:** jsdom 31.0.0 and @types/node 26.6.6 shipped 2026-11-08 (see
+"Upgrade the vitest jsdom environment to 31" and "Move the frontend Node
+types to the Node 26 line" in Completed). TypeScript 7 remains blocked on
+tooling (2026-11-08 compatibility review, owner decision 2026-11-08:
+hold). Original 2026-11-06 hold list of the 2026-11-06 frontend dependency
+hygiene pass (patch/minor wave applied the same day: axios 1.21.0, vite
+8.3.6, vitest 5.1.0, vue 3.5.45, vue-tsc 3.3.14, @playwright/test 1.65.0,
+knip 6.44.1).
 
-Before upgrading Litestar to 3.x, replace unmarked `data` request parameters
-with explicit body markers such as `JSONBody[...]` in backtest, configuration
-and strategy controllers. Preserve strict payload validation and verify the
-existing malformed/unknown-field regression tests.
+**What:** Bump the remaining held major-version frontend dev dependency in
+a dedicated, separately tested changeset:
+- `typescript` 6.0.3 -> 7.0.2 (blocked until Volar supports 7: TypeScript
+  7.0 ships no programmatic compiler API — the `typescript` package's main
+  entry exports only `version`/`versionMajorMinor` — and `vue-tsc` 3.3.14
+  crashes on it with `ERR_PACKAGE_PATH_NOT_EXPORTED: './lib/tsc'`, while
+  its `@vue/language-core` 3.3.14 peer-declares `typescript: <7` and no
+  newer vue-tsc release exists; the 2026-11-06 TypeScript 7.1 beta
+  restores the compiler API and makes Vue first-class, so revisit together
+  with a TS 7.1 stable release plus a vue-tsc that accepts it).
 
-Before upgrading pandas to 4.x, replace deprecated `inplace=True` DataFrame
-operations in `backend/service/data_ohlcv.py` with explicit assignments. Verify
-candle timestamps, resampling, duplicate removal and history serialization.
-Do not suppress the warnings or bundle either major upgrade into a lock refresh.
+**Why:** Recorded rather than bundled: major bumps need the compatibility
+review the dependency hygiene policy requires, and the axios 1.21.0 wave
+proved the test suite is the right gate for behavior changes (its
+header-default recognition change passed clean). The jsdom 31 wave
+confirmed it: the full frontend CI passed unmodified, and the typescript
+7.0.2 blocker was found by the review rather than by a broken build.
+
+**Priority:** P3
+
+### Upgrade Python major dependency: multidict 7
+
+**Status:** Recorded 2026-11-07 as the hold list of the 2026-11-07 Python dependency hygiene pass (patch/minor wave applied the same day: ccxt 4.5.92, cachetools 7.3.0, pandas 3.1.1, python-socketio 5.18.1, websockets 17.4, ta-lib 0.8.3, anyio 4.16.0, click 8.5.1, mypy 2.4.1, pip 26.3, pytest 9.2.0, pytest-asyncio 1.4.1.post1, ruff 0.17.4, filelock 4.2.9). The companion `python-dateutil` 4.0.0 changeset shipped 2026-11-08 (see "Upgrade python-dateutil to 4.0.0" in Completed); this entry is the remaining, still-blocked half.
+
+**What:** Bump the held major-version Python dependency in a dedicated, separately tested changeset:
+- `multidict` 6.9.1 -> 7.2.1 (transitive of aiohttp, hard-pinned to `6.9.1` by ccxt, so the resolver cannot move it until a future ccxt release relaxes the pin; revisit together with the next ccxt release that permits multidict 7).
+
+**Why:** Recorded rather than bundled: major bumps need the compatibility review the dependency hygiene policy requires, and multidict is additionally unresolvable today because of ccxt's hard pin. As of 2026-11-08 the latest ccxt (4.5.92) still pins `multidict==6.9.1`, while aiohttp 3.14.5 already permits `multidict<8.0,>=4.5`, so ccxt's exact pin is the sole blocker and must not be forced through an override. Note: idna stays at 3.18 for the same reason (ccxt 4.5.90-4.5.92 all hard-pin `idna==3.18`), so the idna 3.20 "outdated" row is expected to persist.
+
+**Priority:** P3
+
+## Completed
+
+### Harden the frontend-staging guard against partial and masked-out failures
+
+**Status:** Completed 2026-11-10 as one CI-green changeset. Plan of record:
+`~/.gstack/projects/TBMoonwalker-moonwalker/frontend-staging-guard-hardening-plan-20261110.md`
+(decisions D1–D7). Closes all three findings deferred from the 2026-09-13
+pre-landing review of `feature/code-optimizations` (v4.7.0.0).
+
+**What shipped:**
+- New stdlib-only `backend/staging_check.py` extracts the `/assets/...`
+  references the staged `index.html` makes (module, modulepreload, stylesheet)
+  and reports which are absent from `backend/static`. Only bootstrap-critical
+  asset references are verified — the entrypoint is trusted build output, and
+  the pre-existing cosmetic `/favicon.ico` staging gap is deliberately out of
+  scope.
+- **F1:** `frontend_staging_warning()` is now two-tier — a missing entrypoint
+  keeps its original message, and a partial stage (entrypoint present,
+  referenced bundle missing) returns a "Frontend partially staged" message
+  naming every missing asset. `./run.sh start` refuses to start on a partial
+  stage via the new stdlib-only `scripts/verify_frontend_staging.py` (run
+  under the bootstrap python, since the venv does not exist yet at that
+  point).
+- **F2:** the SPA fallback no longer raises `HTTPException` (whose detail
+  Litestar masks into a generic 500 body); it returns a controlled 500 JSON
+  response (`{"detail": ...}`), so the actionable "run ./run.sh start" message
+  reaches the browser for both failure modes, and a partial stage no longer
+  answers 200 with a blank page.
+- **F3:** `app.py` startup probes the stage through `asyncio.to_thread`,
+  matching the request path; the probe helper stays synchronous.
+- Tests: new `backend/tests/test_staging_check.py` (extraction, dedup,
+  non-asset reference exclusion, root-escape edge) and the extended
+  `backend/tests/test_frontend_staging_warning.py` (partial-stage guard,
+  HTTP-level `TestClient` assertions on the controlled 500 body for both
+  failure modes, fully-staged 200 contract). `test_app_startup.py` passes
+  unmodified.
+
+**Verification:** full CI green (`cd scripts && ./ci.sh`); a manual `run.sh`
+partial-stage simulation aborts with the actionable message. No API, config,
+or schema change.
+
+**Priority:** P1
+
+### Verify remaining rendered accessibility observations
+
+**Status:** Completed 2026-11-10. Plan of record:
+`~/.gstack/projects/TBMoonwalker-moonwalker/rendered-accessibility-verification-plan-20261110.md`;
+findings report:
+`~/.gstack/projects/TBMoonwalker-moonwalker/rendered-accessibility-verification-report-20261110.md`.
+
+**What was verified (rendered, data-fed, throwaway loopback `vite preview`):**
+- **Contrast:** offline WCAG 2.1 matrix over the exact `tokens.ts` values —
+  all 30 text-on-surface pairs pass AA in both schemes (weakest: light
+  muted-on-raised 4.93:1, dark muted-on-card-muted 5.94:1). Rendered half:
+  forced light/dark themes resolve the token map onto real elements
+  (asserted computed colors match the tokens).
+- **Pagination touch targets:** 44×44px item boxes rendered at 375px phone
+  width on both the closed-trades feed and the statistics symbol table;
+  28px Naive default at desktop (1280px) and tablet (768px) — the documented
+  phone-width scope, now a recorded exception instead of an assumption.
+- **Compact table typography:** body renders 16px (was silently 14px — see
+  defect below); statistics ledger renders the documented 12px/14px scale;
+  trade ledger renders the intentional 11px header / 13px cell compact
+  exception (introduced in `05e7cbb`, documented in DESIGN.md, pinned by the
+  guard); control-center mission summary renders 16px.
+
+**Defect found and fixed (same changeset):** the rendered `<body>` was
+14px / v-sans / line-height 1.6, not the documented 16px — Naive UI's
+internal `GlobalStyle` writes the merged common theme onto
+`document.body.style` inline (and its lazy-injected `body` reset sits after
+the app CSS). Fix: `fontSize: "16px"` / `lineHeight: "1.5"` added to both
+schemes' `naive.common` token map (`frontend/src/theme/tokens.ts`) plus an
+`html body` specificity guard in `frontend/src/assets/base.css`.
+
+**Durable guard:** `frontend/tests-e2e/rendered-accessibility.spec.ts`
+(6 tests across chromium / mobile-chromium / tablet-chromium) pins the body
+scale, token resolution, 44px phone touch targets, and the compact/regular
+ledger split; fails CI on drift. Full e2e suite green after the fix
+(98 passed, 0 failed).
+
+### Repair the two consistently failing Playwright specs
+
+**Status:** Completed 2026-11-10; `MOONWALKER_RUN_E2E=1` is green again
+(49/49 across all five Playwright projects for the affected files).
+
+**Root causes:** three distinct test-side races, none in the app code:
+- `background-recovery.spec.ts:5`: the `**/orders/**` counter also counted
+  the dashboard's new `GET /orders/placement-recovery` load from
+  `PlacementRecoveryCard` (added after the spec was written). The mock now
+  answers that path with an empty intent list and only counts
+  order-mutation POSTs, which is what the no-order assertions guard.
+- `accumulation.spec.ts:11`: the `expect(requests).toHaveLength(1)` after
+  the confirm click was a synchronous check that always raced the route
+  handler's push (earlier revisions had `await expect(...)` lines after the
+  click that acted as the barrier and were removed with UI changes). The
+  spec now waits for the panel's "Recorded outcome: applied" notice, which
+  only renders after the mocked POST was handled.
+- `accumulation.spec.ts:240` (previously the "flaky" one, ~20% on
+  tablet/mobile chromium): `page.reload()` could outrun the route handler
+  for the intentionally aborted first POST, so the mock counted the retry
+  as the first POST and aborted it as well. The spec now polls
+  `requests.length === 1` before reloading.
+
+**Note:** the firefox/webkit projects need `npx playwright install`
+(browser builds are not on every machine); once installed, all projects
+pass.
+
+### Review stale full-form saves against concurrent denylist appends
+
+**Status:** Completed 2026-11-10 as commit `40eb50a` on `fixed-todos`;
+the server-side revision check was already implemented and is now verified
+end to end by regression tests and a two-client E2E spec.
+
+**What:** Verified that a deny append advances the config revision in the same
+transaction as its write, so a full config save based on an older generation is
+rejected with HTTP 409 and the newer deny survives; the dashboard shows a
+stale-configuration banner and the operator reloads and re-applies edits.
+Intentional token removal remains possible through a freshly loaded form
+(whole-list replacement). The deny endpoint returns the advanced
+`config_revision`, and the open-trades deny action broadcasts a `deny`
+invalidation so other tabs notice immediately. Regression coverage:
+`backend/tests/test_denylist_append.py`
+(`test_stale_full_form_save_cannot_lose_concurrent_deny`),
+`backend/tests/test_denylist_deny_endpoint.py`, and the two-client E2E flow
+in `frontend/tests-e2e/control-center.spec.ts`
+("a deny append rejects the stale form save until the operator reloads").
+
+**Decision:** Keep the revision check as the only conflict mechanism; no
+per-field merge on 409. Re-applying unsaved draft edits onto a fresh snapshot
+after a rejected save is deferred as a UX enhancement.
+
+**Design:** [Denylist semantics](docs/designs/denylist-symbol-from-open-trade.md).
+
+### Evaluate server caching and incremental timeline loading
+
+**Status:** Completed 2026-11-09 as three CI-green code commits on
+`fixed-todos` (perf, tests, harness) plus the docs commit. Follow-up
+P1.5 (2026-11-10) then made the cold rebuild itself cheap, so a reload no
+longer stalls — see below.
+
+**Plan of record:**
+`~/.gstack/projects/TBMoonwalker-moonwalker/timeline-server-cache-plan-20261109.md`
+
+**What was measured:** the new `scripts/benchmark_timeline.py` harness
+seeds throwaway databases at the real 60-second snapshot density
+(16 d / ~23k rows like the current live instance, 1 y / ~525k rows steady
+state, 2 y / ~1.05M rows) plus a `sqlite3` backup copy of the live
+database, and runs sequential, 4/8/16-concurrent, and 16-client burst
+scenarios. At the steady-state 1-year size the uncached endpoint resampled
+on every fetch: p50 4.4 s per fetch, and 16 concurrent clients queued 16
+resamples with p50 32.1 s / p95 64.8 s per fetch. The response payload was
+already bounded (206 points, ~17.7 KB JSON), so the cost was server CPU and
+SQLite I/O, not bandwidth.
+
+**What shipped:**
+- `Statistic.get_profit_overall_timeline` caches the resampled timeline for
+  one snapshot interval (60 s): single-flight rebuild (lock plus
+  double-checked expiry), immutable cached value returned as a per-fetch
+  list copy, and query errors left uncached.
+- Every `UpnlHistory` write invalidates the cache process-wide: snapshot
+  writes happen in `_get_profit_base` from the controller graph, the DCA
+  engine, and the signal plugins (each its own `Statistic` instance), so a
+  shared data generation advances on any write and the next fetch reflects
+  the new bucket immediately.
+- Retention cleanup fires a new `Housekeeper.on_upnl_history_changed`
+  hook, wired by `app.py` to `statistic.invalidate_timeline_cache`.
+- The endpoint's path, arguments, response shape, and the per-request 409
+  unverified-valuation guard are unchanged; disconnect recovery is
+  unchanged (stateless endpoint; the client store already treats a failed
+  refresh as unverified and retries).
+- After the cache: the same scenarios resample once per window (16→1 and
+  32→1 resamples; warm fetches are sub-millisecond cache hits) and the
+  worst concurrent wait drops from 64.8 s to 5.9 s. Full before/after
+  reports: `~/.gstack/projects/TBMoonwalker-moonwalker/benchmark-reports/`
+  (`2026-11-09T191632Z-timeline-server.json` before,
+  `2026-11-09T192949Z-timeline-server.json` after).
+
+**Follow-up (2026-11-10, P1.5 — cheap rebuild):** the live check above
+proved the cache, but a single client's reload (or standby→active switch)
+still hit the expired TTL and triggered one full rebuild: ~6.4 s on the
+370k-row deployment database, and — because the worker-thread pandas
+resample held the GIL — every concurrent boot request stalled behind it
+(`/config/all` and `/accumulation/strategies` measured ~6.2 s on the
+reloaded page). The rebuild now computes the adaptive bucket grid in
+Python and resolves every bucket with one indexed `LIMIT 1` seek on the
+snapshot timestamp (`Statistic._fetch_profit_overall_timeline`), reading
+~220 rows instead of the full year of snapshots; it runs natively on the
+event loop, so no worker-thread GIL starvation remains. The output is
+point-for-point identical to the old full-resample path: the pandas
+pipeline is kept in `backend/tests/test_statistic_timeline_prewin.py` as a
+differential oracle (adversarial bucket/slice boundaries, sub-second and
+identical-timestamp duplicates, week-straddle label collisions, unverified
+rows, sparse and empty fixtures, a full year of 60-second snapshots with
+every bucket of every slice filled, aligned and sub-second-offset rebuild
+times). Cold rebuild at 1-year scale (525k rows): 2.9–5.9 s → ≤38 ms; at
+2-year scale (1.05M rows): ≤70 ms; concurrent-16 worst wait: 5.9 s →
+38 ms (`2026-11-10T141830Z-timeline-server.json`). The benchmark harness
+had been seeding `T`-separated timestamp strings (`isoformat`) that never
+occur in production storage, which the lexicographic bucket bounds read
+wrongly; the seed now writes the production format (space separator,
+`+00:00`), and the corrected runs restore the expected point counts
+(144/205/205 vs the pre-change 144/206/205). Endpoint contract, 409
+guard, and cache semantics are unchanged.
+
+**Decision:** the proposed P2 incremental delta cursor is not justified
+(measurement evidence in the design doc) — no cursor state and no second
+response shape; the no-argument endpoint remains the sole contract. P3
+(configurable snapshot cadence) remains a proposal in
+[Dashboard history loading](docs/designs/delta-loading.md). Open trades
+remain full-state and closed history remains paginated.
+
+**Verification:** 10 new unit tests in
+`backend/tests/test_statistic_timeline_cache.py` (cache hit, per-fetch
+copy, same- and cross-instance write invalidation, TTL expiry,
+single-flight, retention hook with and without deletions, uncached query
+errors, cached/fresh-build equality) plus the endpoint and startup suites;
+full CI green (`cd scripts && ./ci.sh`) — 2,292 backend tests, 374
+frontend tests, type checks, lint, and coverage floors. No API, config, or
+schema change. Live-instance check 2026-11-10 against the running
+deployment (http://192.168.6.5:8160): cold fetch ~6 s vs cached fetches
+~0.1–0.5 s; 16 concurrent fetches all served in <0.7 s (one rebuild, not
+16); with the bot flat, a profit-WebSocket connection (dashboard-client
+behavior) drove the 60-second snapshot gate, and the new snapshot value
+appeared on the next timeline fetch inside the previous build's TTL window
+— write invalidation observed, bucket updates confirmed. Retention-cleanup
+invalidation is unit-verified (24-hour housekeeper cycle, not triggerable
+on demand). The check also surfaced an environmental observation, not a
+defect in this change: the deployment host's clock appears ~1 hour behind
+this machine (stored row timestamps lag wall-clock fetch times by
+~48–63 minutes), so its NTP configuration is worth a look.
+
+**Live re-check (2026-11-10, P1.5 on the deployment):** after the host
+picked up the code (deployment restart at 15:01:21 by deployment clock,
+`database` log), the reload scenario was verified in the in-app browser:
+- `/statistic/profit-overall/timeline` cold rebuild: 77–233 ms
+  (previously ~6.4 s); the cache is effectively always cold because a
+  snapshot write advances the generation every ~60 s.
+- Full dashboard reload boot: every request under 105 ms, no stall
+  (previously `/config/all`, `/accumulation/strategies` and the timeline
+  all waited ~6.7 s).
+- Response shape unchanged: 191 points, first bucket
+  `2026-02-22 00:00:00` (Sunday-labeled Monday-anchored week), last
+  bucket the current Monday.
+- One 6.7 s boot stall on the very first load right after the restart
+  was a post-restart watcher history backfill (ticker insert batch)
+  holding the single SQLite connection — transient, data-dependent, and
+  not the timeline rebuild.
+- The standby→active switch was toggled for real (instance runs in
+  dry-run; paused for ~45 s): the resume POST took 77 ms, every request
+  in the switch window stayed under 120 ms, no request over 300 ms, and
+  the timeline was not even re-fetched (client TTL still fresh). The
+  worst-case combo — switch plus an expired timeline cache — was
+  measured separately: 441 ms cold rebuild, still sub-second.
+
+**Priority:** P3
+
+### Remove the service/orders.py compatibility facade
+
+**Status:** Completed 2026-11-09 as three CI-green code commits on
+`fixed-todos` (`dc9f29c`, `3b2b02f`, `950f680`) plus the docs commit.
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/orders-facade-removal-plan-20261109.md`
+(decisions R1–R9; the scoped correctness check is recorded in the plan).
+
+**What shipped:**
+- `service/orders.py` is deleted. Its mode-neutral seams moved to the
+  service-root module `service/placement_recovery_entry.py`
+  (`PlacementRecoveryEntry`): it receives a caller-constructed
+  `DcaOrderLifecycle` (app.py owns both constructions), owns the
+  `accumulation_recovery` seam and the startup entry point
+  `reconcile_placement_intents` (which reads the seam at
+  reconciler-construction time, D6 unchanged), builds the operator
+  placement-repair service over the shared recovery resume handler, and
+  wires the bybit reconciler factory. The DCA recovery-handler callback
+  wiring is owned once, on `DcaOrderLifecycle.build_recovery_handler()`.
+- Consumers re-pointed: `app.py` replaces `runtime_state.placement_orders`
+  with `order_lifecycle` + `placement_recovery`; the runtime service graph
+  carries `order_lifecycle` and receives the entry
+  (`build_runtime_services(placement_recovery=…)`);
+  `TradingControlsService` takes `order_lifecycle`; the orders controller
+  proxy resolves the `"order_lifecycle"` graph field; the three signal
+  plugins self-wire `DcaOrderLifecycle()`.
+- 20 test files re-pointed at `DcaOrderLifecycle` (the facade's `.dca` hop
+  collapses onto the lifecycle); the facade-specific split guards are
+  retired and the D6 late-seam guard re-homes in
+  `backend/tests/test_placement_recovery_entry.py` with the
+  entry-composition, finally-close, and repair-wiring units.
+- Coverage ratchet: the `service/orders.py` row is replaced by the
+  `placement_recovery_entry.py` row at the measured 100.0 branch
+  coverage; the split rows are flat or better (lifecycle 73.0 → 73.1,
+  finalization 69.6, routing 90.0, runtime_services 75.0 → 78.6).
+
+**Verification:** full CI green (`cd scripts && ./ci.sh`) — 2,282 backend
+tests, type checks, lint, and coverage floors. No API, config, schema, or
+log-message changes.
+
+**Priority:** P3
+
+### Make logger handler de-duplication robust to uncanonical log directories
+
+**Status:** Completed 2026-11-09 as one changeset on `fixed-todos`, CI-green.
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/logger-handler-dedup-robustness-plan-20261109.md`
+
+**What shipped:**
+- `backend/helper/logger.py`: `_resolve_log_path` now canonicalizes in both
+  branches (`Path(...).resolve()`), and a new `_canonical_log_file()`
+  (`os.path.realpath`) canonicalizes both sides of the handler de-duplication,
+  so one (logger name, log file) pair never receives two file handlers when
+  `LOG_DIR` sits behind a symlink (macOS `/var` -> `/private/var`), carries
+  `..`/`.` components, or is an un-normalized absolute path. `__create_logger`
+  checks de-dup *before* creating the handler, so a redundant call no longer
+  opens and discards a file handle, and Windows no longer creates a discarded
+  second handler.
+- `backend/tests/conftest.py`: the temp log dir is anchored with
+  `_LOG_TMP.resolve()`, so the redirected `LOG_DIR` is canonical and
+  `_close_temp_log_handlers`' `startswith` match on each handler's
+  `baseFilename` works.
+- Tests: `backend/tests/test_logger_factory.py` gains five focused cases
+  (repeated-call de-dup, symlinked `LOG_DIR` de-dup + canonical
+  `baseFilename`, absolute-symlink path, distinct-files-not-collapsed,
+  not-yet-existing file);
+  `backend/tests/test_orders_split_guards.py::test_new_modules_route_logs_to_shared_dca_logger`
+  now asserts the shared `dca` logger owns exactly one `dca.log` handler.
+
+**Priority:** P3
+
+### Add an operator repair path for quarantined classic-DCA placement intents
+
+**Status:** Completed 2026-11-09. Recorded 2026-11-07 during investigation of
+a reported startup lockout after upgrading to the latest main: a
+`limit_sell` intent quarantined at startup (most likely
+`reconciliation_account_scope_unverified` on a legacy unscoped intent) had
+no operator exit, so the instance crashed on every boot with "Exchange
+placement reconciliation requires operator action before trading can start".
+The 2026-11-07 same-day fix removed the most common trigger (legacy unscoped
+`persisted` intents now complete before the gate); this entry closed the
+remaining operator-exit gap.
+
+**What shipped:**
+- Repair-only startup mode now covers quarantined classic-DCA intents: when
+  reconciliation reports `ready is False` with action-required work and no
+  other nonterminal work (`PlacementReconciliationSummary.remaining == 0`),
+  `app.py` serves recovery instead of exiting. The accumulation branch keeps
+  precedence; any remaining nonterminal work still fails closed.
+  `AccumulationRepairOnlyMiddleware` became `RecoveryOnlyMiddleware` and
+  gates both modes (recovery reads + `POST /accumulation/repair` +
+  `POST /orders/placement-recovery/{id}/repair|dismiss` allowed; websockets
+  closed with 1013; everything else 503/409 with `code: recovery_only`).
+- `PlacementRepairService` (`backend/service/placement_repair.py`) with
+  `list_quarantined()` / `repair()` / `dismiss()`. Repair is lookup-only:
+  it resolves the order under the currently configured credentials and
+  applies terminal evidence through the same `resume` handler startup
+  reconciliation uses (`operator_repair_fill_resumed`,
+  `operator_repair_open_limit_reattached`, `operator_repair_cancel_confirmed`,
+  `operator_repair_identity_not_found`,
+  `operator_repair_exchange_order_{state}`); inconclusive evidence leaves the
+  intent quarantined. Dismissal records a terminal `rejected` disposition
+  with reason code `operator_dismissed` and the operator's required note as
+  the audit trail.
+- The quarantine exit lives in
+  `PlacementIntentService.release_quarantine()` (only
+  `quarantined`/`restored_quarantined` → `completed`/`rejected`), so the
+  sticky-quarantine invariant of `_VALID_TRANSITIONS` stays structural:
+  normal transitions still cannot move a quarantined row.
+- Endpoints in `backend/controller/orders.py`: `GET
+  /orders/placement-recovery`, `POST
+  /orders/placement-recovery/{operation_id}/repair`, `POST
+  /orders/placement-recovery/{operation_id}/dismiss` (body
+  `{"note": ...}` required). Errors: 404 `not_found`, 409 `conflict`
+  (not-quarantined or accumulation-routed intents), 400 `invalid_request`.
+- Dashboard: `PlacementRecoveryCard.vue` on the Trading overview lists every
+  quarantined intent with Repair and note-gated Dismiss actions and a
+  restart hint; it is fetch-based, so it works while websockets are closed in
+  recovery mode. API client `api/placementRecovery.ts`, composable
+  `usePlacementRecovery.ts`, types in `types/placementRecovery.ts`, vitest
+  spec `tests-vitest/placement-recovery-card.test.ts` (9 tests) with the
+  component and composable ratcheted into the coverage guard.
+- Tests: `backend/tests/test_placement_repair.py` (24 tests: listing,
+  release transitions, every repair evidence mapping, dismissal audit,
+  conflict/not-found/invalid errors, accumulation routing, lookup-only
+  guard), plus startup-mode and middleware-gate tests in
+  `backend/tests/test_app_startup.py`.
+- The backup-classification `quarantined_intents` finding's `next_action`
+  copy now points at the Placement recovery card (its 2026-11-08 follow-up
+  is resolved).
+- Docs: `docs/operations.md` "Startup Recovery", `docs/api.md` Orders
+  section, and the 6.4.0.0 changelog entry.
+
+**Immediate-unlock procedure for a locked instance (before the fixed
+build):** query `placement_intents` for the `operation_id` from the startup
+error, inspect that order's state on the exchange under the configured
+credentials, and only then either upgrade and use the card, or move the row
+to a verified terminal state (`state`, `reason_code`, `error_message`,
+`completed_at`) — see `docs/operations.md` "Startup Recovery".
 
 **Priority:** P2
 
-### Denylist from open trade: symmetric re-enable + DESIGN.md badge pass
+### Split service/orders.py into the dca/ package and a mode-neutral facade
 
-**Status:** Ready to design when picked up
+**Status:** Completed 2026-11-09 as one changeset on `fixed-todos`
+(commit `2583f1d`), CI-green per commit.
 
-**What:** v4.9.0.0 ships a one-way "Deny from new entries" row action with
-config-only undo by editing `pair_denylist`. A symmetric "Re-enable" /
-"Remove from denylist" row action, plus a DESIGN.md pass on the "Denylisted" tag
-color/label, would close the loop. Keep it an entry-only change; do not touch
-open trades.
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/orders-split-dca-facade-plan-20261108.md`
+(decisions D1–D6; outside-voice corrections OV1–OV4 applied).
+
+**What shipped:**
+- `service/orders.py` (2,591 lines) split into three modules plus a thin
+  facade. `service/dca/finalization.py` owns the classic-DCA trade
+  finalization (persist + stats + the two `MonitoringService.notify_trade`
+  seams at former `orders.py:506`/`:644`, partial-sell handling, TP-limit
+  payload building, entry-size retry, unsellable-state reset,
+  order-status predicates) as 18 free functions behind an explicit
+  `DcaFinalizationContext` built from the current collaborators at call
+  time. `service/dca/order_lifecycle.py` owns the DCA execution lifecycle
+  (`DcaOrderLifecycle`: buy/sell receipt, TP-limit arm/cancel/reconcile,
+  stop signals, manual operations, durable placement-intent transitions).
+  `service/order_routing.py` owns the mode-neutral lifecycle routing
+  (`OrderLifecycleRouting`: the legacy-mutation ownership guard at former
+  `orders.py:107-145`, snapshot-currency validation, trade-state loading,
+  operator mutation results).
+- `service/orders.py` is now a ~250-line compatibility facade (`Orders`)
+  that composes the mode-neutral routing and the DCA lifecycle over the
+  shared `build_default_order_collaborators()` wiring list. The
+  mode-neutral startup reconciliation entry point (former `orders.py:320`)
+  stays on the facade with the `accumulation_recovery` seam (former
+  `orders.py:101`, wired in `app.py:213-215`), read at
+  reconciler-construction time. `dca/engine.py` uses `DcaOrderLifecycle`
+  directly; importing the new modules pulls in neither the root facade nor
+  the engine, and the lazy `from service.dca import Dca` export is
+  preserved.
+- New structural guards (`backend/tests/test_orders_split_guards.py`):
+  import invariant, facade shape, delegation parity, self-wiring parity,
+  logger routing (both new `dca/` modules log through the shared `dca`
+  logger to `logs/dca.log`), and the D6 post-construction
+  accumulation-seam test; plus finalization leaf units
+  (`backend/tests/test_dca_finalization.py`). 20 test files migrated (121
+  reassignment/patch sites).
+- Coverage ratchet: the `service/orders.py` row is replaced by rows for
+  the three new modules plus the facade at the measured post-move branch
+  coverage (finalization 69.6, lifecycle 73.0, routing 90.0, facade
+  100.0), each at or above its pre-move per-group baseline (66.1 / 73.0 /
+  90.0, measured at `ae272a8`).
+
+**Verification:** full CI green (`cd scripts && ./ci.sh`) — 2,249 backend
+tests, type checks, lint, and coverage floors.
+
+**Priority:** P3
+
+### Upgrade python-dateutil to 4.0.0
+
+**Status:** Completed 2026-11-08 as the companion changeset of the "Upgrade Python major dependencies: multidict 7, python-dateutil 4" hold list; the still-blocked multidict 7 half remains in Next up.
+
+**What shipped:**
+- `python-dateutil` 3.0.0 -> 4.0.0 (exact pin in `backend/requirements.in`, regenerated in both hash locks via `scripts/compile_requirements.sh`). dateutil 4.0.0 (released 2026-11-01) requires Python >=3.11 and drops the `six` dependency; it retains the 3.0.0 `tz.tzfile` rewrite, so the "post-2038 TZif support" rationale behind the pin still holds. The only behavior change is a stricter `parser.isoparse` (numeric fields must carry exactly the expected number of digits), which Moonwalker does not exercise — its sole dateutil usage is `dateutil.tz.gettz` in `backend/service/data_ohlcv.py`. The now-orphaned `six` 1.17.0 transitive (pulled in only by dateutil) is dropped from both locks; `tzdata` is retained because dateutil 4.0.0 still depends on it. No other package version changed in either lock.
+- Compatibility review: pandas 3.1.1 (released 2026-11-04, after dateutil 4.0.0) declares `python-dateutil>=2.9.0` with no upper bound and ships an explicit dateutil>=3.0 compatibility fix for timezones such as `dateutil/US/Pacific` (GH 71459); litestar 2.25.0 and tortoise-orm 1.1.9 declare no dateutil dependency and do not import it at runtime.
+- Security/provenance: the 4.0.0 wheel and sdist carry full PyPI provenance and a verified Sigstore publish attestation from the genuine `github.com/dateutil/dateutil` release workflow; OSV and the PyPI security panel report no vulnerabilities for the version.
+- Verification: full CI green — 2,230 backend tests plus the full frontend suite, type checks, lint, builds, coverage gates, both vulnerability audits and registry-signature checks. The two timezone regression tests in `backend/tests/test_data_ohlcv_serialization.py` (repeated autumn hour, summer after 2038) pass unchanged under 4.0.0.
+
+**Priority:** P3
+
+### Extend the campaign residue gate to the full 021 drop set
+
+**Status:** Dropped 2026-11-08 by owner decision: the 4.8.x compatibility
+scenario that motivated this hardening is no longer needed, so the gate's
+current scope (campaign references only) is final. No code change; the
+startup and restore gates keep their current assertions and their
+documented "keep in sync" behavior.
+
+**What it covered:** The campaign-residue gate (startup
+`_assert_no_open_trade_campaign_residue` in `backend/service/database.py`
+and restore `_assert_no_open_trade_campaign_residue` in
+`backend/service/backup_restore.py`) aborts startup / refuses a restore
+only when an `opentrades` row carries `campaign_id IS NOT NULL`. The seven
+sidestep-era waiting-state columns that migration 021 drops
+(`waiting_reference_price`, `reserved_reentry_quote`,
+`waiting_reference_amount`, `waiting_reference_quote`,
+`virtual_waiting_profit`, `virtual_waiting_profit_percent`,
+`last_transition_at`) are zeroed silently on rows that still carry them;
+the entry proposed extending the assertion to the full drop set (campaign
+reference OR non-zero waiting state) with a fixture test.
+
+**Why dropped:** In 4.8.x the waiting-state writers were campaign-context
+paths that propagated `campaign_id`, so the flagged scenario needed an
+already-inconsistent row on an unsupported 4.8.x direct upgrade. With the
+4.8.x compatibility no longer needed, the residual risk does not justify
+extending the gate.
+
+**Origin:** Pre-landing review of
+`chore/hygiene-logging-serialization-sync-2026-10` (2026-11-02), finding
+F5; recorded rather than extended that wave (operator decision
+2026-11-02).
+
+**Priority:** P3
+
+### Move the frontend Node types to the Node 26 line
+
+**Status:** Completed 2026-11-08 as the second changeset of the Node 24 ->
+26 migration, after the runtime floor itself moved in the companion
+"chore(runtime): move the Node floor from 24 to 26 LTS" changeset.
+
+**What shipped:**
+- `@types/node` 24.19.2 -> 26.6.6 (exact devDep pin) and
+  `@tsconfig/node24` 24.0.5 -> `@tsconfig/node26` 26.0.1;
+  `frontend/tsconfig.node.json` now extends the Node 26 base (target/lib
+  es2024 -> es2025, `ESNext.Temporal` added). The Node type package now
+  describes the runtime the project actually runs.
+- Security review: @types/node 26.6.6 is the genuine DefinitelyTyped
+  scoped package (the 2024 typosquat campaign targeted the lookalike
+  `types-node` name, not this one), has no known vulnerabilities or
+  tampering findings, and passes the npm audit and registry-signature
+  gates; @tsconfig/node26 is a config-only package whose full content was
+  read from the registry tarball.
+- Verification: full frontend CI green under Node 26.13.0 — vue-tsc
+  type-check (the gate exercising the new typings), 364 vitest + 384
+  legacy tests, coverage ratchet, build, vulnerability audit, signatures.
+
+**Priority:** P3
+
+### Upgrade the vitest jsdom environment to 31
+
+**Status:** Completed 2026-11-08 as the first changeset of the "Upgrade
+frontend major dependencies: jsdom 31, TypeScript 7, @types/node 26" hold
+list.
+
+**What shipped:**
+- `jsdom` 30.1.3 -> 31.0.0 in `frontend/package.json` (exact devDep pin).
+  jsdom 31 replaces its CSS engine with an integrated implementation (the
+  @asamuzakjp and @csstools packages drop out of the tree), switches the
+  optional canvas backend from `canvas` to `@napi-rs/canvas` (we install
+  no canvas backend, so this is inert), and pauses HTML/XML parsing at
+  blocking scripts.
+- The `whatwg-url` override moved 17.2.0 -> 17.3.0, the attested version
+  inside jsdom 31's declared `^17.3.0` range (17.3.0 only syncs the
+  `search` setter with `searchParams` after stripping ASCII tabs and
+  newlines, per whatwg/url@fde3f74); the npm audit signatures gate stays
+  green.
+- Verification: full frontend CI green — 364 vitest tests across 50 files
+  and 384 legacy CJS tests unmodified, coverage ratchet, vue-tsc
+  type-check, vite build, `npm audit --audit-level=high` (0
+  vulnerabilities) and `npm audit signatures`.
+
+**Priority:** P3
+
+### Show an unavailable notice on replay charts without indicator series
+
+**Status:** Completed 2026-11-08 per
+`~/.gstack/projects/TBMoonwalker-moonwalker/replay-indicator-notice-plan-20261108.md`.
+Origin: declined option of D19 (2026-11-01 legacy-migration-removal design
+review), tracked per D22/R10.
+
+**What shipped:**
+- `frontend/src/components/TradeReplayChart.vue` now tracks an
+  `indicatorUnavailable` state and shows a muted
+  "Indicator overlays unavailable for this trade." caption (12px,
+  `role="status"`) inside the chart stack whenever the indicator fetch yields
+  no series — legacy rows without a deal id, empty indicator results, or
+  failed indicator requests. The state is settled before the chart first
+  paints (no flash), and the empty-candle message remains the only state when
+  no candles exist.
+- The previously swallowed indicator-fetch failure now also reports
+  `console.warn` with the fetch error (UI stays muted); no backend or
+  endpoint changes.
+- New vitest spec `frontend/tests-vitest/trade-replay-indicator-notice.test.ts`
+  covering all five states (empty result, fetch failure, missing deal id,
+  series present, no candles).
+
+**Priority:** P3
+
+### Classify backups before restore confirmation
+
+**Status:** Completed 2026-11-08, implemented per the 2026-11-08 re-plan: a
+read-only classification preview over the restore's own validation primitives,
+a pre-confirmation review surface in the dashboard, and no force-restore path.
+Origin: deferred owner decision from the May 2026 trade-modes-reset CEO plan
+(recorded 2026-11-01 as D12=A; the original deferral to TODOS.md had never
+been written).
+
+**What shipped:**
+- `POST /config/backup/classify` (`backend/controller/config.py`, strict
+  `msgspec.Struct` body, no DB access, no lock, no confirm flag): runs the
+  restore's validation primitives as a collect-all pass and returns a
+  `classification` summary (`schema_version`, `trade_mode_era` =
+  `accumulation` / `dynamic_dca` / `legacy_unspecified`,
+  `pre_4_9_bridge_keys`, `includes_accumulation`) plus `findings` ordered
+  blocking-first, each with `code`, `severity` (`info` / `warning` /
+  `blocking`), `message`, safe-field `detail`, and optional `next_action`.
+  `warning` findings name the silent outcomes (pre-4.9 bridge keys dropped per
+  D11, row values whose columns no longer exist — including the sidestep-era
+  waiting-state set — quarantined intent count, config-only pin removal);
+  `blocking` findings mirror the existing restore refusals verbatim.
+- `backend/service/backup_vintage.py` owns the shared residue vocabulary
+  (`SIDESTEP_WAITING_STATE_COLUMNS`, `campaign_residue_rows`,
+  `campaign_residue_symbols`); the restore's campaign-residue assertion now
+  uses the shared predicate and the startup gate in `database.py`
+  cross-references it, giving the "keep in sync" note of the residue-gate
+  TODO one canonical definition.
+- Dashboard: on restore-button click the composable fetches the
+  classification for that mode (per-mode cache, in-flight dedupe) and
+  `ConfigBackupRestoreControls.vue` renders the findings in an ARIA live
+  region before the confirmation dialog. A blocking finding disables the
+  matching restore button and the composable returns `blocked` before any
+  confirm — no force-restore path. If the preview is unavailable the flow
+  degrades to a warning and the restore endpoint's own checks remain the
+  authoritative gate. The control-center wrapper announces blocked outcomes
+  through the same live region.
+- Zero restore behavior change: the D11 bridge-key drop, the residue gate,
+  dry-run forcing, and the existing refusal messages are unchanged, and the
+  existing restore suite passes unmodified. New backend fixture tests
+  (`backend/tests/test_backup_classify.py`) pin every finding code, era
+  variant, and the non-mutation guarantee; the frontend adds
+  `tests-vitest/backup-classification.test.ts` and ratchets
+  `useConfigBackupRestore.ts` into the vitest coverage guard.
+- Docs: the endpoint contract in `docs/api.md`, the review semantics and the
+  no-force-restore statement in `docs/operations.md` "Backup And Restore",
+  and the 6.4.0.0 changelog entry.
+
+**Follow-up:** Resolved 2026-11-09 with the completed "Add an operator repair
+path for quarantined classic-DCA placement intents" entry: the
+`quarantined_intents` finding's `next_action` copy now points at the
+dashboard's Placement recovery card.
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/backup-classification-replan-20261108.md`
+
+**Effort:** M
+
+**Priority:** P3
+
+### Decide the migration-ledger prune policy (Phase 5 ledger hygiene)
+
+**Status:** Completed 2026-11-08. Policy decided as D1=B (collapse + full
+prune, "Shape B" of the plan): a gated, checksum-safe ledger-hygiene prune
+plus the `015`↔`003` collapse, with the pruned definitions kept in the code
+and a runner retire rule that keeps a prune from being undone.
+
+**What shipped:**
+- `2026-11-09-024-ledger-hygiene-prune` (data step,
+  `backend/service/database.py`): on an install that carries the MSV floor
+  marker, deletes every `schema_migrations` row whose version sorts older
+  than the prune version plus the inert
+  `2026-09-sidestep-removal-v1` `config_migrations` row. The floor marker
+  and the live signal-settings row are never pruned; a pre-floor install
+  (no marker) keeps its full history. One transaction, idempotent, resumable
+  through an interrupted run.
+- The runner in `backend/service/schema_migrations.py` gained the retire
+  rule: on a pruned database it skips a definition only when its row is
+  *missing*, its version is older than the prune, and the prune row is
+  durably `applied` — so the pruned definitions (kept so unsupported
+  installs crossing the floor from below still migrate) never re-create
+  their rows, and rows that exist (including a failed one) still retry under
+  the unchanged checksum gate.
+- The `015` (`2026-10-23-015-accumulation-dust-archive`) definition — a
+  no-op repeat of 003's `_ensure_trade_ledger_columns` — is removed; its
+  ledger row dies in the prune.
+- Tests: retire-rule semantics (missing retired rows skip, existing failed
+  rows retry, newer versions migrate), prune gate (pre-floor install keeps
+  full history), prune-at-floor (deletes once, stays put, keeps live config
+  rows), interrupted-prune resume, fresh-install end-state (pruned on first
+  boot, stable on the second), preflight invariance on a pruned ledger, and
+  the updated 4.9-fixture resume expectation (pruned terminal ledger, floor
+  marker kept).
+- Durable policy recorded in `docs/operations.md` ("Migration ledger
+  retention") and `docs/development.md`; CHANGELOG entry for the next
+  release.
+
+**Plan of record:**
+`~/.gstack/projects/TBMoonwalker-moonwalker/migration-ledger-prune-policy-plan-20261108.md`
+(D1=B, 2026-11-08).
+
+**Effort:** M
+
+**Priority:** P3
+
+### Remove the three deferred Phase 4 data-compat shims at their concrete floors
+
+**Status:** Completed 2026-11-07 by owner decision: the MSV floor was raised
+from 4.9.0.0 to 6.3.0.0 (option B of D8, explicitly re-decided), which passes
+all three recorded floors at once.
+
+**What shipped:**
+- The floor is now `6.3.0.0` in `backend/service/msv.py` (marker row
+  `2026-11-msv-floor-6-3-v1` in the `config_migrations` ledger); the preflight,
+  `GET /monitoring/msv`, `docs/operations.md` and `docs/monitoring.md` follow
+  the constant. `record_msv_floor_marker` now marks an existing install on its
+  first at-floor startup — after the preflight fires the one-time pre-floor
+  warning — so a skip-install no longer reports `unsupported` forever with
+  unsatisfiable guidance. A fresh database carrying pre-floor legacy bridge
+  keys (a restored pre-floor backup) stays unmarked and keeps reporting
+  `unsupported`.
+- The CSV fee-provenance fallback in `has_fee_inclusive_cost`
+  (`backend/service/trade_math.py`) is gone: provenance is explicit-only and a
+  missing `cost_includes_fees` flag behaves like an explicit False (legacy fee
+  estimation). Recorded floor >=5.3.0.0 (016 provenance, 04b6990) passed.
+- The four-column accumulation CSV declaration format
+  (`backend/service/accumulation/imports.py`) is rejected with an explicit
+  error for fresh uploads and persisted legacy declarations; the fee-aware
+  format is required. `docs/accumulation.md`,
+  `docs/howto-operate-accumulation.md`, `docs/signals.md` and the dashboard
+  placeholders were updated. The classic Dynamic DCA CSV import keeps its
+  four-column format.
+- `legacy_accumulation_graph` (the `backend/service/shared_accumulation.py`
+  editor view) is removed: `get_strategy_detail` no longer wraps legacy-shape
+  accumulation documents, the `legacy_accumulation_view` metadata plumbing is
+  gone, and duplicating a legacy preset is rejected with a clear error. Legacy
+  documents remain fully parseable by the accumulation runtime and catalog
+  (`parse_accumulation_strategy_document` keeps both shapes), and
+  `regime_accumulation_graph` now builds its base shape directly.
+
+**Operator-visible consequences (documented in `docs/operations.md` and the
+6.3.0.0 changelog):** pre-floor trade rows without a provenance flag lose the
+inferred fee-inclusive cost; pre-floor four-column accumulation declarations
+can no longer be imported or revalidated; legacy-shape preset documents are
+no longer rendered or duplicable in the strategy builder.
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/legacy-migration-removal-plan-20261101.md`
+(D8=A deferral; superseded by the owner's explicit re-decision on 2026-11-07).
 
 **Effort:** M
 
@@ -45,396 +810,102 @@ open trades.
 
 ### Add the recovery DCA status card to the vitest coverage guard
 
-**Status:** Follow-up from the v4.15.0.0 pre-landing review (P3, informational).
-
-**What:** The new `RecoveryDcaStatus.vue` component is not in the vitest
-`coverage.include` list, so its rendering branch is excluded from the reported
-coverage even though `recovery-dca-status.test.ts` exercises it. Ratchet the
-component into `frontend/vitest.config.ts` `coverage.include`, verify the
-component-level tests assert the card surface, and reinstate the surface
-assertions the old `recoveryDcaSurface.test.cjs` guard checked before they moved
-to the card.
-
-**Context:** v4.15.0.0 moved the recovery DCA diagnostics out of
-`OpenTradeExpandedRow.vue` into the reusable `RecoveryDcaStatus.vue` card. The
-CJS guard was intentionally reduced to a single delegation assertion
-(`OpenTradeExpandedRow` renders
-`<RecoveryDcaStatus :trade="rowData" />`), and the new component coverage lives in
-`frontend/tests-vitest/recovery-dca-status.test.ts`. The card is correct today;
-this only tightens the guard so a future edit to the card surface or a
-coverage-include regression is caught.
-
-**Effort:** S
-
-**Priority:** P3
-
-### Remove the three deferred Phase 4 data-compat shims at their concrete floors
-
-**Status:** Deferred by the 2026-11-01 legacy-migration-removal review (D8=A). Each removal is safe only once its recorded floor is passed.
-
-**What:** Remove the three Phase 4 data-compat shims that the shipped 4.9.0.0 MSV floor does not gate: the CSV fee-accounting fallback in `backend/service/trade_math.py` (fee flag, migration 016), the legacy CSV import path, and the `legacy_accumulation_graph` view. Each as a small PR with its fixture/test updated, the same shape as the two shims removed this wave (replay backfill >008, `has_legacy_partial` >007).
-
-**Why:** These three postdate the 4.9.0.0 floor or are not version-gateable at all, so removing them now would break fee accounting on supported 4.9–5.2 installs. Deferring keeps the wave removal-only and ships only what the floor proves safe.
-
-**Pros:** Each removal gates on a concrete, recorded floor: the fee flag at >=5.3.0.0 (016 provenance, commit 04b6990), the CSV import behind a file-format deprecation window, and `legacy_accumulation_graph` on a retention window since 4.0.0.0/c44fd0e (legacy-shape docs persist unmigrated). The shims are read-only fallbacks, so running one more cycle is harmless.
-
-**Cons:** Three fallback paths stay in the codebase past their natural window until the floors are re-checked.
-
-**Context:** Decided in the 2026-11-01 legacy-migration-removal eng review (D8, option A); the two gateable shims landed this wave on `chore/hygiene-logging-serialization-sync-2026-10`. Plan of record: `~/.gstack/projects/TBMoonwalker-moonwalker/legacy-migration-removal-plan-20261101.md`.
-
-**Depends on:** The MSV floor in `backend/service/msv.py` and its record in `docs/operations.md`; the CSV import also needs an operator-visible deprecation window before its removal.
-
-**Priority:** P3
-
-### Decide the migration-ledger prune policy (Phase 5 ledger hygiene)
-
-**Status:** Deferred by the 2026-11-01 legacy-migration-removal review (D6=B); not a PR this wave.
-
-**What:** Decide the retention policy for `schema_migrations` and `config_migrations` rows, which currently grow unbounded across releases. Candidate: a one-time "prune applied ledger rows older than MSV" migration plus a collapse of the `015` (`2026-10-23-015-accumulation-dust-archive`) and `003` (`2026-07-28-003-trade-ledger-expand`) near-duplicate, both gated by MSV and checksum-safe.
-
-**Why:** The ledgers are the only record that a database has applied each migration, but nothing trims them, so every install accumulates one row per applied step forever.
-
-**Pros:** Bounds ledger growth and removes the near-duplicate entry; a gated, checksum-safe step keeps the recovery contract intact.
-
-**Cons:** Pruning touches the recovery contract (the checksums are the resume proof), so the policy must be designed before any row is deleted; a wrong prune makes a healthy database look un-migrated.
-
-**Context:** Phase 5 of the legacy-migration-removal plan; its "What NOT to do" section forbids deleting ledger rows outright, so pruning must go through a gated, checksum-safe step. Deferred via D6 (option B) on 2026-11-01.
-
-**Depends on:** The MSV floor in `backend/service/msv.py`; the checksum contract in `backend/service/schema_migrations.py`.
-
-**Priority:** P3
-
-### Classify backups before restore confirmation
-
-**Status:** Deferred owner decision from the May 2026 trade-modes-reset CEO plan; the original deferral to TODOS.md was never written. Recorded 2026-11-01 (D12=A).
-
-**What:** Quoted verbatim from the trade-modes-reset CEO plan "Deferred to TODOS.md" section: "Add a restore/import review state that classifies backups as Dynamic DCA, Sidestep, or deprecated static before restore confirmation".
-
-**Why:** The restore flow silently drops legacy bridge keys from pre-4.9 backups (this wave's D11), so an operator restoring an old backup gets no indication of what representation the backup carried; a classification screen before confirmation would make that legible.
-
-**Pros:** Restores an explicitly made owner decision to the backlog where it was supposed to live; implementation stays a future wave, with zero scope change to the removal wave.
-
-**Cons:** New restore-flow UI work (a classification screen) unrelated to the removal wave; the underlying silent key-drop behavior stays unexplained until this ships.
-
-**Context:** The trade-modes-reset CEO plan (2026-05-12, branch `feature/code-stabilization`) deferred this item to TODOS.md; the 2026-11-01 legacy-migration-removal eng review (D12, option A) recorded the missing entry.
-
-**Depends on:** Nothing — standalone restore-flow addition, buildable in any future wave.
-
-**Priority:** P3
-
-### Show an unavailable notice on replay charts without indicator series
-
-**Status:** Declined option of D19 (2026-11-01 design review), tracked per D22/R10.
-
-**What:** A muted "Indicator overlays unavailable for this trade" caption on the replay chart when the indicator fetch yields no series (also fixes the existing swallowed-404 case).
-
-**Why:** D19 deferred it to keep the wave removal-only; legacy rows without a deal id now render candles without indicator overlays and no explanation, and without a repo-side record the deliberate silence is undiscoverable in ~6 months.
-
-**Pros:** Honest state per DESIGN.md ("missing feeds are shown as unavailable rather than invented"); fixes a pre-existing silent case (swallowed 404 in `loadReplayIndicators`).
-
-**Cons:** New chart state + copy (~3h human / ~20min CC).
-
-**Context:** `frontend/src/components/TradeReplayChart.vue` `loadReplayIndicators` (silent early return + swallowed 404); the D19 record in the legacy-migration-removal plan.
-
-**Depends on:** Nothing — standalone chart-state addition, buildable in any future wave.
-
-**Priority:** P3
-
-### Extend the campaign residue gate to the full 021 drop set
-
-**Status:** Hardening candidate from the 2026-11-02 pre-landing review (F5, red-team 6/10); the current gate scope is an approved, documented design decision.
-
-**What:** The campaign-residue gate (startup `_assert_no_open_trade_campaign_residue` in `backend/service/database.py` and restore `_assert_no_open_trade_campaign_residue` in `backend/service/backup_restore.py` — the two implementations must stay in sync) aborts startup / refuses a restore only when an `opentrades` row carries `campaign_id IS NOT NULL`. The seven sidestep-era waiting-state columns that migration 021 drops (`waiting_reference_price`, `reserved_reentry_quote`, `waiting_reference_amount`, `waiting_reference_quote`, `virtual_waiting_profit`, `virtual_waiting_profit_percent`, `last_transition_at`) are zeroed silently on rows that still carry them. Extend the assertion to the full drop set (campaign reference OR non-zero waiting state) with a fixture test.
-
-**Why:** In 4.8.x the waiting-state writers were campaign-context paths that propagated `campaign_id`, so the flagged scenario needs an already-inconsistent row on an unsupported 4.8.x direct upgrade. The risk is low and the current scope was approved; recorded rather than extended in this wave.
-
-**Context:** Pre-landing review of `chore/hygiene-logging-serialization-sync-2026-10` (2026-11-02), finding F5; operator decision 2026-11-02 (PR note + TODO, no code change this wave).
-
-**Priority:** P3
-
-## Dashboard history
-
-### Evaluate server caching and incremental timeline loading
-
-**Status:** Proposed; browser caching and profit-tab persistence are implemented.
-
-**What:** Measure repeated timeline resampling under concurrent dashboard use.
-Consider a short-lived server cache with snapshot-write invalidation first,
-then an additive delta cursor only if measurements justify it. Preserve the
-existing full response and verify bucket updates, disconnect recovery, and
-retention cleanup. Configurable snapshot cadence is a separate optional step.
-
-**Design:** [Dashboard history loading](docs/designs/delta-loading.md).
-Open trades remain full-state and closed history remains paginated.
-
-## Control Center verification
-
-### Verify remaining rendered accessibility observations
-
-**Status:** Follow-up verification from the historical source audit; not a
-claim that the current UI has these defects.
-
-**What:** Check rendered dark-mode contrast, mobile pagination touch targets,
-and the intentional scope of compact table typography against DESIGN.md.
-The old theme-ownership concern is already addressed by the shared theme store.
-
-## Denylist concurrency
-
-### Review stale full-form saves against concurrent denylist appends
-
-**Status:** Design follow-up; atomic append is implemented.
-
-**What:** The append endpoint preserves concurrent appends, but full config
-saves replace the list. Verify stale-form conflict handling and decide whether
-server-side revision checks are needed to avoid silently losing a newer deny.
-Preserve the ability to intentionally remove tokens through configuration.
-
-**Design:** [Denylist semantics](docs/designs/denylist-symbol-from-open-trade.md).
-
-## Frontend staging guard
-
-### Harden the frontend-staging guard against partial and masked-out failures
-
-**Priority:** P1
-
-**What:** The new frontend-staging guard (shipped v4.7.0.0) was left as-is at
-the 2026-09-13 pre-landing review after deferred findings:
-- **F1 (P2):** a partial deploy (entrypoint `index.html` present but a referenced
-  JS bundle missing) passes both `frontend_staging_warning()` and the
-  `run.sh` stage check, so a dead dashboard returns HTTP 200. The underlying
-  deploy gap predates this branch; the guard should verify the bundles the
-  entrypoint references and carry a partial-deploy regression test.
-- **F2 (P2):** Litestar masks `HTTPException.detail` to a generic
-  "Internal Server Error" body, so the actionable "run ./run.sh start" message
-  the guard was built to surface never reaches the browser. Replace the 500
-  raise with a controlled error body and assert its HTTP response.
-- **F3 (P3):** `app.py` startup calls `frontend_staging_warning()` with a
-  synchronous `Path.is_file()` on the event loop before the timing wrapper;
-  move the probe off the loop to match the request path.
-
-**Deferred from:** pre-landing review on `feature/code-optimizations` (v4.7.0.0).
-The guard is strictly an improvement over the previous bare 500; hardening is
-non-blocking.
-
-
-## Retired
-
-### Extend sidestep campaign analytics beyond grouped replay polish
-
-**Retired:** 2026-09-26 documentation cleanup. Sidestep has been removed; its
-proposed campaign analytics are no longer an active backlog item. The former
-discovery gate had no confirmed evidence issues. Historical completed Sidestep
-items below remain release history, not descriptions of current capabilities.
-
-## Completed
-
-### AI-trust and capital-budget config section coverage guards
-
-**Completed:** v5.1.0.0 (2026-10-07)
-
-**What shipped:** Closed both pre-landing P3 coverage gaps for the new
-AI-trust and capital-budget config sections. (1) Pinned the
-`capitalBudgetPreview` client mirror to the backend admission math with a
-cross-language contract test,
-`backend/tests/test_capital_budget_preview_parity.py`, that recomputes the same
-shared vectors `frontend/tests-vitest/capital-budget-preview.test.ts` asserts, so
-a math drift on either side fails its own test; aligned the preview's
-negative-buffer handling to `normalize_buffer_pct` (clamp <= 0 to no buffer,
-behavior-preserving since the input has `min=0`). (2) Added dedicated mount tests
-asserting each section's control surface:
-`config-ai-trust-section.test.ts` (field labels, the warn-block switch staying
-inert until the cockpit is enabled, and the exposed `validate()`) and
-`config-capital-section.test.ts` (the title fallback plus the gated
-showBaseFields / showExpertFields / dynamicDcaEnabled fields and `validate()`).
-These components are not in the vitest `coverage.include` ratcheted set, so the
-new mount tests harden regression coverage without moving the ratchet; see the
-separate P3 for ratcheting the Recovery DCA status card into the include guard.
-
-### Fix mobile Backtest chart marker label clipping (ISSUE-002)
-
-**Completed:** 2026-08-02
-
-**What shipped:** Added exact feature-local logical-range padding based on the
-actual first- and last-candle marker text, typed the Lightweight Charts payloads,
-and guarded pre-paint rendering with invocation ownership and fail-open padding.
-Added 100 percent viewport-helper coverage, component lifecycle regressions,
-and stable 375 x 812 left/right Playwright snapshots. The real localhost
-default Backtest now shows the complete `take_profit` label with no page overflow
-or console errors.
-
-### Fix mobile text truncation (ISSUE-003, ISSUE-004)
-
-**Completed:** v4.5.0.0 (2026-07-28)
-
-**What shipped:** Reworked the Control Center mission header and Statistics
-mobile layout so guidance, tabs, and activity labels remain readable at 375
-pixels, aligned responsive breakpoints at 767 pixels, and added desktop,
-tablet, and mobile Playwright coverage.
-
-### Fix Statistics pagination (ISSUE-001)
-
-**Completed:** v4.0.4.0 (2026-06-05)
-
-**What shipped:** Added `sortedAndPaginatedSymbols` computed property that correctly
-sorts and slices the symbol data based on pagination state. The data table now
-uses `remote` mode with explicit `@update:page` and `@update:sorter` handlers,
-so clicking pagination numbers actually changes the displayed data.
-
-### Fix Statistics sort column data reduction (ISSUE-002)
-
-**Completed:** v4.0.4.0 (2026-06-05)
-
-**What shipped:** Rewired the sort handler to work with the new computed pagination
-pipeline. Clicking a sort column header now correctly sorts the full dataset and
-shows a full page of results instead of reducing to 3 rows. Added `columnSortOrder`
-helper to keep sort indicator logic DRY across all sortable columns.
-
-### Polish Statistics heatmap density and Strategy Builder graph readability
-
-**Completed:** v4.0.0.0 (2026-05-31)
-
-**What shipped:** Tightened the Statistics Trade Activity panel with compact
-padding and an inline closed-trade activity summary, removed duplicate heatmap
-computed state, and made Strategy Builder graph labels easier to read by using
-a less aggressive Rete fit scale plus larger node and control typography.
-
-### Build the operator-facing Backtest UI after backend core stabilizes
-
-**Completed:** v3.3.0.0 (2026-05-28)
-
-**What shipped:** Added a Backtest route with strategy replay controls,
-Lightweight Charts candles and buy/sell markers, stats, run metadata,
-previous-run comparison, loading and safe error states, responsive layout, and
-frontend helper coverage for request shaping, marker normalization, and
-comparison math.
-
-### Centralize lifecycle normalization across backend and frontend config seams
-
-**Completed:** v4.2.0.0 (2026-07-26)
-
-**What shipped:** Added one canonical lifecycle normalization seam on each
-side, made `trade_mode` the operator-facing source of truth, routed backend
-capability checks and frontend config load, submit, readiness, and validation
-through the shared helpers, and added regression coverage for canonical-mode
-round trips.
-
-### Confirm waiting sidestep campaigns keep owning capacity while flat
-
-**Completed:** v4.2.0.0 (2026-07-26)
-
-**What shipped:** Kept the chosen campaign-ownership policy instead of adding a
-second scheduler, verified that flat waiting campaigns continue to preserve
-their reserved slot and capital semantics, covered watcher re-entry and manual
-activate paths with regression tests, and closed the old
-"prioritize waiting campaigns over new symbols" follow-up as an
-audit-and-validation item rather than new ranking behavior.
-
-### Polish waiting-campaign status and grouped sidestep mission history
-
-**Completed:** v4.2.0.0 (2026-07-26)
-
-**What shipped:** Added explicit waiting-campaign cooldown, last-exit, and
-re-entry status fields to the existing payloads and UI, kept the main closed
-trades table terminal-first, and added grouped mission summary context to
-sidestep replay so operators can read campaign progression without a new
-analytics service or DB table.
-
-### Untangle order-persistence ownership between Orders, Trades, and order_persistence
-
-**Completed:** v4.2.0.0 (2026-07-26)
-
-**What shipped:** Moved sell-side lifecycle writes behind
-`order_persistence`, replaced external calls to private trade-cache
-invalidation with a public seam, preserved the read/query role of `Trades`,
-and added regression coverage around partial sells, terminal closes, manual
-adds, stop handling, and related execution flows.
-
-### Deduplicate the EMA20 swing and reverse strategy pair
-
-**Completed:** v4.2.0.0 (2026-07-26)
-
-**What shipped:** Extracted the shared EMA20 swing runtime and persistence
-skeleton into one shared core, kept the public bullish and reverse strategy
-modules stable, preserved separate persisted state namespaces, and collapsed
-the mirrored strategy tests into a shared parameterized suite plus
-direction-specific assertions.
-
-### Reduce Control Center overview card nesting
-
-**Completed:** v1.4.0.0 (2026-04-28)
-
-**What shipped:** Reworked the Control Center overview lower section into one
-shared operator workspace for Configuration, Autopilot, and Monitoring;
-flattened the preview shells so the three surfaces read as related subsections
-instead of equal nested cards; softened the owner-confidence summary to match
-the overview shell; and added frontend regression checks so the preview
-components stay out of full-card wrappers.
-
-### Remove deprecated `autopilot_max_fund` compatibility alias
-
-**Completed:** v1.4.0.0 (2026-04-28)
-
-**What shipped:** Removed the one-release `autopilot_max_fund`
-compatibility alias from backend runtime config, frontend config loading and
-submit payloads, and mirrored API surfaces; switched the remaining capital and
-Green Phase logic to the canonical `capital_max_fund` key; rejected removed-key
-config writes and legacy backup restores; filtered removed keys from new backup
-exports; and documented the breaking upgrade requirement in the release notes
-and config or API docs.
-
-### Apply suggested base order as guarded per-symbol entry sizing
-
-**Completed:** v1.2.0.0 (2026-04-22)
-
-**What shipped:** Added an explicit `autopilot_symbol_entry_sizing_enabled`
-switch, extended the shared Autopilot policy seam to resolve entry-size
-decisions alongside adaptive TP, routed ASAP and SymSignals through one shared
-signal-runtime order-size resolver, persisted applied-vs-fallback sizing
-metadata through buy executions, retried once with baseline `bo` on sizing
-validation failures, and surfaced entry-sizing status in the Autopilot cockpit.
-
-### Add owner-confidence summary to Control Center overview
-
-**Completed:** v1.2.0.0 (2026-04-22)
-
-**What shipped:** Added a compact owner-confidence summary to the Control
-Center overview that rolls up operating mode, config trust, Autopilot memory,
-and a lightweight live-data signal without duplicating Monitoring diagnostics.
-
-### Add ranked scarce-bot admission for trusted symbols
-
-**Completed:** v1.2.0.0 (2026-04-22)
-
-**What shipped:** Added a shared ranked admission and reservation seam in
-`backend/service/signal_runtime.py`, reused Autopilot trust memory to rank
-favored, neutral, and cooling symbols, routed ASAP and SymSignals through the
-same decision path, and expanded regression coverage around ranking,
-explanations, and release-on-failure behavior.
-
-### Finish the deferred backend stabilization slice for data/replay/database seams
-
-**Completed:** 2026-04-08
-
-**What shipped:** Removed redundant history-window wrappers from
-`backend/service/data.py`, centralized numeric SQLite text-timestamp handling,
-hardened replay archive reads/writes against short millisecond fixtures and
-mixed timestamp inputs, reused the same timestamp normalization seam in
-housekeeping, and extracted additive-column/corruption-message helpers from
-`backend/service/database.py` with regression coverage.
-
-### Harden config trust and invalidation in Control Center
-
-**Completed:** v1.0.3.0 (2026-03-27)
-
-**What shipped:** Added explicit Control Center config-trust states, quiet
-auto-refresh for clean tabs, stale-draft conflict handling, browser-local
-invalidation fanout after save, restore, and live activation, the `/config/all`
-`config_updated_at` contract, and regression coverage for stale snapshot
-timestamp handling.
-
-### Create a repo-level DESIGN.md after the Control Center ships
-
-**Completed:** 2026-03-21
-
-**What shipped:** Added the repo-level `DESIGN.md` and then refined it with the
-surface-treatment rule that keeps gradients atmospheric and working panels flat.
+**Status:** Completed 2026-11-07. The card is now ratcheted into the vitest
+coverage guard and its pre-card surface labels are asserted on the card
+itself.
+
+**What shipped:**
+- `src/components/RecoveryDcaStatus.vue` added to `coverage.include` in
+  `frontend/vitest.config.mts` (this entry named the config
+  `vitest.config.ts`; the file has since been renamed to `.mts`) with a
+  per-file threshold ratcheted at 90/80/95/90 (stmts/branches/funcs/lines)
+  against the measured 92.47/84.74/96.15/91.78. The uncovered remainder is
+  the `insufficient_tp_improvement` and `invalid_trade_state` /
+  `target_not_solvable` warning branches.
+- New surface test in
+  `frontend/tests-vitest/recovery-dca-status.test.ts` re-asserting the five
+  labels the old `recoveryDcaSurface.test.cjs` guard checked on
+  `OpenTradeExpandedRow.vue` before the v4.15.0.0 card split, in their
+  post-split form: the `Recovery DCA status` aria-label, `Trigger ≤ USDC`,
+  `reference ATR`, `SO 1 / 5`, and the `Projected TP 0.25` sizing line.
+  The CJS guard keeps its single delegation assertion.
+
+### Prepare request bodies and OHLCV helpers for future major upgrades
+
+**Status:** Completed 2026-11-07. Litestar 2.25.0 and pandas 3.1.x no longer
+expose the deprecation warnings this entry named: all ten unmarked `data`
+body parameters are `JSONBody[...]`-marked and all seven `inplace=True` calls
+in `backend/service/data_ohlcv.py` are explicit reassignments. No warnings
+were suppressed (no CI filter changes) and no dependency versions changed;
+the future majors are tracked by the "Upgrade to Litestar 3.x and pandas 4.x
+after release" entry in Next up.
+
+**What shipped:**
+- `JSONBody[...]` on all ten unmarked `data` parameters:
+  `backend/controller/backtest.py` (run_backtest),
+  `backend/controller/config.py` (activate_live_trading, pause_trading,
+  resume_trading, deny_symbol, restore_backup), `backend/controller/
+  strategies.py` (duplicate/create/validate/save). Strict payload validation
+  preserved: the msgspec.Struct DTOs keep `forbid_unknown_fields`, the dict
+  handlers keep app-level validation, and the existing malformed/unknown-field
+  regression tests pass unmodified.
+- Explicit reassignment at all seven deprecated call sites in
+  `backend/service/data_ohlcv.py` (`rows_to_dataframe`,
+  `serialize_ohlcv_dataframe`, `resample_ohlcv_data`); candle timestamps,
+  resampling, duplicate removal and history serialization verified by the
+  existing suite plus new regression tests.
+- New regression guards: an app-creation test asserting no Litestar
+  "Reserved kwarg" deprecation for the three controllers; a helper test
+  asserting no `pandas.errors.Pandas4Warning` (matched by category); a
+  duplicate-removal first-wins test; a partial-candle sanitization test (a
+  lost `rows_to_dataframe` dropna corrupts resampled bucket values that no
+  other test catches — probe-verified 2026-11-07); HTTP-boundary TestClient
+  cases for the changed dict handlers (malformed JSON / non-object body ->
+  400, path+body binding on PUT /strategies/{slug}).
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/fixed-todos-eng-review-20261107-105742.md`
+
+**Effort:** M
+
+**Priority:** P2
+
+### Periodic price re-evaluation for open trades
+
+**Status:** Completed 2026-11-07 as the exit price guard (G1: fresh-bid
+verification before engine-decided market sells; G2: fresh-bid verification
+before market fallback after a limit timeout or placement failure for non-TP
+exits). Identified 2026-11-03 during the YB/USDC stuck-trade investigation
+(incident: the trade sat above its TP for ~23h without an exit evaluation, and
+the later manual sell filled ~15% below the stale displayed price). Scope fixed
+by owner decision 2026-11-07: **implement the exit price guard only; the
+periodic re-evaluation loop is rejected** (stream recovery stays the watchdog's
+job; in a flat market a periodic refresh discovers nothing; the accepted
+silent-stream blind spots are documented as known limitations). See "Exit
+Price Guard" in `docs/configuration.md`.
+
+**What shipped (decided scope):** Before a market sell decided by the engine,
+and before a market fallback when a limit sell runs in a timeout (or fails to
+place), fetch the live bid and re-verify that the exit is still justified —
+TP/trailing/autopilot-timeout require the fresh price at or above their
+threshold, stop-loss requires it at or below the SL price. Abort the sell
+(fail-closed, position stays open) when the fresh price no longer justifies it
+or the fetch fails. Engine-computed guard bounds shared through one pure
+helper at both call sites; TP limit-timeout fallback behavior unchanged.
+Documented the per-reason guard behavior, the zero-steady-state API-load
+budget, and the interaction with `watcher_ohlcv` mode.
+
+**Why no periodic refresh:** Classic DCA TP/SL checks run only when a
+`ticker_price` event arrives from the per-symbol trade stream; a dead or
+silent stream (watchdog per-symbol budget is `max(1800s, candle timeframe)`,
+1006 disconnects, quiet pairs, or demo/testnet books) leaves open trades
+unmanaged while the UI keeps showing stale prices. A periodic REST refresh was
+the original mitigation, declined on 2026-11-07 for steady-state API load and
+the flat-market no-op argument; the guard closes the failure mode that actually
+cost money (executing a sell on a stale trigger price) without any periodic
+work.
+
+**Plan of record:** `~/.gstack/projects/TBMoonwalker-moonwalker/open-trade-price-revaluation-plan-20261107.md`
+
+**Effort:** M
+
+**Priority:** P2

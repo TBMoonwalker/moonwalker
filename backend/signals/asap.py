@@ -10,9 +10,9 @@ from service.accumulation.entry import AccumulationEntryService
 from service.autopilot import Autopilot
 from service.config import resolve_history_lookback_days
 from service.data import Data
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.filter import Filter
 from service.indicators import Indicators
-from service.orders import Orders
 from service.signal_runtime import (
     build_common_runtime_settings,
     execute_signal_entry_batch,
@@ -60,7 +60,7 @@ class SignalPlugin:
         self.utils = helper.Utils()
         self.autopilot = Autopilot()
         self.data = Data(persist_exchange=True)
-        self.orders = Orders()
+        self.order_lifecycle = DcaOrderLifecycle()
         self.filter = Filter()
         self.indicators = Indicators()
         self.statistic = Statistic()
@@ -527,7 +527,7 @@ class SignalPlugin:
                         self.statistic,
                         self.autopilot,
                         self.watcher_queue,
-                        self.orders,
+                        self.order_lifecycle,
                         candidate_symbols,
                         signal_name="asap",
                         strategy_name=(
@@ -563,4 +563,4 @@ class SignalPlugin:
         """
         self.status = False
         await self.data.close()
-        await self.orders.close()
+        await self.order_lifecycle.close()

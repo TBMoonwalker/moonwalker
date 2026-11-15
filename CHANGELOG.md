@@ -2,6 +2,162 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [6.4.0.0] - 2026-11-15
+
+### Breaking Changes
+
+- Drop the 4.8.x-and-earlier (pre-4.9) trade-mode compatibility. Backups
+  created before `4.9.0.0` that still carry the raw trade-mode bridge keys
+  (`trade_lifecycle_mode`, top-level `dynamic_dca`,
+  `sidestep_campaign_enabled`) are now refused on restore like any other
+  removed config key, with a message that names the canonical `trade_mode`
+  key, instead of being dropped silently. To restore such a backup, remove
+  the three keys from its config rows first (every legacy representation was
+  equivalent to the default `trade_mode` value, so nothing is lost). The
+  pre-confirmation backup review no longer reports them as a silent drop: the
+  `pre_4_9_bridge_keys` summary field and the `legacy_bridge_keys_dropped`
+  finding are gone from `POST /config/backup/classify`, and the keys now
+  surface as `removed_config_key` blocking findings.
+
+### Added
+
+- Pre-confirmation backup review: before restoring, the dashboard classifies
+  the selected backup (read-only, no database access) and shows what the
+  restore would do to it — the backup's era, the dropped legacy column values
+  it silently discards, the placement intents that will restore into
+  quarantine, and the config-only removal of the local accumulation pin.
+  Backups the restore would refuse (campaign residue, removed config keys,
+  incomplete accumulation sections, invalid recovery manifest) are flagged
+  as blocking and their restore button is disabled;
+  there is no force-restore path. Restore behavior itself is unchanged.
+  See `POST /config/backup/classify` in the API reference.
+- Operator repair path for quarantined classic-DCA placement intents: an
+  instance whose startup gate is blocked by quarantined intents alone (no
+  other nonterminal exchange work) now serves a restricted recovery mode
+  instead of exiting with no operator access. The dashboard's Placement
+  recovery card on the Trading overview lists every quarantined intent;
+  **Repair** looks the order up on the exchange under the configured
+  credentials and applies the confirmed terminal state locally (lookup-only —
+  it never submits, cancels, or otherwise changes exchange state, and
+  inconclusive evidence leaves the intent quarantined), and **Dismiss**
+  records an explicit operator decision with a required note as a terminal
+  disposition. Restart Moonwalker after every intent is resolved to clear the
+  gate. New endpoints: `GET /orders/placement-recovery`, `POST
+  /orders/placement-recovery/{operation_id}/repair`, `POST
+  /orders/placement-recovery/{operation_id}/dismiss`.
+- `docs/operations.md` "Startup Recovery" documents the placement recovery
+  mode and the safe manual procedure for instances running an unfixed build.
+
+### Changed
+
+- Preserve the minimum-supported-version warning across restarts for existing
+  installations without a verified floor marker. Running newer software alone
+  does not mark legacy data as compatible or prune its migration history.
+- Pruned the startup migration ledgers on the first startup after an
+  installation reached the minimum supported version. Applied ledger rows
+  older than the floor are removed once (the floor marker and live
+  migration records are kept, and installations below the floor keep their
+  full history), and the near-duplicate dust-archive ledger entry (015, a
+  no-op repeat of 003) is no longer tracked. Operator-invisible ledger
+  hygiene; migration behavior for supported and pre-floor installations is
+  unchanged.
+- Split classic-DCA order execution and finalization into focused services,
+  with a shared entry point for placement recovery. This internal refactor
+  does not change the trading API or configuration.
+- Cache the resampled profit-overall timeline on the server for one snapshot
+  interval (60 s): concurrent dashboard clients now share a single rebuild
+  per window instead of each re-reading and re-resampling the full 12-month
+  window, and a newly stored snapshot (from any service instance) or a
+  retention cleanup drops the cache so the next fetch reflects it. The
+  rebuild itself resolves every adaptive bucket (15min/4h/1d/Monday-anchored
+  week) with an indexed `LIMIT 1` seek on the snapshot timestamp instead of
+  scanning and resampling the whole year of snapshots in pandas, so a cold
+  rebuild — the path a single client's page reload or switch from standby to active
+  always hits — takes tens of milliseconds even on a two-year database and
+  no longer stalls unrelated requests while it runs. The endpoint's path,
+  arguments, and response are unchanged;
+  `docs/designs/delta-loading.md` records the evaluation, the rebuild
+  benchmarks, and the decision against the proposed incremental fetch.
+
+### Fixed
+
+- Startup recovery checks that an exchange placement still belongs to its
+  original deal before applying it. Placements without sufficient identity
+  evidence remain quarantined for review.
+- A blocked trailing-profit exit retains its trigger after an unusable bid or
+  a confirmed cancelled limit order with no fill, so it can be reconsidered
+  on a later tick without retrying uncertain exchange work.
+- Legacy accumulation presets now show an explanation in the strategy editor
+  rather than breaking the editor when their data has no editable graph.
+- The dashboard document body now renders at its documented 16px / General
+  Sans / 1.5 line-height in both color schemes. Naive UI's internal global
+  style was writing its 14px / v-sans defaults directly onto the
+  `<body>` element's inline style (and its lazy-injected `body` reset
+  out-cascaded the app stylesheet), so the documented body scale never
+  rendered even though the source was correct. The document-scope
+  `font-size` and `line-height` now live in the theme token map's Naive
+  `common` section — the single source of truth the global style reads —
+  and the app's body rule gained a specificity guard so injection order
+  can no longer win. A rendered e2e guard now fails CI if the body scale,
+  the resolved theme tokens, the 44px phone-width pagination touch
+  targets, or the compact trade-ledger / regular statistics-ledger
+  typography split drifts.
+- Replay charts now show a muted "Indicator overlays unavailable for this
+  trade." notice when no indicator series can be loaded — legacy rows without
+  a deal id, empty indicator results, or failed indicator requests — instead
+  of rendering candles with no explanation. Failed indicator requests are now
+  reported to the browser console.
+- Closed dynamic-DCA deals keep their strategy's indicator overlays on the
+  replay chart after the deal closes. The active DCA strategy is now recorded
+  on base orders that carry no strategy of their own when the order is
+  created. Signal-triggered base orders previously recorded only the optional
+  entry-filter strategy, so a deal that never placed a safety order lost its
+  strategy metadata (and its overlays) the moment it closed. Deals already
+  closed keep the unavailable notice.
+- The frontend-staging guard now detects partially staged builds: when the
+  staged `index.html` is present but a bundle it references is missing from
+  `backend/static`, startup logs an actionable error, `./run.sh start` refuses
+  to start the service, and dashboard routes answer HTTP 500 with a JSON
+  `detail` naming the missing assets and the `./run.sh start` remedy —
+  previously such a stage passed every check and served a 200 that rendered a
+  blank page. The not-staged error is now a controlled response, so the
+  actionable message reaches the browser instead of being masked into
+  Litestar's generic 500 body, and the startup staging probe no longer stats
+  the filesystem on the event loop.
+
+## [6.3.0.0] - 2026-11-07
+
+### Breaking Changes
+
+- Raise the minimum supported version (MSV) to `6.3.0.0`. Installs below the
+  floor still load and run (report-only), but their pre-floor data shapes are
+  no longer supported: the first at-floor startup logs a one-time warning, and
+  later startups report `supported`. Upgrade to `6.3.0.0` and export a fresh
+  backup to move persisted data cleanly.
+- Remove the CSV fee-provenance fallback. Trade rows created before the
+  `cost_includes_fees` column (`5.3.0.0`) no longer have fee-inclusive cost
+  inferred from the CSV plugin's generated order IDs; they are valued with the
+  legacy fee estimate like any other unmarked row. Rows imported on or after
+  `5.3.0.0` keep their explicit provenance.
+- Remove the four-column accumulation CSV declaration format. Accumulation CSV
+  entries now require the fee-aware columns
+  (`date;symbol;price;amount;fee;fee_currency;amount_type`, with optional
+  `fee_quote_value`). Four-column files and previously persisted four-column
+  declarations are rejected with an explicit error; blank fee fields still mean
+  unknown fees. The classic Dynamic DCA CSV import keeps its four-column
+  format.
+- Remove the `legacy_accumulation_graph` editor view for legacy-shape
+  accumulation preset documents. Legacy documents remain fully readable by the
+  accumulation runtime and the strategy catalog, but the strategy detail
+  endpoint no longer renders them as an editable graph, and duplicating one is
+  rejected.
+
+### Changed
+
+- The MSV floor marker is written on an existing install's first at-floor
+  startup, so installs that skipped a floor release no longer keep reporting
+  `unsupported` with guidance that can no longer be satisfied.
+
 ## [6.2.0.0] - 2026-11-05
 
 ### Fixed

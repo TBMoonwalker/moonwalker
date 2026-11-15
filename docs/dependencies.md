@@ -14,7 +14,7 @@ This manual pre-install review complements the automated gates below.
 ## Runtime baseline
 
 - Python `3.14.x`; `.python-version` records the verified patch release.
-- Node.js `24.x` LTS; `.nvmrc` records the verified patch release and npm
+- Node.js `26.x` LTS; `.nvmrc` records the verified patch release and npm
   enforces the supported range from `frontend/package.json`.
 - npm `11.x`.
 - TA-Lib's Python wheel is pinned in the backend lock. The system TA-Lib
@@ -31,11 +31,11 @@ nvm use
 ./run.sh start
 ```
 
-On macOS, Homebrew can provide the same isolated Node.js 24 runtime:
+On macOS, Homebrew can provide the same isolated Node.js 26 runtime:
 
 ```bash
-brew install node@24
-export PATH="$(brew --prefix node@24)/bin:$PATH"
+brew install node
+export PATH="$(brew --prefix node)/bin:$PATH"
 ./run.sh start
 ```
 
@@ -89,7 +89,9 @@ Moonwalker intentionally remains on TypeScript 6 while Vue's embedded
 type-checking tools depend on the TypeScript programmatic API. TypeScript 7.0
 does not expose that stable API yet, and the TypeScript team recommends that
 Vue projects keep using TypeScript 6 during this transition. The Node type
-package also stays on the Node 24 line to match Moonwalker's supported runtime.
+package tracks the supported runtime: it moved to the Node 26 line
+(`@types/node` 26.6.6, `@tsconfig/node26`) with the 2026-11-08 Node floor
+migration.
 
 The reviewed `@vue/test-utils` 2.5 line replaces the older dependency tree
 that introduced vulnerable `js-beautify` and `glob` dependencies. Recheck the
@@ -409,3 +411,39 @@ array-form credentials and custom sensitive header names containing `^` and `|`
 are stripped across hosts while ordinary headers and redirects still work.
 Browser E2E was not run for this dependency-only changeset. GitHub's default-branch
 alerts remain open until the patch is merged there.
+
+## python-dateutil 4.0.0 (2026-11-08)
+
+The held `python-dateutil` major was moved from 3.0.0 to 4.0.0 in a dedicated
+changeset; the companion multidict 7 bump remains blocked (see the close of
+this section).
+
+- `python-dateutil 4.0.0` (released 2026-11-01) is a mostly-bugfix major: it
+  requires Python >=3.11 and drops the `six` dependency. It retains the 3.0.0
+  `tz.tzfile` rewrite, so the "post-2038 TZif support" rationale that justified
+  pinning dateutil for pandas still holds. The one behavior change is a stricter
+  `parser.isoparse` (each numeric field must carry exactly the expected number
+  of ASCII digits), which Moonwalker does not exercise — its only dateutil usage
+  is `dateutil.tz.gettz` in `backend/service/data_ohlcv.py`.
+- pandas 3.1.1 (released 2026-11-04, after dateutil 4.0.0) declares
+  `python-dateutil>=2.9.0` with no upper bound and ships an explicit
+  dateutil>=3.0 compatibility fix for timezones such as `dateutil/US/Pacific`
+  (GH 71459). litestar 2.25.0 and tortoise-orm 1.1.9 declare no dateutil
+  dependency and do not import it at runtime.
+- The `six` 1.17.0 transitive, pulled in only by dateutil, is dropped from both
+  generated locks; `tzdata` is retained because dateutil 4.0.0 still depends on
+  it. No other package version changed in either lock.
+- Security/provenance: the 4.0.0 wheel and sdist carry full PyPI provenance and
+  a verified Sigstore publish attestation from the genuine
+  `github.com/dateutil/dateutil` release workflow
+  (`github.com/dateutil/dateutil/.github/workflows/publish.yml`); OSV and the
+  PyPI security panel report no vulnerabilities for the version.
+- Validation: full CI green — 2,230 backend tests plus the full frontend suite,
+  type checks, lint, builds, coverage gates, both vulnerability audits and
+  registry-signature checks. The timezone regression tests in
+  `backend/tests/test_data_ohlcv_serialization.py` pass unchanged.
+
+Multidict 7 remains blocked: CCXT 4.5.92 (the latest release as of 2026-11-08)
+still hard-pins `multidict==6.9.1`. aiohttp 3.14.5 already permits
+`multidict<8.0,>=4.5`, so CCXT's exact pin is the sole blocker; do not force the
+override. Revisit when a reviewed CCXT release permits multidict 7.

@@ -94,6 +94,7 @@ class AccumulationPlacementRecovery:
             evidence,
             account_scope=scope,
             exchange_name=exchange_name,
+            config=config,
         )
         if result.settled:
             await self.intents.transition(

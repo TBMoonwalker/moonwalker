@@ -95,7 +95,7 @@
             </template>
 
             <template v-if="signal.signal === 'csv_signal'">
-                <n-text depth="3">CSV: date;symbol;price;amount, optionally followed by fee;fee_currency;amount_type;fee_quote_value. Amount defaults to net owned coins; use gross for amounts before base-coin fees. Third-currency fees need their quote value for returns.</n-text>
+                <n-text depth="3">CSV: date;symbol;price;amount, optionally followed by fee;fee_currency;amount_type;fee_quote_value. Accumulation entries require the fee columns. Amount defaults to net owned coins; use gross for amounts before base-coin fees. Third-currency fees need their quote value for returns.</n-text>
                 <n-form-item label="CSV input mode" path="csv_signal_mode">
                     <n-radio-group v-model:value="signal.csvsignal_mode">
                         <n-space>

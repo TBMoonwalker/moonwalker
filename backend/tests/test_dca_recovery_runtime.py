@@ -80,7 +80,7 @@ async def test_recovery_mode_rejects_0g_candidate_inside_atr_spacing(
     )
     monkeypatch.setattr(dca, "_Dca__dynamic_dca_strategy", fake_strategy)
     monkeypatch.setattr(dca.trades, "update_open_trades", fake_update)
-    monkeypatch.setattr(dca.orders, "receive_buy_order", fake_buy)
+    monkeypatch.setattr(dca.order_lifecycle, "receive_buy_order", fake_buy)
     monkeypatch.setattr(dca.statistic, "update_statistic_data", fake_stat)
 
     await dca._Dca__calculate_dca(
@@ -202,7 +202,7 @@ async def test_recovery_mode_places_target_sized_0g_order(monkeypatch) -> None:
     monkeypatch.setattr(dca.trades, "update_open_trades", fake_update)
     monkeypatch.setattr(dca.exchange, "get_free_quote_balance", fake_balance)
     monkeypatch.setattr(dca.exchange, "get_minimum_buy_notional", fake_minimum)
-    monkeypatch.setattr(dca.orders, "receive_buy_order", fake_buy)
+    monkeypatch.setattr(dca.order_lifecycle, "receive_buy_order", fake_buy)
     monkeypatch.setattr(dca.statistic, "update_statistic_data", fake_stat)
 
     first_cost = 3.8010819527

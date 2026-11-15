@@ -59,8 +59,10 @@ async def bump_config_revision(conn: Any, expected: int | None = None) -> int:
 
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
-# Pre-4.9 trade-mode bridge keys are no longer handled here; backup restore
-# drops them silently (see backup_restore.LEGACY_TRADE_MODE_KEYS).
+# The pre-4.9 trade-mode bridge keys are rejected with the canonical
+# trade_mode replacement: the 4.8.x-and-earlier trade-mode era is no longer a
+# supported restore source, so pre-4.9 backups naming them are refused on
+# restore (and skipped on export) like any other removed key.
 REMOVED_CONFIG_KEY_REPLACEMENTS = {
     "autopilot_max_fund": ("capital_max_fund", "v1.4.0.0"),
     "debug": ("", "this release"),
@@ -68,6 +70,9 @@ REMOVED_CONFIG_KEY_REPLACEMENTS = {
         "autopilot_base_order_stretch_max_multiplier",
         "this release",
     ),
+    "trade_lifecycle_mode": ("trade_mode", "4.9.0.0"),
+    "dynamic_dca": ("trade_mode", "4.9.0.0"),
+    "sidestep_campaign_enabled": ("trade_mode", "4.9.0.0"),
 }
 
 HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {
@@ -665,16 +670,14 @@ class Config:
         return True
 
     async def append_denylist_token(self, symbol: str) -> list[str]:
-        """Atomically append one base token to the pair_denylist.
+        """Atomically append a base token and return the resulting denylist."""
+        tokens, _ = await self.append_denylist_token_with_revision(symbol)
+        return tokens
 
-        Reads the current list, de-duplicates the appended token, and writes the
-        whole list back under the config write lock so concurrent appends from
-        multiple dashboard clients cannot clobber each other. The existing open
-        trades for the symbol are untouched; only future signal entries are gated.
-
-        Returns:
-            The resulting de-duplicated denylist tokens.
-        """
+    async def append_denylist_token_with_revision(
+        self, symbol: str
+    ) -> tuple[list[str], int]:
+        """Append a base token and return its denylist and revision together."""
         lock = await self._acquire_write_lock()
         async with lock:
             current = self.get("pair_denylist")
@@ -686,29 +689,8 @@ class Config:
             await self._set_locked(
                 "pair_denylist", {"value": serialized, "type": "str"}
             )
-            return tokens
-
-    async def merge_denylist_tokens(self, tokens: list[str]) -> list[str]:
-        """Atomically replace the pair_denylist with a de-duplicated token list.
-
-        Used when a client submits a full config form. The list is persisted under
-            the same write lock as appends to keep the denylist consistent.
-        """
-        lock = await self._acquire_write_lock()
-        async with lock:
-            ordered: list[str] = []
-            seen: set[str] = set()
-            for raw_token in tokens:
-                base_token = to_base_token(raw_token)
-                if not base_token or base_token in seen:
-                    continue
-                seen.add(base_token)
-                ordered.append(base_token)
-            serialized = serialize_denylist_tokens(ordered)
-            await self._set_locked(
-                "pair_denylist", {"value": serialized, "type": "str"}
-            )
-            return ordered
+            row = await ConfigRevision.filter(id=1).first()
+            return tokens, int(row.revision) if row else 0
 
     def subscribe(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Subscribe a callback function to configuration changes.

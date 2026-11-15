@@ -158,6 +158,33 @@ def calculate_average_entry_price(
     return cost / total_amount
 
 
+def calculate_pnl_break_even_price(
+    reference_price: float,
+    reference_pnl: float,
+    target_pnl: float,
+) -> float | None:
+    """Return the price at which PNL percentage equals the target.
+
+    The average entry price is recovered from the reference price and its
+    PNL percentage, so the result is exact for the same PNL formula the
+    engine uses for exit decisions.
+
+    Args:
+        reference_price: Price whose PNL percentage is known.
+        reference_pnl: PNL percentage at reference_price.
+        target_pnl: PNL percentage to invert back to a price.
+
+    Returns:
+        The price reaching target_pnl, or None when the inputs are
+        degenerate and no finite price can satisfy the target.
+    """
+    reference_factor = 1.0 + (reference_pnl / 100.0)
+    if reference_price <= 0 or reference_factor <= 0:
+        return None
+    average_price = reference_price / reference_factor
+    return average_price * (1.0 + (target_pnl / 100.0))
+
+
 def calculate_trade_profit_pct(
     entry_price: float,
     exit_price: float,

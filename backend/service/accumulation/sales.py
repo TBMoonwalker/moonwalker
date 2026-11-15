@@ -418,6 +418,7 @@ class AccumulationCommandExecutor:
                 evidence,
                 account_scope=scope,
                 exchange_name=config["exchange"],
+                config=config,
             )
         except AccumulationStateError:
             return AccumulationExecutionResult(

@@ -381,6 +381,41 @@ class Exchange:
                 )
         return resolved_symbol
 
+    async def _history_page_backoff(
+        self,
+        *,
+        fetch_kind: str,
+        symbol: str,
+        consecutive_errors: int,
+        backoff_seconds: Callable[[int], float],
+    ) -> bool:
+        """Sleep one history-page backoff or report the error budget exhausted.
+
+        Shared by the two OHLCV history fetchers so the consecutive-error
+        budget and the stop behavior have a single implementation.
+
+        Args:
+            fetch_kind: Human-readable fetch label for the stop message.
+            symbol: The symbol whose history is being fetched.
+            consecutive_errors: Failed pages in a row, including the current one.
+            backoff_seconds: Sleep duration in seconds for the given
+                consecutive-error count.
+
+        Returns:
+            True when paging may continue, False when the consecutive-error
+            budget is exhausted and the fetch must stop.
+        """
+        if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
+            logging.error(
+                "Stopping %s fetch for %s after %s consecutive errors.",
+                fetch_kind,
+                symbol,
+                consecutive_errors,
+            )
+            return False
+        await asyncio.sleep(backoff_seconds(consecutive_errors))
+        return True
+
     async def get_history_for_symbol(
         self,
         config: dict[str, Any],
@@ -449,25 +484,23 @@ class Exchange:
                 # Broad catch to continue paging through historical data.
                 logging.error("Fetching historical data failed due to an error: %s", e)
                 consecutive_errors += 1
-                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
-                    logging.error(
-                        "Stopping history fetch for %s after %s consecutive errors.",
-                        resolved_symbol,
-                        consecutive_errors,
-                    )
+                if not await self._history_page_backoff(
+                    fetch_kind="history",
+                    symbol=resolved_symbol,
+                    consecutive_errors=consecutive_errors,
+                    backoff_seconds=lambda _count: self.HISTORY_RETRY_SLEEP_SECONDS,
+                ):
                     break
-                await asyncio.sleep(self.HISTORY_RETRY_SLEEP_SECONDS)
             except (TypeError, ValueError, RuntimeError) as e:
                 logging.error("Fetching historical data failed due to an error: %s", e)
                 consecutive_errors += 1
-                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
-                    logging.error(
-                        "Stopping history fetch for %s after %s consecutive errors.",
-                        resolved_symbol,
-                        consecutive_errors,
-                    )
+                if not await self._history_page_backoff(
+                    fetch_kind="history",
+                    symbol=resolved_symbol,
+                    consecutive_errors=consecutive_errors,
+                    backoff_seconds=lambda _count: self.HISTORY_RETRY_SLEEP_SECONDS,
+                ):
                     break
-                await asyncio.sleep(self.HISTORY_RETRY_SLEEP_SECONDS)
 
         return all_candles
 
@@ -538,15 +571,23 @@ class Exchange:
             except (ccxt.NetworkError, ccxt.ExchangeError, ccxt.BaseError) as e:
                 logging.error("Batch fetch error: %s", e)
                 consecutive_errors += 1
-                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
+                if not await self._history_page_backoff(
+                    fetch_kind="batch history",
+                    symbol=resolved_symbol,
+                    consecutive_errors=consecutive_errors,
+                    backoff_seconds=lambda count: page_delay * (2 ** (count - 1)),
+                ):
                     break
-                await asyncio.sleep(page_delay * (2 ** (consecutive_errors - 1)))
             except (TypeError, ValueError, RuntimeError) as e:
                 logging.error("Batch fetch error: %s", e)
                 consecutive_errors += 1
-                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
+                if not await self._history_page_backoff(
+                    fetch_kind="batch history",
+                    symbol=resolved_symbol,
+                    consecutive_errors=consecutive_errors,
+                    backoff_seconds=lambda count: page_delay * (2 ** (count - 1)),
+                ):
                     break
-                await asyncio.sleep(page_delay * (2 ** (consecutive_errors - 1)))
 
         return all_candles[:max_candles]
 
@@ -583,11 +624,16 @@ class Exchange:
         pair: str,
         *,
         prefer_ask: bool = False,
+        prefer_bid: bool = False,
     ) -> str:
         """Return a current exchange price with exchange precision.
 
         Buy execution paths prefer the best ask because it is the immediately
-        executable price. Other callers retain the last-trade behavior.
+        executable buy price. Sell-side exit price guards prefer the best bid
+        for the same reason. Those executable-side fetches never fall back to
+        the last trade - a stale last can mislead exactly the guards that
+        exist to protect against unexecutable prices - and retry like a
+        missing price instead. Other callers retain the last-trade behavior.
         """
         result = None
 
@@ -601,8 +647,9 @@ class Exchange:
                 return ""
             # Fetch the ticker data for the trading pair
             ticker = await self.exchange.fetch_ticker(resolved_pair)
-            raw_price = ticker.get("ask") if prefer_ask else ticker.get("last")
-            if not raw_price:
+            if prefer_ask or prefer_bid:
+                raw_price = ticker.get("ask" if prefer_ask else "bid")
+            else:
                 raw_price = ticker.get("last")
             if not raw_price:
                 logging.debug(
@@ -625,6 +672,16 @@ class Exchange:
             self._raise_retryable_exchange_error("Fetching ticker data", exc)
 
         return result
+
+    async def get_bid_price_for_symbol(self, pair: str, config: dict[str, Any]) -> str:
+        """Return the best executable bid price for a symbol.
+
+        Exit price guards compare a pending market sell against this price
+        because it is the price an immediate market sell would realize.
+        """
+        await self._ensure_exchange(config)
+        await self._ensure_markets_loaded()
+        return await self._get_price_for_symbol(pair, prefer_bid=True)
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     async def _get_precision_for_symbol(self, pair: str) -> Any:

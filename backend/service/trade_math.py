@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
@@ -20,23 +19,13 @@ DATE_FORMATS = (
 
 
 def has_fee_inclusive_cost(order: Mapping[str, Any]) -> bool:
-    """Honor explicit provenance, with a bounded pre-flag CSV backup fallback.
+    """Honor the explicit cost provenance recorded at purchase time.
 
-    Only old rows from the CSV plugin's generated namespace inherit its stored
-    acquisition basis. An explicit False always retains legacy fee estimation.
+    Rows predating the ``cost_includes_fees`` column carry no flag and retain
+    the legacy fee estimation; MSV 6.3.0.0 removed the order-id inference
+    fallback, so an explicit ``False`` and a missing flag behave alike.
     """
-    declared = order.get("cost_includes_fees")
-    if declared is not None:
-        return declared is True
-    symbol = str(order.get("symbol") or "").replace("/", "")
-    return bool(
-        order.get("bot") == "csv_signal"
-        and symbol
-        and re.fullmatch(
-            rf"csv-signal-{re.escape(symbol)}-[0-9]+-[0-9]+",
-            str(order.get("orderid") or ""),
-        )
-    )
+    return order.get("cost_includes_fees") is True
 
 
 def calculate_order_size(price: float, amount: float) -> float:

@@ -151,11 +151,10 @@ async def _call_http_middleware(
         messages.append(message)
 
     middleware = TrustedLanHttpMiddleware(
-        inner_app,
         allowed_origins=allowed_origins,
         allowed_hosts=allowed_hosts,
     )
-    await middleware(scope, receive, send)
+    await middleware(inner_app)(scope, receive, send)
     return called, messages
 
 
@@ -283,11 +282,10 @@ async def _call_websocket_middleware(
         messages.append(message)
 
     middleware = WebSocketOriginMiddleware(
-        inner_app,
         allowed_origins=allowed_origins,
         allowed_hosts=allowed_hosts,
     )
-    await middleware(scope, receive, send)
+    await middleware(inner_app)(scope, receive, send)
     return called, messages
 
 

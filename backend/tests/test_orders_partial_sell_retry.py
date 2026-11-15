@@ -2,7 +2,7 @@ import os
 
 import model
 import pytest
-from service.orders import Orders
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from tortoise import Tortoise
 
 
@@ -40,7 +40,7 @@ async def test_receive_sell_order_uses_remaining_amount_after_partial_fill(
         sold_proceeds=10.1536,
     )
 
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
     submitted_orders: list[dict[str, float | str | bool]] = []
 
     async def fake_create_spot_sell(order, _config):
@@ -56,10 +56,10 @@ async def test_receive_sell_order_uses_remaining_amount_after_partial_fill(
     async def fake_close() -> None:
         return None
 
-    monkeypatch.setattr(orders.exchange, "create_spot_sell", fake_create_spot_sell)
-    monkeypatch.setattr(orders.exchange, "close", fake_close)
+    monkeypatch.setattr(lifecycle.exchange, "create_spot_sell", fake_create_spot_sell)
+    monkeypatch.setattr(lifecycle.exchange, "close", fake_close)
 
-    await orders.receive_sell_order(
+    await lifecycle.receive_sell_order(
         {
             "symbol": "SENT/USDC",
             "direction": "long",

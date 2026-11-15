@@ -18,6 +18,7 @@ import type { PerformanceRange } from '@/helpers/performanceRange'
 const OpenTrades = defineAsyncComponent(() => import('../components/OpenTrades.vue'))
 const ClosedTrades = defineAsyncComponent(() => import('../components/ClosedTrades.vue'))
 const UnsellableTrades = defineAsyncComponent(() => import('../components/UnsellableTrades.vue'))
+const PlacementRecoveryCard = defineAsyncComponent(() => import('../components/PlacementRecoveryCard.vue'))
 const UpnlChart = defineAsyncComponent(() => import('@/components/UpnlChart.vue'))
 const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
 
@@ -229,6 +230,8 @@ const admissionToneClass = computed(() =>
         View statistics <span aria-hidden="true">↗</span>
       </RouterLink>
     </header>
+
+    <PlacementRecoveryCard />
 
     <n-alert
       v-if="delistingWarnings.length > 0"

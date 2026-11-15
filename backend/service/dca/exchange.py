@@ -9,8 +9,14 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 import ccxt.async_support as ccxt
+from service.dca.decision import (
+    EXIT_GUARD_MAX_PRICE_REASONS,
+    EXIT_GUARD_MIN_PRICE_REASONS,
+    evaluate_exit_price_guard,
+)
 from service.dca.limit_fills import DcaLimitSellManager
 from service.dca.limit_orders import DcaLimitOrderManager
+from service.dca.limit_sell import EXIT_TIMEOUT_FALLBACK_REASONS
 from service.dca.sell_execution import DcaSellManager
 from service.dca.sell_status import (
     build_partial_sell_status,
@@ -29,9 +35,11 @@ from service.exchange_contexts import (
     MarketSellExecutionContext,
     SellRoutingContext,
 )
+from service.exchange_helpers import safe_float
 from service.exchange_risk import build_buy_precheck_result, normalize_buy_buffer_pct
 from service.exchange_types import ExchangeOrderPayload, ParsedOrderStatus
 from tenacity import (
+    RetryError,
     TryAgain,
     retry,
     retry_if_exception_type,
@@ -80,10 +88,24 @@ class DcaExchange(Exchange):
         await self._ensure_markets_loaded()
         self._last_buy_precheck_result = None
         order_check_range_seconds = self._get_order_check_range_seconds(config)
-        order["price"] = await self._get_price_for_symbol(
-            order["symbol"],
-            prefer_ask=True,
-        )
+        try:
+            order["price"] = await self._get_price_for_symbol(
+                order["symbol"],
+                prefer_ask=True,
+            )
+        except (ccxt.BaseError, RetryError, RuntimeError, TypeError, ValueError):
+            self._last_buy_precheck_result = build_buy_precheck_result(
+                ok=False,
+                reason="executable_price_unavailable",
+                symbol=str(order.get("symbol") or ""),
+                required_quote=self._resolve_required_buy_quote(order),
+            )
+            logging.error(
+                "Skipping buy for %s: executable price fetch failed.",
+                order.get("symbol"),
+                exc_info=True,
+            )
+            return None
         maximum_buy_price = float(order.get("maximum_buy_price") or 0.0)
         if maximum_buy_price > 0:
             if getattr(self.exchange, "id", None) == "bybiteu":
@@ -144,11 +166,25 @@ class DcaExchange(Exchange):
         amount_sizing_price = (
             maximum_buy_price if maximum_buy_price > 0 else order["price"]
         )
-        order["amount"] = await self._get_amount_from_symbol(
-            order["ordersize"],
-            order["symbol"],
-            amount_sizing_price,
-        )
+        try:
+            order["amount"] = await self._get_amount_from_symbol(
+                order["ordersize"],
+                order["symbol"],
+                amount_sizing_price,
+            )
+        except (ccxt.BaseError, RetryError, RuntimeError, TypeError, ValueError):
+            self._last_buy_precheck_result = build_buy_precheck_result(
+                ok=False,
+                reason="executable_price_unavailable",
+                symbol=str(order.get("symbol") or ""),
+                required_quote=self._resolve_required_buy_quote(order),
+            )
+            logging.error(
+                "Skipping buy for %s: order amount resolution failed.",
+                order.get("symbol"),
+                exc_info=True,
+            )
+            return None
         if not order["price"] or not order["amount"] or float(order["amount"]) <= 0:
             self._last_buy_precheck_result = build_buy_precheck_result(
                 ok=False,
@@ -423,6 +459,7 @@ class DcaExchange(Exchange):
                     create_market_fallback or self._create_spot_market_fallback
                 ),
                 can_fallback_to_market_sell=self._can_fallback_to_market_sell,
+                can_fallback_after_exit_timeout=self._can_fallback_after_exit_timeout,
             ),
         )
 
@@ -479,17 +516,21 @@ class DcaExchange(Exchange):
             return True
 
         fallback_min_price = order.get("fallback_min_price")
-        if fallback_min_price in (None, False):
+        if fallback_min_price is None or fallback_min_price is False:
             return True
 
         try:
+            if isinstance(fallback_min_price, bool):
+                return False
             min_price = float(fallback_min_price)
         except (TypeError, ValueError):
-            return True
+            return False
 
         try:
-            current_price = float(await self._get_price_for_symbol(order["symbol"]))
-        except (ccxt.BaseError, RuntimeError, TypeError, ValueError) as exc:
+            current_price = float(
+                await self._get_price_for_symbol(order["symbol"], prefer_bid=True)
+            )
+        except (ccxt.BaseError, RetryError, RuntimeError, TypeError, ValueError) as exc:
             logging.warning(
                 "Skipping market fallback for %s: could not determine current price (%s).",
                 order.get("symbol"),
@@ -497,16 +538,85 @@ class DcaExchange(Exchange):
             )
             return False
 
-        if current_price < min_price:
+        justified, reason = evaluate_exit_price_guard(
+            sell_reason="take_profit", fresh_price=current_price, min_price=min_price
+        )
+        if not justified:
             logging.info(
-                "Skipping market fallback for %s: current price %.10f is below "
-                "minimum fallback price %.10f.",
+                "Skipping market fallback for %s: bid %.10f and minimum "
+                "price %.10f failed the take-profit guard (%s).",
                 order.get("symbol"),
                 current_price,
                 min_price,
+                reason,
+            )
+        return justified
+
+    async def _can_fallback_after_exit_timeout(
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+        fallback_reason: str,
+    ) -> bool:
+        """Check whether a limit exit timeout still justifies market fallback.
+
+        Non-TP engine exits (stop loss, trailing take profit, autopilot
+        timeout) carry the engine's exit guard bounds on the order payload.
+        Verify the fresh bid against those bounds before a market fallback
+        can be sent. TP exits keep their existing floor behavior and any
+        other reason (for example manual sells) passes through unchanged.
+        """
+        if fallback_reason not in EXIT_TIMEOUT_FALLBACK_REASONS:
+            return True
+        sell_reason = str(order.get("sell_reason") or "")
+        guarded_reasons = EXIT_GUARD_MIN_PRICE_REASONS | EXIT_GUARD_MAX_PRICE_REASONS
+        if sell_reason == "take_profit" or sell_reason not in guarded_reasons:
+            return True
+        try:
+            raw_price = await self._get_price_for_symbol(
+                order["symbol"],
+                prefer_bid=True,
+            )
+        except (
+            ccxt.BaseError,
+            RetryError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            logging.warning(
+                "Skipping market fallback for %s: could not determine the "
+                "current price for the exit price guard (%s).",
+                order.get("symbol"),
+                exc,
             )
             return False
-
+        fresh_price = safe_float(raw_price)
+        if fresh_price is None or fresh_price <= 0:
+            logging.warning(
+                "Skipping market fallback for %s: the exit price guard "
+                "returned an unusable price %r.",
+                order.get("symbol"),
+                raw_price,
+            )
+            return False
+        justified, reason_code = evaluate_exit_price_guard(
+            sell_reason=sell_reason,
+            fresh_price=fresh_price,
+            min_price=safe_float(order.get("exit_guard_min_price")),
+            max_price=safe_float(order.get("exit_guard_max_price")),
+        )
+        if not justified:
+            logging.info(
+                "Skipping market fallback for %s: fresh bid %.10f no longer "
+                "justifies the %s exit (guard=%s fallback_reason=%s).",
+                order.get("symbol"),
+                fresh_price,
+                sell_reason,
+                reason_code,
+                fallback_reason,
+            )
+            return False
         return True
 
     async def _build_sell_order_status(
@@ -554,7 +664,7 @@ class DcaExchange(Exchange):
             reference_price=reference_price,
             is_market_order=str(order.get("ordertype") or "").lower() != "limit",
         )
-        return build_partial_sell_status(
+        partial = build_partial_sell_status(
             symbol=symbol,
             partial_amount=sold_amount,
             partial_avg_price=reference_price,
@@ -565,6 +675,10 @@ class DcaExchange(Exchange):
             unsellable_min_notional=unsellable_min_notional,
             unsellable_estimated_notional=unsellable_estimated_notional,
         )
+        order_id = finalized_status.get("orderid") or order.get("id")
+        if order_id:
+            partial["id"] = str(order_id)
+        return partial
 
     def _classify_sell_remainder(
         self,

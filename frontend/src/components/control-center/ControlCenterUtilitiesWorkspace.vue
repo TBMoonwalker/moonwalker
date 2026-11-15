@@ -1,27 +1,37 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
-import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
+import type {
+    BackupClassification,
+    BackupRestoreMode,
+    RestoreReviewState,
+} from '../../composables/useConfigBackupRestore'
 import ConfigBackupDownloadControls from '../config/ConfigBackupDownloadControls.vue'
 import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'
 
-type BackupRestoreMode = 'config' | 'full'
-
-defineProps<{
-    backupDownloadLoading: boolean
-    backupIncludeTradeData: boolean
-    backupRestoreSummary: string
-    backupRestoreTitle: string
-    bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
-    bindBackupRestoreTargetRef: (element: Element | import('vue').ComponentPublicInstance | null) => void
-    canTestMonitoringTelegram: boolean
-    hasSelectedBackupPayload: boolean
-    monitoringTestLoading: boolean
-    restoreLoading: boolean
-    restoreReview: RestoreReviewState | null
-    selectedBackupConfigCount: number
-    selectedBackupFileName: string | null
-    selectedBackupHasTradeData: boolean
-}>()
+withDefaults(
+    defineProps<{
+        backupClassifications?: Partial<Record<BackupRestoreMode, BackupClassification>>
+        backupDownloadLoading: boolean
+        backupIncludeTradeData: boolean
+        backupRestoreSummary: string
+        backupRestoreTitle: string
+        bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
+        bindBackupRestoreTargetRef: (element: Element | import('vue').ComponentPublicInstance | null) => void
+        canTestMonitoringTelegram: boolean
+        classificationLoading?: boolean
+        hasSelectedBackupPayload: boolean
+        monitoringTestLoading: boolean
+        restoreLoading: boolean
+        restoreReview: RestoreReviewState | null
+        selectedBackupConfigCount: number
+        selectedBackupFileName: string | null
+        selectedBackupHasTradeData: boolean
+    }>(),
+    {
+        backupClassifications: () => ({}),
+        classificationLoading: false,
+    },
+)
 
 const emit = defineEmits<{
     'backup-file-selected': [event: Event]
@@ -72,7 +82,9 @@ const emit = defineEmits<{
                 </div>
                 <ConfigBackupRestoreControls
                     action-button-class="utility-action-button"
+                    :backup-classifications="backupClassifications"
                     :bind-backup-file-input="bindBackupFileInput"
+                    :classification-loading="classificationLoading"
                     :has-selected-backup-payload="hasSelectedBackupPayload"
                     :restore-loading="restoreLoading"
                     :restore-review="restoreReview"

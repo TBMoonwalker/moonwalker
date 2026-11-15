@@ -108,6 +108,24 @@ class DcaSellManager(ExchangeSellManager):
                     default_symbol=str(order.get("symbol")),
                 )
 
+            if not await context.can_fallback_after_exit_timeout(
+                order,
+                config,
+                fallback_reason,
+            ):
+                result = build_partial_status_from_fallback(
+                    order_status,
+                    default_symbol=str(order.get("symbol")),
+                )
+                if (
+                    fallback_reason == "limit_order_timeout"
+                    and order_status.get("partial_filled_amount") == 0
+                    and not order_status.get("executions")
+                    and order_status.get("exchange_order_id")
+                ):
+                    result["exit_guard_canceled_zero_fill"] = True
+                return result
+
             self._log_market_fallback_reason(order, fallback_reason)
             remaining_order = dict(order)
             remaining_order["total_amount"] = float(

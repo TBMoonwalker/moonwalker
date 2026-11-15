@@ -179,7 +179,10 @@ const {
     isFresh: () => dcaDataFresh.value,
     generation: () => openTradeSocket.generation + statistics_store.generation,
     currentTrade: (symbol) => open_trades.value.find(row => row.symbol === symbol),
-    onAfterDeny: async () => { await configSnapshotStore.refresh() },
+    onAfterDeny: async () => {
+        await configSnapshotStore.refresh()
+        configSnapshotStore.emitLocalInvalidation('deny')
+    },
 })
 const {
     handlePauseMission,

@@ -1,8 +1,12 @@
 import asyncio
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import app as app_module
 import pytest
+from httpx import ASGITransport, AsyncClient
+from litestar import Litestar
+from litestar.handlers import get, post
+from litestar.params import FromPath
 from service.ai_work_queue import AiWorkQueue
 from service.background_work_queue import BoundedWorkQueue
 
@@ -99,14 +103,21 @@ class _FakeSignal:
 class _FakePlacementSummary:
     ready = True
     action_required: tuple[str, ...] = ()
+    remaining: int = 0
 
 
-class _FakePlacementOrders:
+class _FakePlacementRecovery:
+    def __init__(self, *, lifecycle: object) -> None:
+        self.dca = lifecycle
+
     async def reconcile_placement_intents(
         self,
         _config: dict[str, object],
     ) -> _FakePlacementSummary:
         return _FakePlacementSummary()
+
+    def build_placement_repair(self) -> object:
+        return object()
 
     async def close(self) -> None:
         return None
@@ -254,7 +265,9 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
     monkeypatch.setattr(
         app_module, "build_accumulation_runtime", lambda _provider: accumulation
     )
-    monkeypatch.setattr(app_module, "runtime_state", app_module.RuntimeState())
+    monkeypatch.setattr(
+        app_module, "runtime_state", app_module.RuntimeState(recovery_mode="placement")
+    )
     monkeypatch.setattr(app_module, "start_redis", lambda: object())
     monkeypatch.setattr(app_module, "redis_client", _FakeRedisClient())
     monkeypatch.setattr(
@@ -263,7 +276,7 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
         fake_market_cap_service,
     )
     monkeypatch.setattr(app_module, "Database", lambda: fake_database)
-    monkeypatch.setattr(app_module, "Orders", _FakePlacementOrders)
+    monkeypatch.setattr(app_module, "PlacementRecoveryEntry", _FakePlacementRecovery)
     monkeypatch.setattr(app_module, "Config", _FakeConfigFactory)
     monkeypatch.setattr(app_module, "Watcher", _FakeWatcher)
     monkeypatch.setattr(app_module, "Housekeeper", _FakeHousekeeper)
@@ -341,14 +354,14 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
             assert accumulation.startup_calls == 1
             assert accumulation.running
             assert (
-                app_module.runtime_state.placement_orders.accumulation_recovery
+                app_module.runtime_state.placement_recovery.accumulation_recovery
                 == accumulation.recovery.reconcile
             )
         assert app_module.runtime_state.controller_services is not None
         assert app_module.runtime_state.controller_services.accumulation is accumulation
         assert (
-            app_module.runtime_state.controller_services.orders
-            is app_module.runtime_state.placement_orders
+            app_module.runtime_state.controller_services.order_lifecycle
+            is app_module.runtime_state.placement_recovery.dca
         )
 
     assert fake_market_cap_service.shutdown_calls == 1
@@ -356,6 +369,175 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
     if accumulation is not None:
         assert accumulation.closed and not accumulation.running
         assert app_module.runtime_state.accumulation_runtime is None
+
+
+def _patch_startup_gate_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    recovery_factory: type,
+) -> None:
+    """Patch the globals startup touches before the placement reconciliation gate."""
+    monkeypatch.setattr(app_module, "runtime_state", app_module.RuntimeState())
+    monkeypatch.setattr(app_module, "start_redis", lambda: object())
+    monkeypatch.setattr(app_module, "redis_client", _FakeRedisClient())
+    monkeypatch.setattr(
+        app_module,
+        "coin_market_cap_rank_service",
+        _FakeMarketCapRankService(),
+    )
+    monkeypatch.setattr(app_module, "Database", lambda: _FakeDatabase())
+    monkeypatch.setattr(app_module, "PlacementRecoveryEntry", recovery_factory)
+    monkeypatch.setattr(app_module, "Config", _FakeConfigFactory)
+    monkeypatch.setattr(
+        app_module, "build_accumulation_runtime", lambda _provider: None
+    )
+    # The gate paths never start the fanouts, but shutdown stops them; a
+    # stop on the shared fanouts would mark them stopped for later tests.
+    for controller in (
+        app_module.trades_controller,
+        app_module.statistics_controller,
+    ):
+        monkeypatch.setattr(controller, "start_websocket_fanout", _noop_async)
+        monkeypatch.setattr(controller, "stop_websocket_fanout", _noop_async)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_serves_placement_recovery_when_only_quarantined_intents_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Quarantined-only classic-DCA work must serve recovery, not crash."""
+
+    class _QuarantinedSummary(_FakePlacementSummary):
+        ready = False
+        action_required = ("limit_sell-abc123",)
+
+    class _QuarantinedRecovery(_FakePlacementRecovery):
+        async def reconcile_placement_intents(self, _config):
+            return _QuarantinedSummary()
+
+    _patch_startup_gate_dependencies(monkeypatch, _QuarantinedRecovery)
+
+    async with app_module.runtime_lifespan(None):
+        assert app_module.runtime_state.recovery_mode == "placement"
+        assert app_module.runtime_state.controller_services is not None
+        assert app_module.runtime_state.background_tasks == []
+        assert app_module.runtime_state.watcher is None
+        assert app_module.runtime_state.signal_plugin is None
+
+    assert app_module.runtime_state.controller_services is None
+    assert app_module.runtime_state.recovery_mode == "placement"
+
+
+@pytest.mark.asyncio
+async def test_lifespan_stays_fatal_when_nonterminal_work_remains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A quarantined intent plus leftover nonterminal work keeps the crash gate."""
+
+    class _MixedSummary(_FakePlacementSummary):
+        ready = False
+        action_required = ("limit_sell-abc123",)
+        remaining = 1
+
+    class _MixedRecovery(_FakePlacementRecovery):
+        async def reconcile_placement_intents(self, _config):
+            return _MixedSummary()
+
+    _patch_startup_gate_dependencies(monkeypatch, _MixedRecovery)
+
+    with pytest.raises(RuntimeError, match="requires operator action"):
+        async with app_module.runtime_lifespan(None):
+            pass
+
+    assert app_module.runtime_state.recovery_mode is None
+    assert app_module.runtime_state.controller_services is None
+
+
+@pytest.mark.asyncio
+async def test_recovery_middleware_gates_placement_recovery_routes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Placement recovery mode allows exactly the recovery reads and actions."""
+    monkeypatch.setattr(app_module, "runtime_state", app_module.RuntimeState())
+    app_module.runtime_state.recovery_mode = "placement"
+    served: list[str] = []
+
+    @get(path="/orders/placement-recovery")
+    async def list_recovery() -> dict[str, list[str]]:
+        served.append("list")
+        return {"intents": []}
+
+    @post(
+        path="/orders/placement-recovery/{operation_id:str}/repair",
+        status_code=200,
+    )
+    async def repair_one(operation_id: FromPath[str]) -> dict[str, str]:
+        served.append(f"repair:{operation_id}")
+        return {"status": "unchanged"}
+
+    @post(
+        path="/orders/placement-recovery/{operation_id:str}/dismiss",
+        status_code=200,
+    )
+    async def dismiss_one(operation_id: FromPath[str]) -> dict[str, str]:
+        served.append(f"dismiss:{operation_id}")
+        return {"status": "dismissed"}
+
+    @get(path="/trades/open")
+    async def forbidden_history() -> dict[str, bool]:
+        served.append("history")
+        return {"read": True}
+
+    @post(path="/orders/sell/BTC/USDC", status_code=200)
+    async def forbidden_sale() -> dict[str, bool]:
+        served.append("sell")
+        return {"sold": True}
+
+    app = Litestar(
+        route_handlers=[
+            list_recovery,
+            repair_one,
+            dismiss_one,
+            forbidden_history,
+            forbidden_sale,
+        ],
+        middleware=[app_module.RecoveryOnlyMiddleware()],
+        openapi_config=None,
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://localhost"
+    ) as http:
+        assert (await http.get("/orders/placement-recovery")).status_code == 200
+        assert (
+            await http.post("/orders/placement-recovery/op-1/repair")
+        ).status_code == 200
+        assert (
+            await http.post(
+                "/orders/placement-recovery/op-1/dismiss", json={"note": "n"}
+            )
+        ).status_code == 200
+        for method, path, expected in (
+            ("GET", "/trades/open", 503),
+            ("POST", "/orders/sell/BTC/USDC", 409),
+        ):
+            rejected = await http.request(method, path, json={})
+            assert rejected.status_code == expected
+            assert rejected.json()["code"] == "recovery_only"
+        # Unmatched paths return 404 before any middleware runs in
+        # Litestar, so a non-action path under the recovery namespace is
+        # still unreachable.
+        missing = await http.post(
+            "/orders/placement-recovery/op-1/unknown-action", json={}
+        )
+        assert missing.status_code == 404
+        assert served == ["list", "repair:op-1", "dismiss:op-1"]
+
+        downstream = Mock()
+        sent = AsyncMock()
+        await app_module.RecoveryOnlyMiddleware()(downstream)(
+            {"type": "websocket", "path": "/trades/open"}, Mock(), sent
+        )
+        sent.assert_awaited_once_with({"type": "websocket.close", "code": 1013})
+        downstream.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -665,7 +847,7 @@ async def test_shutdown_attempts_later_resources_after_early_failure(
         signal_plugin=FailingSignal(),  # type: ignore[arg-type]
         watcher=ShutdownService("watcher"),  # type: ignore[arg-type]
         housekeeper=ShutdownService("housekeeper"),  # type: ignore[arg-type]
-        placement_orders=CloseService("placement_orders"),  # type: ignore[arg-type]
+        placement_recovery=CloseService("placement_recovery"),  # type: ignore[arg-type]
         market_cap_rank_service=ShutdownService("market_cap"),  # type: ignore[arg-type]
         database=ShutdownService("database"),  # type: ignore[arg-type]
     )
@@ -695,14 +877,15 @@ async def test_shutdown_attempts_later_resources_after_early_failure(
         "signal",
         "watcher",
         "housekeeper",
-        "placement_orders",
+        "placement_recovery",
         "market_cap",
         "database",
         "provider",
         "redis",
     ]
     assert state.signal_plugin is None
-    assert state.placement_orders is None
+    assert state.placement_recovery is None
+    assert state.order_lifecycle is None
     assert state.database is None
 
 
@@ -736,3 +919,125 @@ class _FakeAccumulationRuntime:
     async def shutdown(self):
         assert self.stopping and not self.running
         self.closed = True
+
+
+class _BlockedAccumulationRuntime(_FakeAccumulationRuntime):
+    """Accumulation runtime that is blocked and not repair-ready."""
+
+    repair_ready = False
+    ready = False
+
+    async def startup(self) -> bool:
+        self.startup_calls += 1
+        return False
+
+
+class _QuarantinedOnlySummary(_FakePlacementSummary):
+    ready = False
+    action_required = ("limit_sell-abc123",)
+
+
+class _QuarantinedOnlyRecovery(_FakePlacementRecovery):
+    async def reconcile_placement_intents(self, _config):
+        return _QuarantinedOnlySummary()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_stays_fatal_when_placement_only_mode_would_hide_accumulation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blocked non-repair-ready accumulation runtime forbids placement-only mode."""
+
+    _patch_startup_gate_dependencies(monkeypatch, _QuarantinedOnlyRecovery)
+    monkeypatch.setattr(
+        app_module,
+        "build_accumulation_runtime",
+        lambda _provider: _BlockedAccumulationRuntime(),
+    )
+
+    with pytest.raises(RuntimeError, match="not in a repair-ready state"):
+        async with app_module.runtime_lifespan(None):
+            pass
+
+    assert app_module.runtime_state.recovery_mode is None
+    assert app_module.runtime_state.controller_services is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["placement", "accumulation"])
+async def test_recovery_middleware_allows_only_known_spa_deep_links(monkeypatch, mode):
+    """Recovery permits dashboard entry points without reopening APIs."""
+    monkeypatch.setattr(app_module.runtime_state, "recovery_mode", mode)
+    downstream = AsyncMock()
+    send = AsyncMock()
+    middleware = app_module.RecoveryOnlyMiddleware()(downstream)
+    routes = (
+        "/",
+        "/index.html",
+        "/control-center",
+        "/control-center/autopilot",
+        "/backtest",
+        "/monitoring",
+        "/stats",
+        "/statistics",
+        "/config",
+        "/settings",
+    )
+    for method in ("GET", "HEAD"):
+        for path in routes:
+            downstream.reset_mock()
+            send.reset_mock()
+            scope = {"type": "http", "method": method, "path": path}
+            receive = AsyncMock()
+            await middleware(scope, receive, send)
+            downstream.assert_awaited_once_with(scope, receive, send)
+            send.assert_not_awaited()
+
+    for method, path, status in (
+        ("GET", "/control-center/unknown", 503),
+        ("GET", "/trades/open", 503),
+        ("GET", "/config/freshness", 503),
+        ("POST", "/control-center", 409),
+        ("PUT", "/config/all", 409),
+    ):
+        downstream.reset_mock()
+        send.reset_mock()
+        await middleware(
+            {"type": "http", "method": method, "path": path}, AsyncMock(), send
+        )
+        downstream.assert_not_awaited()
+        assert send.await_args_list[0].args[0]["status"] == status
+        assert b'"recovery_only"' in send.await_args_list[1].args[0]["body"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["placement", "accumulation"])
+async def test_recovery_deep_links_serve_spa_over_http(tmp_path, monkeypatch, mode):
+    """Real SPA routes remain available while API requests stay restricted."""
+    from controller import frontend
+
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    (template_dir / "index.html").write_text("<html>recovery dashboard</html>")
+    monkeypatch.setattr(frontend, "TEMPLATE_DIR", template_dir)
+    monkeypatch.setattr(frontend, "STATIC_DIR", tmp_path / "static")
+    monkeypatch.setattr(app_module.runtime_state, "recovery_mode", mode)
+
+    @get(path="/trades/open")
+    async def blocked_api() -> dict[str, bool]:
+        return {"unexpected": True}
+
+    application = Litestar(
+        route_handlers=[blocked_api, *frontend.route_handlers],
+        middleware=[app_module.RecoveryOnlyMiddleware()],
+        openapi_config=None,
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://localhost"
+    ) as client:
+        for path in ("/control-center", "/control-center/autopilot", "/stats"):
+            response = await client.get(path)
+            assert response.status_code == 200
+            assert "recovery dashboard" in response.text
+        assert (await client.get("/trades/open")).status_code == 503
+        assert (await client.get("/unknown-dashboard-path")).status_code == 503

@@ -151,7 +151,11 @@
   font-weight: normal;
 }
 
-body {
+/* `html body` (0,0,2) outranks Naive UI's lazy-injected global body reset
+   (0,0,1), which would otherwise win the cascade by insertion order and
+   render the document at 14px / v-sans / line-height 1.6 instead of the
+   documented 16px / General Sans / 1.5. */
+html body {
   min-height: 100vh;
   color: var(--color-text);
   background: var(--color-background);

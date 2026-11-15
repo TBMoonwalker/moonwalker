@@ -3,7 +3,12 @@ import os
 
 import pytest
 import service.config as config_module
-from service.config import Config, parse_denylist_tokens, to_base_token
+from service.config import (
+    Config,
+    StaleConfigRevision,
+    parse_denylist_tokens,
+    to_base_token,
+)
 from service.filter import Filter
 from tortoise import Tortoise
 
@@ -91,6 +96,53 @@ async def test_concurrent_appends_do_not_clobber_each_other(
 
 
 @pytest.mark.asyncio
+async def test_stale_full_form_save_cannot_lose_concurrent_deny(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A whole-list form save based on an older generation must not overwrite
+    a deny that was appended while the form was open."""
+    config, _ = await _make_config(tmp_path, monkeypatch)
+
+    # The operator loads the config form: revision R1, empty denylist.
+    _, revision = await config.snapshot_with_revision()
+    assert parse_denylist_tokens(config.get("pair_denylist")) == []
+
+    # A second client denies a symbol while the form is open.
+    tokens = await config.append_denylist_token("FO0/USDT")
+    assert tokens == ["FO0"]
+    _, after_deny = await config.snapshot_with_revision()
+    assert after_deny == revision + 1
+
+    # The stale form submits a full-list save based on the old generation.
+    with pytest.raises(StaleConfigRevision):
+        await config.batch_set(
+            {
+                "pair_denylist": {"value": "", "type": "str"},
+                "timezone": {"value": "UTC", "type": "str"},
+            },
+            expected_revision=revision,
+        )
+
+    # The newer deny survived; the rejected save persisted nothing and did
+    # not advance the revision.
+    assert parse_denylist_tokens(config.get("pair_denylist")) == ["FO0"]
+    assert config.get("timezone") is None
+    _, after_reject = await config.snapshot_with_revision()
+    assert after_reject == after_deny
+
+    # A fresh form can still remove the token on purpose.
+    _, fresh = await config.snapshot_with_revision()
+    await config.batch_set(
+        {"pair_denylist": {"value": "", "type": "str"}},
+        expected_revision=fresh,
+    )
+    assert parse_denylist_tokens(config.get("pair_denylist")) == []
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_deny_block_future_entry_via_filter(tmp_path, monkeypatch) -> None:
     config, _ = await _make_config(tmp_path, monkeypatch)
 
@@ -130,20 +182,5 @@ async def test_deny_does_not_close_open_trade(tmp_path, monkeypatch) -> None:
     assert (await model.OpenTrades.filter(symbol="FO0/USDT").count()) == 1
     # No closed-trade row was created as a side effect of the deny write.
     assert (await model.ClosedTrades.filter(symbol="FO0/USDT").count()) == 0
-
-    await Tortoise.close_connections()
-
-
-@pytest.mark.asyncio
-async def test_merge_denylist_tokens_clears_list(tmp_path, monkeypatch) -> None:
-    config, _ = await _make_config(tmp_path, monkeypatch)
-
-    await config.append_denylist_token("FO0")
-    await config.append_denylist_token("ETH")
-    assert parse_denylist_tokens(config.get("pair_denylist")) == ["FO0", "ETH"]
-
-    ordered = await config.merge_denylist_tokens([])
-    assert ordered == []
-    assert parse_denylist_tokens(config.get("pair_denylist")) == []
 
     await Tortoise.close_connections()

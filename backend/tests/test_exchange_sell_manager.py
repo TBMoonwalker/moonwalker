@@ -33,6 +33,14 @@ class _DummyExchange:
         return {"id": "sell-1", "symbol": _symbol}
 
 
+async def _pass_through_exit_timeout_guard(
+    _order: dict[str, object],
+    _config: dict[str, object],
+    _fallback_reason: str,
+) -> bool:
+    return True
+
+
 @pytest.mark.asyncio
 async def test_create_spot_market_sell_initializes_exchange_before_lookup() -> None:
     holder: dict[str, _DummyExchange | None] = {"exchange": None}
@@ -138,6 +146,7 @@ async def test_create_spot_sell_returns_partial_when_fallback_disabled() -> None
             create_spot_market_sell=fake_market_sell,
             create_spot_market_fallback=fake_market_fallback,
             can_fallback_to_market_sell=fake_guard,
+            can_fallback_after_exit_timeout=_pass_through_exit_timeout_guard,
         ),
     )
 
@@ -197,6 +206,7 @@ async def test_create_spot_sell_preserves_tp_floor_after_limit_timeout() -> None
             create_spot_market_sell=fake_market_sell,
             create_spot_market_fallback=fake_market_fallback,
             can_fallback_to_market_sell=fake_guard,
+            can_fallback_after_exit_timeout=_pass_through_exit_timeout_guard,
         ),
     )
 
@@ -264,6 +274,7 @@ async def test_create_spot_sell_live_price_floor_fallback_sells_when_guard_passe
             create_spot_market_sell=fake_market_fallback,
             create_spot_market_fallback=fake_market_fallback,
             can_fallback_to_market_sell=fake_guard,
+            can_fallback_after_exit_timeout=_pass_through_exit_timeout_guard,
         ),
     )
 
@@ -322,6 +333,7 @@ async def test_create_spot_sell_live_price_floor_fallback_keeps_open_when_guard_
             create_spot_market_sell=fake_market_fallback,
             create_spot_market_fallback=fake_market_fallback,
             can_fallback_to_market_sell=fake_guard,
+            can_fallback_after_exit_timeout=_pass_through_exit_timeout_guard,
         ),
     )
 
@@ -370,6 +382,7 @@ async def test_create_spot_sell_marks_below_minimum_limit_remainder_unsellable()
             create_spot_market_sell=should_not_sell,
             create_spot_market_fallback=should_not_sell,
             can_fallback_to_market_sell=should_not_sell,
+            can_fallback_after_exit_timeout=_pass_through_exit_timeout_guard,
         ),
     )
 

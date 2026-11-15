@@ -39,13 +39,21 @@ requirements installation step before launching `backend/app.py` directly.
 Starting `backend/app.py` from an existing virtual environment bypasses
 dependency synchronization after an upgrade.
 
+An incomplete frontend stage is refused before the app starts: `./run.sh start`
+verifies that the staged entrypoint references only assets that are present in
+`backend/static`, and startup logs an error when the stage is missing or
+partial. While the stage is incomplete, dashboard routes answer HTTP 500 with
+a JSON body (`{"detail": ...}`) that names the gap and the `./run.sh start`
+remedy instead of serving a blank page.
+
 ## Minimum supported version
 
 Moonwalker declares a minimum supported version (MSV). Legacy migration and
 compatibility code that predates it is kept only until an install is known to
 have reached the floor.
 
-- **Minimum supported version:** `4.9.0.0`, the sidestep-removal release.
+- **Minimum supported version:** `6.3.0.0`, the release that removed the
+  remaining Phase 4 data-compat shims.
 - **Posture:** report only. A `preflight_msv` step runs at startup, before any
   schema or config migration callback, and records the install's baseline. It
   **never blocks startup** and **never mutates a ledger**: an install that
@@ -54,36 +62,62 @@ have reached the floor.
 The preflight reports three outcomes:
 
 - `supported` — the install's configuration ledger already contains the
-  `2026-09-sidestep-removal-v1` migration row, so it has run at or after the
-  floor.
-- `unsupported` — the install has schema history (it is not fresh) but its
-  configuration ledger predates the floor. Startup logs a `WARNING` with the
+  `2026-11-msv-floor-6-3-v1` migration row.
+- `unsupported` — the install has schema history or legacy trade-mode keys,
+  but its configuration ledger has no floor marker. Startup logs a `WARNING` with the
   upgrade path and the dashboard reports the same state at
   `GET /monitoring/msv`.
-- `fresh` — no ledger history at all. Treated as supported; it will receive the
-  current migrations on the same startup.
+- `fresh` — no ledger history or legacy trade-mode keys. Treated as supported;
+  it will receive the current migrations on the same startup.
 
 ### Why the configuration ledger is the floor signal
 
-The floor release deliberately added no schema migration, so a `4.8.x` and a
-`4.9.x` database share an identical schema ledger and cannot be told apart
-structurally. The non-self-healing marker that an install reached the floor is
-the `2026-09-sidestep-removal-v1` row in the `config_migrations` ledger.
-Databases that ran the floor release carry the row from that release onward.
-Databases created after the trade-mode migration was removed receive the row
-on their first startup only if they carry no pre-floor legacy bridge keys; a
-database that still carries those keys is left unmarked and keeps reporting
-`unsupported`, so the row stays a true floor signal rather than a self-healing
-one.
+The floor release deliberately added no schema migration, so a database from
+the release before the floor and one from the floor release share an identical
+schema ledger and cannot be told apart structurally. The non-self-healing
+marker that an install reached the floor is the `2026-11-msv-floor-6-3-v1` row
+in the `config_migrations` ledger. A clean fresh install is marked before
+schema history exists, so an interrupted startup cannot create a false
+pre-floor baseline. A fresh database carrying legacy trade-mode keys is not
+marked. An existing database without the marker is not automatically marked:
+running newer software alone does not establish that its old data is compatible.
+Earlier versions could write this marker automatically on an existing
+installation. An already-present marker therefore does not prove that legacy
+trade or strategy data was converted, and this change cannot reconstruct the
+prior baseline after the marker was written.
+
+### What the 6.3.0.0 floor gates
+
+Raising the floor to `6.3.0.0` is what let the last deferred Phase 4
+data-compat shims be removed:
+
+- The CSV fee-provenance fallback in `service/trade_math.py`, which inferred
+  fee-inclusive costs from `csv-signal-*` order IDs for rows created before
+  the `cost_includes_fees` column existed (migration 016, released in
+  `5.3.0.0`). Such rows no longer have fee-inclusive cost inferred; they are
+  valued through the legacy fee-estimation path like any other unmarked row.
+- The four-column accumulation CSV declaration format
+  (`date;symbol;price;amount`). Accumulation CSV entries now require the
+  fee-aware columns and four-column files are rejected with an explicit
+  error. The classic Dynamic DCA CSV import keeps its four-column format.
+- The `legacy_accumulation_graph` editor view for legacy-shape accumulation
+  preset documents. Legacy documents remain fully readable by the accumulation
+  runtime and strategy catalog, but the strategy detail endpoint no longer
+  renders them as an editable graph, and duplicating one is rejected.
 
 ### Upgrade path for a pre-floor install
 
-1. Upgrade the installation through `4.9.0.0`.
-2. Save the configuration and export a fresh full backup through the backup tool,
-   so any removed legacy bridge is gone from the persisted data.
+1. Upgrade the installation to `6.3.0.0`.
+2. Review any legacy trade, strategy and configuration data, and export a
+   full backup through the backup tool before making changes. A new backup
+   alone does not convert or verify the existing data.
 
-The trade-mode bridge removal shipped first under that gate; the remaining
-removal passes stay gated on every install reaching `4.9.0.0`.
+Installs below the floor still load and run (report-only), but their pre-floor
+data shapes — unmarked CSV trade rows, four-column accumulation declarations,
+and legacy-shape accumulation preset documents — are no longer supported. The
+pre-floor warning persists on later startups when the floor marker is absent.
+Saving configuration and exporting a backup do not by themselves establish the
+provenance of existing trade or strategy data, or automatically clear the warning.
 
 > **Changelog drift reconciled (B2 removal pass, 2026-11-01).** The
 > `4.0.0.0` changelog entry claimed the legacy trade-mode config keys
@@ -93,6 +127,39 @@ removal passes stay gated on every install reaching `4.9.0.0`.
 > `4.9.0.0` it canonicalized the keys until this removal. That migration and
 > its guards are now gone, the historical entry is corrected, and the
 > unreleased changelog entry documents the current restore behavior.
+
+### Migration ledger retention
+
+The startup migration ledgers (`schema_migrations`, `config_migrations`)
+record which migrations a database has applied; the checksums on those rows
+are the recovery contract, so they are never trimmed outside a gated,
+ledger-tracked step. Once an install is at the floor, the one-time hygiene
+step `2026-11-09-024-ledger-hygiene-prune` bounds their growth:
+
+- **Watermark:** every ledger row whose version sorts older than the prune
+  step is deleted. At the `6.3.0.0` floor that is the entire pre-floor
+  history (migrations 001-022); rows added after the floor accumulate only
+  until the next floor raise retires them in turn.
+- **Always kept:** the floor marker row (`2026-11-msv-floor-6-3-v1`), the
+  still-live signal-settings migration row (`2026-07-signal-settings-v1`,
+  whose `backup_json` is the only pre-canonicalization snapshot), and every
+  row on a pre-floor install — the step is gated on the floor marker and
+  never touches a database below the floor.
+- **Retire rule:** the pruned migrations' definitions stay in the code so
+  unsupported installs crossing the floor from below still migrate. On a
+  pruned database the migration runner skips a definition only when its row
+  is *missing*, its version is older than the prune step, and the prune row
+  is durably `applied`. Rows that exist (including a failed one) are still
+  retried, and the checksum gate is unchanged.
+- **Idempotent and resumable:** the deletes run in one transaction and the
+  step's own ledger row records its outcome; a killed startup re-runs the
+  (no-op) deletes and converges on the pruned state.
+- **What a prune discards:** only the `applied_at` timestamps of retired
+  rows — their version, description and checksum stay reconstructible from
+  the migration definitions and git history. The inert pre-4.9
+  `2026-09-sidestep-removal-v1` config row is dropped as well; its backup
+  carried only legacy trade-mode values that were all equivalent to the
+  default `trade_mode`, so the drop is lossless.
 
 ## Shared local Redis
 
@@ -266,11 +333,31 @@ Two restore modes are available:
 
 Backups created before `4.9.0.0` may still carry the raw trade-mode bridge
 keys (`trade_lifecycle_mode`, top-level `dynamic_dca`,
-`sidestep_campaign_enabled`). Restoring such a backup is still supported: the
-three keys are dropped silently and the rest of the backup restores normally,
-because every legacy representation was equivalent to the default `trade_mode`
-value (`dynamic_dca`). All other removed config keys are still rejected on
-restore with a message that names the replacement key.
+`sidestep_campaign_enabled`). The 4.8.x-and-earlier trade-mode era is no
+longer a supported restore source, so restoring such a backup is rejected
+like any other removed config key, with a message that names the canonical
+`trade_mode` key. To restore one, remove the three keys from the backup's
+config rows first (every legacy representation was equivalent to the default
+`trade_mode` value (`dynamic_dca`), so nothing is lost) and retry.
+
+Before the restore confirmation, the dashboard runs a read-only backup review
+(`POST /config/backup/classify`) over the selected file and shows the outcome:
+
+- The review names the backup's era (`accumulation`, `dynamic_dca`, or
+  `legacy_unspecified`) and every silent outcome the restore would perform:
+  row values whose columns no longer exist in the current schema (including
+  the sidestep-era waiting-state values), the count of placement intents that
+  will restore into quarantine, and the config-only removal of the local
+  accumulation pin.
+- A backup that the restore would refuse (campaign residue on open trades,
+  removed config keys, incomplete accumulation sections, or an invalid sealed
+  recovery manifest) is flagged as blocking, and the matching restore button
+  is disabled. There is no force-restore path: the review and the restore
+  endpoint enforce the same rules, and the restore endpoint remains the
+  authoritative gate.
+- The review performs no database reads or writes and never mutates the
+  selected file. If the review is unavailable, the dashboard blocks restore
+  until the review succeeds. Retry the review before restoring.
 
 Restore requires explicit confirmation. Before replacing state, Moonwalker
 blocks new exchange-order work and waits for already admitted order work to
@@ -286,9 +373,40 @@ If an intent cannot be resolved safely, startup fails closed and identifies the
 operation requiring manual reconciliation. Capital recorded by an unresolved
 buy remains reserved until the intent reaches a safe terminal state.
 
-If only paused, quarantined accumulation obligations remain, startup can instead
-serve restricted recovery access with trading workers stopped. See the
+Before applying a recovered safety buy, full sell or take-profit order, startup
+checks the exchange order identity and confirms that the current open deal is
+the original deal recorded by the intent. A recovered base buy also requires
+that no open deal or orphan trade rows exist for the symbol. If an older intent
+lacks enough identity evidence, or the current deal or take-profit order differs,
+it remains quarantined. Review the exchange order and local ledger before an
+operator decision; do not guess the missing identity or resubmit the order.
+
+If paused, quarantined accumulation obligations are ready for repair, startup can
+instead serve restricted recovery access with trading workers stopped when all
+unresolved obligations meet the accumulation recovery gate. Separate unresolved
+DCA work prevents this restricted startup. See the
 [accumulation recovery guide](howto-recover-accumulation.md#recover-after-restore-or-upgrade).
+
+If only quarantined classic-DCA placement intents remain (with no other
+nonterminal exchange work), startup serves the restricted recovery access for
+placement intents instead of exiting. The dashboard's Placement recovery card
+lists every quarantined intent while all trading workers stay stopped, and
+each intent can be resolved with an operator action:
+
+- **Repair** looks the order up under the currently configured exchange
+  credentials and applies the confirmed terminal state through the same
+  recovery path startup reconciliation uses. Nothing is submitted, cancelled,
+  or otherwise changed on the exchange. Inconclusive evidence leaves the
+  intent quarantined so the operator can retry or dismiss it. Applying a
+  confirmed local effect and resolving its intent are one database transaction.
+  Repair also checks the recorded account and original deal, and will not
+  replace or clear a different tracked take-profit order. Older intents without
+  enough identity evidence remain quarantined for operator review.
+- **Dismiss** records an explicit operator decision, with a required note
+  stored on the row as the audit trail, as a terminal disposition without
+  touching the exchange.
+
+Once every intent is resolved, restart Moonwalker to clear the startup gate.
 
 An accepted buy acknowledgement can omit fill details, especially for a capped
 IOC safety order. Moonwalker records that acceptance and looks up the existing

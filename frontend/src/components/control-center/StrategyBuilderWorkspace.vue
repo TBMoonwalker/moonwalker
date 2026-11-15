@@ -37,6 +37,7 @@ const {
     draftName,
     duplicateSelected,
     errorMessage,
+    isLegacyAccumulation,
     isReadOnly,
     loading,
     nodeTitle,
@@ -81,7 +82,7 @@ const {
                     :type="isReadOnly ? 'default' : 'success'"
                     size="small"
                 >
-                    {{ isReadOnly ? 'Built-in' : 'Custom' }}
+                    {{ isLegacyAccumulation ? 'Legacy accumulation' : isReadOnly ? 'Built-in' : 'Custom' }}
                 </n-tag>
                 <n-tag
                     v-if="validation.status"
@@ -92,7 +93,7 @@ const {
                 </n-tag>
                 <n-button
                     secondary
-                    :disabled="!selectedDetail || saving"
+                    :disabled="!selectedDetail || isLegacyAccumulation || saving"
                     @click="validateDraft"
                 >
                     Validate
@@ -108,7 +109,7 @@ const {
                 <n-button
                     type="error"
                     secondary
-                    :disabled="!selectedDetail || isReadOnly || saving"
+                    :disabled="!selectedDetail || selectedDetail.is_builtin || saving"
                     @click="deleteSelected"
                 >
                     Delete
@@ -151,7 +152,7 @@ const {
                     :selected-slug="selectedSlug"
                     :read-only="isReadOnly"
                     :saving="saving"
-                    :has-selection="Boolean(selectedDetail)"
+                    :has-selection="Boolean(selectedDetail) && !isLegacyAccumulation"
                     @select="selectStrategy"
                     @create="createBlank"
                     @duplicate="duplicateSelected"
@@ -159,6 +160,11 @@ const {
                 />
 
                 <div class="strategy-workbench">
+                    <n-alert v-if="isLegacyAccumulation" type="info">
+                        This legacy accumulation preset cannot be edited or duplicated
+                        in the strategy editor. It remains available to the accumulation runtime.
+                    </n-alert>
+                    <template v-else>
                     <StrategyCanvasPanel
                         :detail="selectedDetail"
                         :read-only="isReadOnly"
@@ -186,6 +192,7 @@ const {
                         @update-param-value="updateNodeParamValue"
                         @update-input="updateSelectedInput"
                     />
+                    </template>
                 </div>
             </div>
         </n-spin>

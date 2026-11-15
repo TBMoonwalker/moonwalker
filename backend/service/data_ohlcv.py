@@ -14,7 +14,7 @@ from service.data_timeframes import timeframe_bucket_origin_milliseconds
 def rows_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
     """Create and sanitize a DataFrame from database rows."""
     df = pd.DataFrame(rows)
-    df.dropna(inplace=True)
+    df = df.dropna()
     return df
 
 
@@ -165,11 +165,11 @@ def serialize_ohlcv_dataframe(df_source: pd.DataFrame, offset: float) -> str:
             pass
     timestamp_series = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
     df["time"] = timestamp_series.map(timestamp_to_unix_seconds)
-    df.dropna(subset=["time"], inplace=True)
+    df = df.dropna(subset=["time"])
     df["time"] = df["time"].astype(float) + float(offset_seconds)
-    df.drop_duplicates(subset=["time"], inplace=True)
-    df.drop("volume", axis=1, inplace=True)
-    df.drop("timestamp", axis=1, inplace=True)
+    df = df.drop_duplicates(subset=["time"])
+    df = df.drop("volume", axis=1)
+    df = df.drop("timestamp", axis=1)
     return df.to_json(orient="records")
 
 
@@ -247,6 +247,6 @@ def resample_ohlcv_data(ohlcv: pd.DataFrame, timerange: str) -> pd.DataFrame | N
             "volume": "sum",
         }
     )
-    df_resample.reset_index(inplace=True)
-    df_resample.dropna(inplace=True)
+    df_resample = df_resample.reset_index()
+    df_resample = df_resample.dropna()
     return df_resample

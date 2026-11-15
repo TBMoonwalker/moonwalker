@@ -51,6 +51,9 @@ test('reviews an exact inventory declaration without adding it to order history'
   expect(requests).toHaveLength(0)
   await expect(panel.getByText(/this correction is not an exchange fill/)).toBeVisible()
   await panel.getByRole('button', { name: 'Confirm correct managed inventory', exact: true }).click()
+  // The recorded-outcome notice only renders after the mocked repair POST
+  // was handled and the panel refreshed; it synchronizes the request count.
+  await expect(panel.getByText(/Recorded outcome: applied/)).toBeVisible()
   expect(requests).toHaveLength(1)
   expect(requests[0]).toMatchObject({ action: 'adjust_inventory', direction: 'add', quantity: '0.000000000000000001', acquisition_cost: '0.000000000000000009', note: 'Correct imported net coins', expected_revision: 20 })
   await expect(panel.getByRole('button', { name: 'Resume accumulation', exact: true })).toBeEnabled()
@@ -277,6 +280,10 @@ test('reviews manual sales and retains an uncertain request across reload', asyn
   expect(requests).toHaveLength(0)
   await panel.getByRole('button', { name: 'Confirm close holding', exact: true }).click()
   await expect(panel.getByRole('button', { name: 'Retry same request' })).toBeVisible()
+  // Settle the aborted first POST with the mock before reloading: a reload
+  // that wins the race leaves requests empty, so the mock would abort the
+  // retry as if it were the first POST.
+  await expect.poll(() => requests.length).toBe(1)
   await page.reload()
   await expect(panel).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Retry same request' })).toBeEnabled()

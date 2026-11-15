@@ -227,7 +227,9 @@ async def test_websocket_signal_opens_trade_from_take_trade_payload(monkeypatch)
     async def fake_receive_buy_order(order, _config) -> None:
         orders.append(order)
 
-    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+    plugin.order_lifecycle = types.SimpleNamespace(
+        receive_buy_order=fake_receive_buy_order
+    )
 
     await _run_plugin_once(monkeypatch, plugin, _payload())
 
@@ -252,7 +254,9 @@ async def test_websocket_signal_ignores_non_trade_decision(monkeypatch):
     async def fake_receive_buy_order(order, _config) -> None:
         orders.append(order)
 
-    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+    plugin.order_lifecycle = types.SimpleNamespace(
+        receive_buy_order=fake_receive_buy_order
+    )
 
     await _run_plugin_once(monkeypatch, plugin, _payload(decision="skip_trade"))
 
@@ -269,7 +273,9 @@ async def test_websocket_signal_ignores_expired_signal(monkeypatch):
     async def fake_receive_buy_order(order, _config) -> None:
         orders.append(order)
 
-    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+    plugin.order_lifecycle = types.SimpleNamespace(
+        receive_buy_order=fake_receive_buy_order
+    )
 
     await _run_plugin_once(
         monkeypatch,
@@ -291,7 +297,9 @@ async def test_websocket_signal_acknowledges_keepalive_message(monkeypatch):
     async def fake_receive_buy_order(order, _config) -> None:
         orders.append(order)
 
-    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+    plugin.order_lifecycle = types.SimpleNamespace(
+        receive_buy_order=fake_receive_buy_order
+    )
 
     await _run_plugin_once(
         monkeypatch,

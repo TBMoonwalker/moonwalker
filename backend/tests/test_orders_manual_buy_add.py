@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 import service.order_persistence as persistence_module
-from service.orders import Orders
+from service.dca.order_lifecycle import DcaOrderLifecycle
 
 
 class _DummyTradesModel:
@@ -69,7 +69,7 @@ async def test_receive_manual_buy_add_appends_safety_order(monkeypatch) -> None:
     _DummyOpenTradesModel.updated_payload = None
     _DummyTradeExecutionsModel.created_payload = None
 
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
 
     async def fake_run_sqlite(operation, _name) -> None:
         await operation()
@@ -111,18 +111,18 @@ async def test_receive_manual_buy_add_appends_safety_order(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_open_trades_by_symbol",
         fake_get_open_trades_by_symbol,
     )
     monkeypatch.setattr(
-        orders.trades, "get_trades_by_symbol", fake_get_trades_by_symbol
+        lifecycle.trades, "get_trades_by_symbol", fake_get_trades_by_symbol
     )
     monkeypatch.setattr(
-        orders.trades, "get_trades_for_orders", fake_get_trades_for_orders
+        lifecycle.trades, "get_trades_for_orders", fake_get_trades_for_orders
     )
 
-    result = await orders.receive_manual_buy_add(
+    result = await lifecycle.receive_manual_buy_add(
         symbol="BTC/USDC",
         date_input="3000",
         price_raw=80.0,
@@ -161,19 +161,19 @@ async def test_receive_manual_buy_add_appends_safety_order(monkeypatch) -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_manual_buy_add_requires_open_trade(monkeypatch) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
 
     async def fake_get_open_trades_by_symbol(_symbol: str) -> list[dict[str, Any]]:
         return []
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_open_trades_by_symbol",
         fake_get_open_trades_by_symbol,
     )
 
     with pytest.raises(ValueError, match="No open trade found"):
-        await orders.receive_manual_buy_add(
+        await lifecycle.receive_manual_buy_add(
             symbol="BTC/USDC",
             date_input="3000",
             price_raw=80.0,
@@ -185,7 +185,7 @@ async def test_receive_manual_buy_add_requires_open_trade(monkeypatch) -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_manual_buy_add_rejects_older_date(monkeypatch) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
 
     async def fake_get_open_trades_by_symbol(_symbol: str) -> list[dict[str, Any]]:
         return [{"symbol": "BTC/USDC", "so_count": 0, "amount": 0.5, "cost": 50.0}]
@@ -194,16 +194,16 @@ async def test_receive_manual_buy_add_rejects_older_date(monkeypatch) -> None:
         return [{"timestamp": "5000000", "price": 100.0, "baseorder": True}]
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_open_trades_by_symbol",
         fake_get_open_trades_by_symbol,
     )
     monkeypatch.setattr(
-        orders.trades, "get_trades_by_symbol", fake_get_trades_by_symbol
+        lifecycle.trades, "get_trades_by_symbol", fake_get_trades_by_symbol
     )
 
     with pytest.raises(ValueError, match="Date must be greater than or equal"):
-        await orders.receive_manual_buy_add(
+        await lifecycle.receive_manual_buy_add(
             symbol="BTC/USDC",
             date_input="4000",
             price_raw=80.0,
@@ -215,7 +215,7 @@ async def test_receive_manual_buy_add_rejects_older_date(monkeypatch) -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_manual_buy_add_rejects_paused_mission(monkeypatch) -> None:
-    orders = Orders()
+    lifecycle = DcaOrderLifecycle()
 
     async def fake_get_open_trades_by_symbol(_symbol: str) -> list[dict[str, Any]]:
         return [{"symbol": "BTC/USDC", "so_count": 0, "amount": 0.5, "cost": 50.0}]
@@ -231,19 +231,19 @@ async def test_receive_manual_buy_add_rejects_paused_mission(monkeypatch) -> Non
         }
 
     monkeypatch.setattr(
-        orders.trades,
+        lifecycle.trades,
         "get_open_trades_by_symbol",
         fake_get_open_trades_by_symbol,
     )
     monkeypatch.setattr(
-        orders.trades, "get_trades_by_symbol", fake_get_trades_by_symbol
+        lifecycle.trades, "get_trades_by_symbol", fake_get_trades_by_symbol
     )
     monkeypatch.setattr(
-        orders.trades, "get_trades_for_orders", fake_get_trades_for_orders
+        lifecycle.trades, "get_trades_for_orders", fake_get_trades_for_orders
     )
 
     with pytest.raises(ValueError, match="Automation is paused for BTC/USDC"):
-        await orders.receive_manual_buy_add(
+        await lifecycle.receive_manual_buy_add(
             symbol="BTC/USDC",
             date_input="5000",
             price_raw=80.0,

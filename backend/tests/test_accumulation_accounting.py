@@ -187,8 +187,9 @@ async def test_activity_distinguishes_valid_csv_declarations(accounting_db):
     database.db_url = accounting_db
     await database._ensure_accumulation_history_revision()
     activation, _, _ = await _buy()
+    # Empty fee cells keep the unknown-fee declaration this case distinguishes.
     declaration = parse_accumulation_csv(
-        "date;symbol;price;amount\n2026-01-01;BTC/USDC;100;1",
+        "date;symbol;price;amount;fee;fee_currency;amount_type\n2026-01-01;BTC/USDC;100;1;;;net",
         "USDC",
         now_ms=1800000000000,
     )[0]
@@ -535,9 +536,13 @@ async def test_two_dashboards_cannot_rebind_the_same_revision_twice(accounting_d
     ).account_scope == "rotated-account-scope"
 
 
-async def _persist(order, operation_id="buy-1"):
+async def _persist(order, operation_id="buy-1", config=None):
     return await persist_accumulation_order(
-        operation_id, order, account_scope="account-1", exchange_name="binance"
+        operation_id,
+        order,
+        account_scope="account-1",
+        exchange_name="binance",
+        config=config if config is not None else {"exchange": "binance"},
     )
 
 
@@ -1462,7 +1467,11 @@ async def test_invalid_evidence_or_ownership_never_changes_inventory(
         report = _order(side="sell", filled="5", cost="50")
     with pytest.raises(AccumulationStateError):
         await persist_accumulation_order(
-            placement.operation_id, report, account_scope=scope, exchange_name="binance"
+            placement.operation_id,
+            report,
+            account_scope=scope,
+            exchange_name="binance",
+            config={"exchange": "binance"},
         )
     assert (
         await model.OpenTrades.get(symbol="BTC/USDC")

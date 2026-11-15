@@ -10,7 +10,7 @@ understand and maintain the system without access to an individual machine.
 |---|---|
 | Application lifecycle | [app.py](../backend/app.py) and [runtime_services.py](../backend/service/runtime_services.py) own startup, supervised tasks, and shutdown. |
 | Configuration | [config.py](../backend/service/config.py) persists settings; [config_contract.py](../backend/service/config_contract.py) defines the shared high-risk configuration contract; [config_migrations.py](../backend/service/config_migrations.py) applies versioned config migrations (the signal-settings migration). |
-| MSV baseline | [msv.py](../backend/service/msv.py) owns the minimum-supported-version preflight and the floor marker; [database.py](../backend/service/database.py) records the floor marker for a fresh install during init, before schema history. |
+| MSV baseline | [msv.py](../backend/service/msv.py) owns the minimum-supported-version preflight and the floor marker; [database.py](../backend/service/database.py) records the floor marker for a fresh install during init, before schema history, and runs the gated ledger-hygiene prune (retention policy: [operations](operations.md), "Migration ledger retention"). |
 | Signal entry | [signal_runtime.py](../backend/service/signal_runtime.py) coordinates admission; the order service remains the central execution boundary. |
 | Trading data | [trading_contracts.py](../backend/service/trading_contracts.py), [exchange_types.py](../backend/service/exchange_types.py), and [persistence_records.py](../backend/service/persistence_records.py) define intent, execution, and persistence contracts. |
 | AI work | [ai_work_queue.py](../backend/service/ai_work_queue.py) bounds background work; provider transport, analytics, and calibration have separate modules behind the AI Trust facade. |
@@ -25,7 +25,9 @@ For the operator-facing behavior, see [safety-order sizing](dynamic-so.md),
 ## Maintained design notes
 
 - [Dashboard history loading](designs/delta-loading.md): browser caching,
-  full-state versus paginated streams, and proposed server optimizations.
+  the implemented server-side timeline cache with its evaluation, the
+  decision against the proposed incremental fetch, and the remaining
+  proposal for a configurable snapshot cadence.
 - [Denying future entries](designs/denylist-symbol-from-open-trade.md):
   entry-only semantics, server-side append, and full-form replacement limits.
 - [Product record](../PRODUCT.md) and [design system](../DESIGN.md):
@@ -35,8 +37,8 @@ For the operator-facing behavior, see [safety-order sizing](dynamic-so.md),
 Dynamic DCA and accumulation are supported trade modes. Accumulation retains
 managed inventory until an explicit sale and does not use DCA's automatic exits.
 Valid accumulation configuration survives reload and backup normalization;
-legacy Sidestep config keys are dropped silently by backup restore and the
-runtime never reads them. Historical Sidestep plans do not describe a
+backup restore rejects removed Sidestep config keys and identifies their
+`trade_mode` replacement. Historical Sidestep plans do not describe a
 supported runtime capability. See the [accumulation reference](accumulation.md)
 and [recovery guide](howto-recover-accumulation.md).
 
@@ -143,7 +145,7 @@ remains an on-demand check rather than a CI gate.
 Follow [AGENTS.md](../AGENTS.md), [dependency policy](dependencies.md), and the
 [pre-update supply-chain review workflow](howto-update-dependencies.md).
 After code changes, run `./ci.sh` from `scripts/`; on macOS, put Homebrew
-`node@24` on PATH as documented in AGENTS.md. Documentation-only changes should
+`node` (26.x) on PATH as documented in AGENTS.md. Documentation-only changes should
 verify relative links, source-backed claims, and `git diff --check`.
 
 
@@ -169,9 +171,36 @@ Mode-owned services live in `service/dca/` and `service/accumulation/`:
   fallback policy lives in its `limit_orders.py`, `limit_fills.py`,
   `limit_sell.py`, `sell_execution.py` and `sell_status.py` modules; these reuse
   shared submission, lookup and cancellation mechanics.
-- `dca/dust.py` owns DCA remainder orchestration. `Orders` delegates its existing
-  dependencies; `order_persistence.py` retains atomic execution/history/archive
-  writes. Cache invalidation and notifications occur after persistence.
+- `dca/dust.py` owns DCA remainder orchestration. `DcaOrderLifecycle`
+  delegates its existing dependencies; `order_persistence.py` retains
+  atomic execution/history/archive writes. Cache invalidation and
+  notifications occur after persistence.
+- `dca/finalization.py` owns classic-DCA trade finalization: persistence,
+  closed-trade statistics, TP limit sell payload building, entry-size retry,
+  unsellable-state reset, order-status predicates, and the two
+  `MonitoringService.notify_trade` seams (`trade.buy` / `trade.sell`).
+  Functions take an explicit `DcaFinalizationContext` built from the current
+  collaborators at call time; the caller guarantees exclusivity (runtime
+  lifecycle lock or startup ordering).
+- `dca/order_lifecycle.py` owns the DCA execution lifecycle
+  (`DcaOrderLifecycle`): buy/sell receipt, TP limit arm/cancel/reconcile,
+  stop signals, manual operations, and the durable placement-intent
+  transitions behind them. It calls `dca/finalization.py` for persistence
+  and `order_routing.py` for ownership, snapshot and operator-result
+  decisions.
+- `order_routing.py` owns the mode-neutral lifecycle routing
+  (`OrderLifecycleRouting`): the legacy-mutation ownership guard for
+  accumulation symbols, snapshot-currency validation, trade-state loading,
+  and the operator mutation-result contract. It is shared by
+  `PlacementRecoveryEntry` and `DcaOrderLifecycle`.
+- `placement_recovery_entry.py` is the mode-neutral startup recovery entry
+  (`PlacementRecoveryEntry`): it receives a caller-constructed
+  `DcaOrderLifecycle` (the application owns both constructions), owns the
+  `accumulation_recovery` seam and the startup reconciliation entry point
+  `reconcile_placement_intents`, which reads the seam when it builds the
+  reconciler, and builds the operator placement-repair service over the
+  shared recovery resume handler. The DCA recovery-handler callback wiring
+  is owned once, on `DcaOrderLifecycle.build_recovery_handler()`.
 - `accumulation/exchange.py` composes the shared transport for its exact,
   preflighted orders. `runtime.py`, `accounting.py` and `dust.py` retain its
   activation, inventory/basis and archive lifecycle. Its fee adapters reuse the

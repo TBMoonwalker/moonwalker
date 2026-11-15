@@ -7,7 +7,7 @@ import pytest_asyncio
 from model import AppConfig, ConfigMigration
 from service.msv import (
     FLOOR_CONFIG_MIGRATION_ROW,
-    LEGACY_TRADE_MODE_KEYS,
+    MINIMUM_SUPPORTED_VERSION,
     MsvStatus,
     evaluate_msv_baseline,
     get_msv_baseline,
@@ -37,6 +37,15 @@ async def _migration_database(tmp_path):
     await Tortoise.close_connections()
 
 
+async def _seed_schema_history() -> None:
+    async def _noop() -> None:
+        return None
+
+    await run_schema_migrations(
+        (MigrationDefinition("000-test-history", "schema", "seed history", _noop),)
+    )
+
+
 @pytest.mark.asyncio
 async def test_evaluate_msv_baseline_derives_each_outcome() -> None:
     """Pure decision: floor present wins; otherwise freshness separates cases."""
@@ -58,7 +67,8 @@ async def test_evaluate_msv_baseline_pre_floor_is_unsupported_and_guides() -> No
     baseline = evaluate_msv_baseline(False, True)
     assert baseline.supported is False
     assert baseline.upgrade_guidance
-    assert "4.9.0.0" in baseline.summary
+    assert MINIMUM_SUPPORTED_VERSION in baseline.summary
+    assert "6.3.0.0" in baseline.upgrade_guidance
     assert baseline.floor_config_migration
 
 
@@ -74,13 +84,7 @@ async def test_preflight_msv_fresh_database_is_supported() -> None:
 @pytest.mark.asyncio
 async def test_preflight_msv_schema_history_without_floor_is_unsupported() -> None:
     """History that predates the floor is reported, never blocked."""
-
-    async def _noop() -> None:
-        return None
-
-    await run_schema_migrations(
-        (MigrationDefinition("000-test-history", "schema", "seed history", _noop),)
-    )
+    await _seed_schema_history()
     baseline = await preflight_msv()
     assert baseline.status == MsvStatus.UNSUPPORTED
     assert baseline.schema_history_present is True
@@ -89,7 +93,7 @@ async def test_preflight_msv_schema_history_without_floor_is_unsupported() -> No
     assert baseline.upgrade_guidance
     # The report did not mutate the ledger: still no floor row.
     assert (
-        await ConfigMigration.filter(version="2026-09-sidestep-removal-v1").exists()
+        await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
         is False
     )
 
@@ -97,7 +101,7 @@ async def test_preflight_msv_schema_history_without_floor_is_unsupported() -> No
 @pytest.mark.asyncio
 async def test_preflight_msv_floor_migration_present_is_supported() -> None:
     await ConfigMigration.create(
-        version="2026-09-sidestep-removal-v1",
+        version=FLOOR_CONFIG_MIGRATION_ROW,
         backup_json="[]",
     )
     baseline = await preflight_msv()
@@ -105,6 +109,26 @@ async def test_preflight_msv_floor_migration_present_is_supported() -> None:
     assert baseline.floor_applied is True
     assert baseline.supported is True
     assert get_msv_baseline() is baseline
+
+
+@pytest.mark.asyncio
+async def test_preflight_msv_pruned_ledger_stays_supported() -> None:
+    """A pruned database (floor row, empty schema history) is still supported.
+
+    The ledger-hygiene prune deletes every older schema-migration row; the
+    preflight must keep classifying the install as supported on the floor
+    row alone, never as fresh.
+    """
+    await ConfigMigration.create(
+        version=FLOOR_CONFIG_MIGRATION_ROW,
+        backup_json="[]",
+    )
+    baseline = await preflight_msv()
+    assert baseline.status == MsvStatus.SUPPORTED
+    assert baseline.floor_applied is True
+    assert baseline.schema_history_present is False
+    assert baseline.supported is True
+    assert baseline.upgrade_guidance == ""
 
 
 @pytest.mark.asyncio
@@ -128,63 +152,46 @@ async def test_floor_marker_keeps_a_fresh_install_supported_on_later_startups() 
 
 
 @pytest.mark.asyncio
-async def test_floor_marker_is_not_written_while_legacy_bridge_rows_exist() -> None:
-    """Pre-floor residue keeps the database unmarked and unsupported."""
-
-    async def _noop() -> None:
-        return None
-
+async def test_floor_marker_is_withheld_for_fresh_install_with_legacy_rows() -> None:
+    """A database with legacy rows must not be self-marked as supported."""
     await AppConfig.create(
         key="trade_lifecycle_mode", value="classic_dca", value_type="str"
     )
-    await run_schema_migrations(
-        (MigrationDefinition("000-test-history", "schema", "seed history", _noop),)
-    )
     baseline = await preflight_msv()
     assert baseline.status == MsvStatus.UNSUPPORTED
+    assert not baseline.supported
+    assert baseline.upgrade_guidance
     await record_msv_floor_marker(baseline)
 
-    assert (
-        await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
-        is False
-    )
+    assert not await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
+    await _seed_schema_history()
     baseline2 = await preflight_msv()
     assert baseline2.status == MsvStatus.UNSUPPORTED
     assert baseline2.floor_applied is False
 
 
 @pytest.mark.asyncio
-async def test_floor_marker_is_not_written_for_a_pre_floor_install_without_legacy_keys() -> (
-    None
-):
-    """A pre-floor install keeps its warning even when no legacy keys remain.
-
-    Regression: the marker was previously written whenever the optional legacy
-    bridge keys were absent, so a pre-4.9 install with no residue would flip
-    to ``supported`` on its next startup and lose the upgrade guidance. Only a
-    preflight-classified fresh database may be marked.
-    """
-
-    async def _noop() -> None:
-        return None
-
-    await run_schema_migrations(
-        (MigrationDefinition("000-test-history", "schema", "seed history", _noop),)
-    )
-    assert (
-        await AppConfig.filter(key__in=list(LEGACY_TRADE_MODE_KEYS)).exists() is False
-    )
+@pytest.mark.parametrize("legacy_rows", [False, True])
+async def test_floor_marker_preserves_pre_floor_warning_across_startups(
+    legacy_rows: bool,
+) -> None:
+    """Starting newer software alone cannot prove old data is compatible."""
+    if legacy_rows:
+        await AppConfig.create(
+            key="trade_lifecycle_mode", value="classic_dca", value_type="str"
+        )
+    await _seed_schema_history()
     baseline = await preflight_msv()
     assert baseline.status == MsvStatus.UNSUPPORTED
+    assert baseline.upgrade_guidance
+
     await record_msv_floor_marker(baseline)
 
-    assert (
-        await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
-        is False
-    )
+    assert not await ConfigMigration.filter(version=FLOOR_CONFIG_MIGRATION_ROW).exists()
     baseline2 = await preflight_msv()
     assert baseline2.status == MsvStatus.UNSUPPORTED
     assert baseline2.floor_applied is False
+    assert baseline2.supported is False
     assert baseline2.upgrade_guidance
 
 
@@ -210,19 +217,13 @@ async def test_floor_marker_written_before_schema_history_survives_an_interrupte
     and the marker guard refused to ever mark it. Recording the marker before
     schema history closes that window.
     """
-
-    async def _noop() -> None:
-        return None
-
     baseline = await preflight_msv()
     assert baseline.status == MsvStatus.FRESH
     # Init records the marker before schema migrations commit their rows...
     await record_msv_floor_marker(baseline)
     # ...then the schema migrations run. If startup stops right here (schema
     # history present, but the marker is already committed)...
-    await run_schema_migrations(
-        (MigrationDefinition("000-test-history", "schema", "seed history", _noop),)
-    )
+    await _seed_schema_history()
     # ...the next startup sees the floor row and reports supported, not a
     # false pre-floor baseline.
     baseline2 = await preflight_msv()

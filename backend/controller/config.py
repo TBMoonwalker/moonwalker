@@ -10,7 +10,7 @@ from controller.responses import json_response
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
 from litestar.handlers import get, post, put
-from litestar.params import FromPath, FromQuery
+from litestar.params import FromPath, FromQuery, JSONBody
 from model import AppConfig, OpenTrades
 from service.accumulation.config import accumulation_available, configuration_mode_guard
 from service.config import Config
@@ -54,6 +54,13 @@ class RestoreBackupRequest(msgspec.Struct, forbid_unknown_fields=True):
     backup: dict[str, Any]
     restore_trade_data: object = False
     confirm: object = False
+
+
+class ClassifyBackupRequest(msgspec.Struct, forbid_unknown_fields=True):
+    """Strict body for the read-only backup classification preview."""
+
+    backup: dict[str, Any]
+    restore_trade_data: object = False
 
 
 def _require_json_boolean(value: object, field: str) -> tuple[bool | None, Any]:
@@ -662,7 +669,7 @@ def _expected_config_revision(request: Request[Any, Any, Any]) -> tuple[int, Any
 
 
 @post(path="/config/live/activate")
-async def activate_live_trading(data: ConfirmMutationRequest) -> Any:
+async def activate_live_trading(data: JSONBody[ConfirmMutationRequest]) -> Any:
     """Switch the instance from dry run to live mode after server-side checks."""
     confirm, error_response = _require_json_boolean(data.confirm, "confirm")
     if error_response is not None:
@@ -740,7 +747,7 @@ def _read_confirm_flag(data: ConfirmMutationRequest) -> tuple[bool | None, Any]:
 
 
 @post(path="/config/trading/pause")
-async def pause_trading(data: ConfirmMutationRequest) -> Any:
+async def pause_trading(data: JSONBody[ConfirmMutationRequest]) -> Any:
     """Pause Moonwalker for new exposure while existing exits continue."""
     _, error_response = _read_confirm_flag(data)
     if error_response is not None:
@@ -774,7 +781,7 @@ async def pause_trading(data: ConfirmMutationRequest) -> Any:
 
 
 @post(path="/config/trading/resume")
-async def resume_trading(data: ConfirmMutationRequest) -> Any:
+async def resume_trading(data: JSONBody[ConfirmMutationRequest]) -> Any:
     """Resume Moonwalker so new exposure is allowed again."""
     _, error_response = _read_confirm_flag(data)
     if error_response is not None:
@@ -814,7 +821,7 @@ class DenySymbolRequest(msgspec.Struct, forbid_unknown_fields=True):
 
 
 @post(path="/config/denylist/deny")
-async def deny_symbol(data: DenySymbolRequest) -> Any:
+async def deny_symbol(data: JSONBody[DenySymbolRequest]) -> Any:
     """Append a base token to the pair_denylist atomically.
 
     The existing open trades for the symbol continue to their natural end;
@@ -828,7 +835,7 @@ async def deny_symbol(data: DenySymbolRequest) -> Any:
         )
 
     config = await Config.instance()
-    tokens = await config.append_denylist_token(symbol)
+    tokens, revision = await config.append_denylist_token_with_revision(symbol)
     logging.info(
         "Symbol %s denied from new signal entries. Denylist now: %s",
         symbol,
@@ -839,11 +846,37 @@ async def deny_symbol(data: DenySymbolRequest) -> Any:
         "status": "denied",
         "denied": symbol,
         "pair_denylist": tokens,
+        "config_revision": revision,
     }
 
 
+@post(path="/config/backup/classify")
+async def classify_backup(data: JSONBody[ClassifyBackupRequest]) -> Any:
+    """Classify a backup payload without touching configuration or trades.
+
+    Runs the restore's own validation primitives as a collect-all pass so
+    the dashboard can show what a restore would do before the operator
+    confirms it. The restore endpoint remains the authoritative gate.
+    """
+    restore_trade_data, error_response = _require_json_boolean(
+        data.restore_trade_data,
+        "restore_trade_data",
+    )
+    if error_response is not None:
+        return error_response
+
+    try:
+        return backup_service.classify_backup(
+            data.backup,
+            restore_trade_data=restore_trade_data,
+        )
+    except Exception as exc:  # noqa: BLE001 - surface preview failures to UI.
+        logging.error("Backup classification failed: %s", exc, exc_info=True)
+        return json_response({"error": "Backup classification failed."}, 500)
+
+
 @post(path="/config/backup/restore")
-async def restore_backup(data: RestoreBackupRequest) -> Any:
+async def restore_backup(data: JSONBody[RestoreBackupRequest]) -> Any:
     """Restore config-only or full backup payloads."""
     backup_payload = data.backup
     _, error_response = _read_confirm_flag(ConfirmMutationRequest(confirm=data.confirm))
@@ -918,5 +951,6 @@ route_handlers = [
     pause_trading,
     resume_trading,
     deny_symbol,
+    classify_backup,
     restore_backup,
 ]

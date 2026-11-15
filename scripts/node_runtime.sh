@@ -11,24 +11,22 @@ print_node_runtime_help() {
     echo "  ./run.sh start"
     echo
     echo "macOS with Homebrew:"
-    echo "  brew install node@24"
+    echo "  brew install node"
     # Print the command literally for the user to run in their own shell.
     # shellcheck disable=SC2016
-    echo '  export PATH="$(brew --prefix node@24)/bin:$PATH"'
+    echo '  export PATH="$(brew --prefix node)/bin:$PATH"'
     echo "  ./run.sh start"
 }
 
 frontend_runtime_matches() {
-    local node_version npm_version node_minor
+    local node_version npm_version
 
     command -v node >/dev/null 2>&1 || return 1
     command -v npm >/dev/null 2>&1 || return 1
     node_version="$(node -p 'process.versions.node' 2>/dev/null)" || return 1
     npm_version="$(npm --version 2>/dev/null)" || return 1
-    [[ "$node_version" =~ ^24\.([0-9]+)\.[0-9]+$ ]] || return 1
-    node_minor="${BASH_REMATCH[1]}"
+    [[ "$node_version" =~ ^26\.[0-9]+\.[0-9]+$ ]] || return 1
     [[ "$npm_version" =~ ^11\.[0-9]+\.[0-9]+$ ]] || return 1
-    [ "$node_minor" -ge 11 ]
 }
 
 check_frontend_runtime() {
@@ -40,7 +38,7 @@ check_frontend_runtime() {
     if [ "$(uname -s)" = "Darwin" ]; then
         for brew_bin in "$(command -v brew 2>/dev/null || true)" /opt/homebrew/bin/brew /usr/local/bin/brew; do
             [ -x "$brew_bin" ] || continue
-            prefix="$(HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" --prefix node@24 2>/dev/null)" || continue
+            prefix="$(HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" --prefix node 2>/dev/null)" || continue
             [ -x "$prefix/bin/node" ] && [ -x "$prefix/bin/npm" ] || continue
             if PATH="$prefix/bin:$PATH" frontend_runtime_matches; then
                 # npm and its child processes must resolve this same Node runtime.
@@ -50,7 +48,7 @@ check_frontend_runtime() {
             fi
         done
     fi
-    echo "Required: Node.js >=24.11.0 <25 and npm >=11 <12." >&2
+    echo "Required: Node.js >=26.0.0 <27 and npm >=11 <12." >&2
     print_node_runtime_help >&2
     return 1
 }

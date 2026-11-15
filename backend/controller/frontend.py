@@ -1,15 +1,17 @@
 """Frontend routing and static asset delivery."""
 
 import asyncio
+import json
 import mimetypes
 import re
 from pathlib import Path
 
 from controller import STATIC_DIR, TEMPLATE_DIR
-from litestar.exceptions import HTTPException, NotFoundException
+from litestar.exceptions import NotFoundException
 from litestar.handlers import get
 from litestar.params import FromPath
-from litestar.response import File
+from litestar.response import File, Response
+from staging_check import missing_referenced_assets
 
 _HASHED_ASSET_PATTERN = re.compile(r".+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
 DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
@@ -30,18 +32,27 @@ def _staging_warning_message(index_file: Path) -> str:
     return f"Frontend not staged: {index_file} is missing. Run './run.sh start' to build and copy the Vue app into backend/templates and backend/static."
 
 
+def _partial_staging_message(index_file: Path, missing: list[str]) -> str:
+    """Build the actionable message for a partially staged frontend."""
+    return f"Frontend partially staged: {index_file} references assets missing from {STATIC_DIR}: {', '.join(missing)}. Run './run.sh start' to build and copy the Vue app into backend/templates and backend/static."
+
+
 def frontend_staging_warning() -> str | None:
-    """Return an actionable message when the staged SPA entrypoint is absent.
+    """Return an actionable message when the staged SPA is incomplete.
 
     The frontend is built by ``run.sh`` and copied into ``backend/static`` and
-    ``backend/templates``. When that copy is missing, every SPA route raises a
-    500 with no explanation; this makes the cause obvious at startup and in the
-    response detail instead of a bare "Internal Server Error".
+    ``backend/templates``. When that copy is missing or partial (the
+    entrypoint references a bundle that never staged), the SPA cannot
+    bootstrap; this makes the cause obvious at startup and in the response
+    body instead of a bare "Internal Server Error" or a blank page.
     """
     index_file = TEMPLATE_DIR / "index.html"
-    if index_file.is_file():
-        return None
-    return _staging_warning_message(index_file)
+    if not index_file.is_file():
+        return _staging_warning_message(index_file)
+    missing = missing_referenced_assets(index_file, STATIC_DIR)
+    if missing:
+        return _partial_staging_message(index_file, missing)
+    return None
 
 
 def _cache_control_for_file(path: Path) -> str:
@@ -102,7 +113,7 @@ async def serve_docs(file_path: FromPath[str]) -> File:
 
 
 @get(path="/{path:path}", include_in_schema=False)
-async def serve_vue(path: FromPath[str]) -> File:
+async def serve_vue(path: FromPath[str]) -> File | Response:
     """Serve the Vue.js SPA entrypoint with static-file fallback."""
     return await _serve_vue_path(path)
 
@@ -111,7 +122,7 @@ async def serve_vue(path: FromPath[str]) -> File:
     path=["/control-center", "/monitoring", "/config", "/settings"],
     include_in_schema=False,
 )
-async def serve_spa_top_level_routes() -> File:
+async def serve_spa_top_level_routes() -> File | Response:
     """Serve top-level SPA routes that would otherwise collide with API prefixes.
 
     These are exact routes: without them Litestar's routing tree lets the
@@ -122,7 +133,7 @@ async def serve_spa_top_level_routes() -> File:
     return await _serve_vue_path("")
 
 
-async def _serve_vue_path(path: str) -> File:
+async def _serve_vue_path(path: str) -> File | Response:
     """Serve a SPA route by path with static-file fallback."""
     candidate = None
     if path:
@@ -131,17 +142,24 @@ async def _serve_vue_path(path: str) -> File:
         return _file_response(candidate)
 
     index_file = TEMPLATE_DIR / "index.html"
-    # Check existence off the event loop so a blocking stat cannot stall the loop
+    # Probe the full stage (entrypoint plus referenced assets) off the event
+    # loop so the entrypoint read and the asset stats cannot stall the loop
     # shared with trading tasks; the message comes from the shared helper.
-    if not await asyncio.to_thread(index_file.is_file):
-        raise HTTPException(
-            status_code=500, detail=_staging_warning_message(index_file)
+    staging_warning = await asyncio.to_thread(frontend_staging_warning)
+    if staging_warning is not None:
+        # Return a controlled body instead of raising: Litestar masks the
+        # detail of 5xx HTTPExceptions into a generic error body, so a raise
+        # would hide the actionable message from the browser.
+        return Response(
+            status_code=500,
+            media_type="application/json",
+            content=json.dumps({"detail": staging_warning}),
         )
     return _file_response(index_file)
 
 
 @get(path="/", include_in_schema=False)
-async def serve_root() -> File:
+async def serve_root() -> File | Response:
     """Serve the Vue.js SPA entrypoint for the root path."""
     return await _serve_vue_path("")
 

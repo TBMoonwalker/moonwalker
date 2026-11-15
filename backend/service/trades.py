@@ -14,7 +14,12 @@ from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
 from service.order_persistence import (
     persist_tp_limit_cancellation,
 )
-from service.placement_intents import mark_placement_persisted_in_transaction
+from service.placement_intents import (
+    QuarantineResolution,
+    RecoveryTarget,
+    mark_placement_persisted_in_transaction,
+    validate_repair_target_in_transaction,
+)
 from service.trade_math import has_fee_inclusive_cost, parse_date_to_ms
 from service.trading_controls import resolve_mission_pause_fields
 from tortoise.exceptions import BaseORMException
@@ -561,11 +566,16 @@ class Trades:
         price: float,
         amount: float,
         placement_operation_id: str | None = None,
+        resolution: QuarantineResolution | None = None,
+        recovery_target: RecoveryTarget | None = None,
     ) -> bool:
         """Persist the currently armed proactive TP limit order for a symbol."""
 
         async def _set_tp_limit_order() -> int:
             async with in_transaction() as conn:
+                await validate_repair_target_in_transaction(
+                    resolution, conn, symbol=symbol, recovery_target=recovery_target
+                )
                 updated_count = (
                     await model.OpenTrades.filter(symbol=symbol)
                     .using_db(conn)
@@ -581,6 +591,7 @@ class Trades:
                 await mark_placement_persisted_in_transaction(
                     placement_operation_id,
                     conn,
+                    **({"resolution": resolution} if resolution else {}),
                 )
                 return updated_count
 
@@ -610,6 +621,10 @@ class Trades:
         *,
         placement_operation_id: str | None = None,
         exchange_status: dict[str, Any] | None = None,
+        resolution: QuarantineResolution | None = None,
+        recovery: bool = False,
+        recovery_deal_id: str | None = None,
+        recovery_tp_order_id: str | None = None,
     ) -> bool:
         """Clear persisted proactive TP limit order metadata for a symbol."""
 
@@ -618,6 +633,16 @@ class Trades:
                 symbol,
                 exchange_status,
                 placement_operation_id=placement_operation_id,
+                **({"resolution": resolution} if resolution else {}),
+                **(
+                    {
+                        "recovery": True,
+                        "recovery_deal_id": recovery_deal_id,
+                        "recovery_tp_order_id": recovery_tp_order_id,
+                    }
+                    if recovery
+                    else {}
+                ),
             )
         except BaseORMException as exc:
             self._log_db_error(

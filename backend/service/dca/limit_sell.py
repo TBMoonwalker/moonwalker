@@ -5,6 +5,15 @@ from typing import Any
 from service.dca.sell_status import build_partial_sell_status
 from service.exchange_types import MarketFallbackStatus, PartialSellStatus
 
+EXIT_TIMEOUT_FALLBACK_REASONS = frozenset(
+    {
+        "limit_order_timeout",
+        "limit_order_partial_timeout",
+        "limit_order_placement_failed",
+        "limit_order_missing_id",
+    }
+)
+
 
 def get_limit_sell_timeout_seconds(config: dict[str, Any]) -> int:
     """Return a validated limit sell timeout in seconds."""
@@ -57,10 +66,21 @@ def build_partial_status_from_fallback(
     default_symbol: str,
 ) -> PartialSellStatus:
     """Convert a fallback status payload into a partial sell status."""
-    return build_partial_sell_status(
+    status = build_partial_sell_status(
         symbol=str(fallback_status.get("symbol", default_symbol)),
         partial_amount=float(fallback_status.get("partial_filled_amount") or 0.0),
         partial_avg_price=float(fallback_status.get("partial_avg_price") or 0.0),
         remaining_amount=float(fallback_status.get("remaining_amount") or 0.0),
         executions=list(fallback_status.get("executions") or []),
     )
+
+    order_id = fallback_status.get("exchange_order_id")
+    if order_id:
+        status["id"] = str(order_id)
+        if (
+            fallback_status.get("limit_cancel_confirmed") is True
+            and fallback_status.get("partial_filled_amount") == 0
+            and not fallback_status.get("executions")
+        ):
+            status["confirmed_canceled_zero_fill"] = True
+    return status

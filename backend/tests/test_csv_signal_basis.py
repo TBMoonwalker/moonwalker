@@ -150,7 +150,7 @@ async def test_csv_remainder_scales_effective_basis(basis_db, monkeypatch):
 
 
 # Value: protects=old backups recover bounded CSV provenance, explicit flags win;
-# fails_when=restore loses provenance or ID heuristics override an explicit False;
+# fails_when=restore loses provenance or a missing flag is treated as inclusive;
 # why_new=current import tests omit old backup and native-row compatibility;
 # seam=none; no_claim=history downloads or configuration cache refresh.
 @pytest.mark.asyncio
@@ -182,8 +182,10 @@ async def test_backup_restore_preserves_csv_cost_provenance(
     restored = await model.Trades.get()
     assert restored.cost_includes_fees is flag
     aggregate = await Trades().get_trades_for_orders_fresh("BTC/USDC")
-    assert aggregate["entry_cost"] == (None if flag is False else 101)
-    if flag is not False:
+    # Only an explicit True keeps the fee-inclusive basis; a missing flag no
+    # longer infers it from the order-id namespace (removed at MSV 6.3.0.0).
+    assert aggregate["entry_cost"] == (101 if flag is True else None)
+    if flag is True:
         await assert_live_basis(monkeypatch, 101, 1)
 
 
@@ -213,7 +215,8 @@ async def test_native_only_fee_estimate_is_unchanged(basis_db):
 # Value: protects=additive upgrade preserves old CSV quantities and stored costs;
 # fails_when=an older trade table cannot be read or its financial values change;
 # why_new=fresh ORM schemas do not exercise missing-column upgrades; seam=none;
-# no_claim=non-SQLite schema migration support.
+# no_claim=non-SQLite schema migration support. Pre-flag rows follow the legacy
+# fee estimation now that the order-id inference is gone (MSV 6.3.0.0).
 @pytest.mark.asyncio
 async def test_cost_provenance_upgrade_is_additive_and_repeatable(basis_db):
     await CSVSignalImportService().import_from_csv(
@@ -228,7 +231,9 @@ async def test_cost_provenance_upgrade_is_additive_and_repeatable(basis_db):
     row = await model.Trades.get()
     assert row.cost_includes_fees is None
     assert row.ordersize == 101 and row.amount == 1 and row.fee == 0.01
-    assert (await Trades().get_trades_for_orders_fresh("BTC/USDC"))["entry_cost"] == 101
+    assert (await Trades().get_trades_for_orders_fresh("BTC/USDC"))[
+        "entry_cost"
+    ] is None
 
 
 # Value: protects=existing paid fees stay separate from future recovery-buy fees;

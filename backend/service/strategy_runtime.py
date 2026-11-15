@@ -218,9 +218,7 @@ def invalidate_strategy_runtime_cache(slug: str | None = None) -> None:
 async def get_strategy_adapter(slug: str, timeframe: str) -> GraphStrategyAdapter:
     """Return a runtime adapter for DCA, TP, and signal paths."""
     snapshot = await _load_strategy_snapshot(slug)
-    if snapshot.ir.get("capability") == "accumulation/v1" or snapshot.ir.get(
-        "metadata", {}
-    ).get("legacy_accumulation_view"):
+    if snapshot.ir.get("capability") == "accumulation/v1":
         raise AccumulationStateError("Accumulation requires its dedicated runtime.")
     if "accumulation" in snapshot.ir or any(
         (node.get("params") or {}).get("timeframe")
@@ -322,9 +320,7 @@ async def evaluate_strategy_graph(
 ) -> StrategyEvaluationResult:
     """Evaluate a strategy graph against current candle data."""
     snapshot = await _load_strategy_snapshot(slug)
-    if snapshot.ir.get("capability") == "accumulation/v1" or snapshot.ir.get(
-        "metadata", {}
-    ).get("legacy_accumulation_view"):
+    if snapshot.ir.get("capability") == "accumulation/v1":
         return StrategyEvaluationResult(
             False, snapshot.version, "accumulation_requires_dedicated_runtime"
         )

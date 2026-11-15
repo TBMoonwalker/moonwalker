@@ -1,35 +1,50 @@
-"""Order orchestration for exchange buy/sell actions."""
+"""Classic-DCA order execution lifecycle: buys, sells, TP limits, manual ops.
+
+Owns the DCA execution entry points (receive_* / arm / cancel / reconcile /
+stop / manual) and the durable placement-intent transitions behind them.
+Trade finalization lives in service/dca/finalization.py; lifecycle routing
+(ownership guard, snapshot validation, operator mutation results) lives in
+service/order_routing.py.
+"""
 
 import json
 import math
 import sqlite3
-from datetime import datetime
-from typing import Any, TypeGuard
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import helper
 from service.ai_trust import evaluate_entry_enforcement
 from service.capital_budget import CapitalBudgetService
-from service.dca.dust import DcaDustContext, handle_unsellable_remainder
 from service.dca.exchange import DcaExchange
+from service.dca.finalization import (
+    DcaFinalizationContext,
+    build_entry_size_retry_order,
+    build_tp_limit_sell_payload,
+    calculate_closed_trade_stats,
+    finalize_buy_order,
+    finalize_completed_sell,
+    handle_partial_sell_status,
+    has_valid_buy_fill,
+    is_exchange_order_filled,
+    is_exchange_order_inactive,
+    is_partial_sell_status,
+    is_sold_check_status,
+    log_buy_failure,
+    persist_reconciled_limit_fallback,
+)
 from service.dca.limit_sell import build_partial_status_from_fallback
-from service.dca.recovery_sizing import build_recovery_sizing_policy
 from service.delisting_protection import DelistingProtectionService
 from service.exchange_capabilities import (
     ExchangePostSubmissionFailure,
     ExchangeSubmissionIndeterminate,
 )
-from service.exchange_types import (
-    ExchangeOrderPayload,
-    PartialSellStatus,
-    SoldCheckStatus,
-)
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
-from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.lifecycle_snapshot import (
     LifecycleSnapshotIdentity,
     snapshots_match,
 )
-from service.lifecycle_types import normalize_close_reason
 from service.monitoring import MonitoringService
 from service.order_intents import (
     build_manual_buy_order_intent,
@@ -40,19 +55,12 @@ from service.order_mutation_result import (
     OrderMutationStatus,
 )
 from service.order_payloads import (
-    build_buy_monitor_payload,
-    build_buy_trade_payload,
-    build_closed_trade_payloads,
     build_manual_buy_open_trade_payload,
     build_manual_buy_trade_payload,
 )
-from service.order_persistence import (
-    persist_buy_trade,
-    persist_closed_trade,
-    persist_manual_buy_add,
-    persist_partial_sell_execution,
-)
+from service.order_persistence import persist_closed_trade, persist_manual_buy_add
 from service.order_requests import normalize_order_symbol, parse_manual_buy_add_request
+from service.order_routing import OrderLifecycleRouting
 from service.placement_intents import (
     PlacementAction,
     PlacementIntentState,
@@ -60,12 +68,9 @@ from service.placement_intents import (
     ensure_operation_id,
     is_exchange_placement_enabled,
     is_terminal_placement_state,
+    placement_scope_matches,
 )
-from service.placement_reconciliation import (
-    PlacementReconciler,
-    PlacementReconciliationSummary,
-    RecoverAccumulation,
-)
+from service.placement_reconciliation import PlacementReconciler
 from service.placement_recovery import PlacementRecoveryHandler
 from service.placement_workflow import PlacementWorkflow
 from service.sell_fallback_workflow import DurableSellFallback
@@ -75,554 +80,190 @@ from service.trading_contracts import BuyIntent, SellIntent
 from service.trading_controls import evaluate_buy_like_gate
 from tortoise.exceptions import BaseORMException, ConfigurationError
 
-logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
+logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 
 
-class Orders:
-    """Handle incoming buy/sell signals and persist trades."""
+@dataclass(frozen=True)
+class DefaultOrderCollaborators:
+    """The default collaborator set shared by both construction paths."""
 
-    _ENTRY_SIZING_RETRY_REASONS = {
-        "capital_budget_exceeded",
-        "insufficient_quote_balance",
-        "invalid_required_quote",
-        "invalid_price_or_amount",
-    }
+    utils: helper.Utils
+    capital_budget: CapitalBudgetService
+    delisting_protection: DelistingProtectionService
+    exchange: DcaExchange
+    monitoring: MonitoringService
+    placement_workflow: PlacementWorkflow
+    trades: Trades
 
-    def __init__(self):
-        self.utils = helper.Utils()
-        self.capital_budget = CapitalBudgetService()
-        self.delisting_protection = DelistingProtectionService.shared()
-        self.exchange = DcaExchange()
-        self.monitoring = MonitoringService()
-        self.placement_workflow = PlacementWorkflow()
+
+def build_default_order_collaborators() -> DefaultOrderCollaborators:
+    """Build the default order collaborators from the single wiring list."""
+    return DefaultOrderCollaborators(
+        utils=helper.Utils(),
+        capital_budget=CapitalBudgetService(),
+        delisting_protection=DelistingProtectionService.shared(),
+        exchange=DcaExchange(),
+        monitoring=MonitoringService(),
+        placement_workflow=PlacementWorkflow(),
+        trades=Trades(),
+    )
+
+
+class DcaOrderLifecycle:
+    """Execute classic-DCA orders: buys, sells, TP limits, manual ops, stops."""
+
+    def __init__(
+        self,
+        *,
+        exchange: DcaExchange | None = None,
+        trades: Trades | None = None,
+        monitoring: MonitoringService | None = None,
+        capital_budget: CapitalBudgetService | None = None,
+        delisting_protection: DelistingProtectionService | None = None,
+        utils: helper.Utils | None = None,
+        placement_workflow: PlacementWorkflow | None = None,
+        routing: OrderLifecycleRouting | None = None,
+        reconciler_factory: Callable[[], PlacementReconciler] | None = None,
+    ) -> None:
+        """Wire collaborators; each omitted collaborator is self-wired.
+
+        The finalization context is built at CALL TIME from the current
+        self.<collaborator> values (see the finalization property), not once
+        in __init__, so post-construction test reassignment keeps working.
+        """
+        defaults = build_default_order_collaborators()
+        self.utils = utils if utils is not None else defaults.utils
+        self.capital_budget = (
+            capital_budget if capital_budget is not None else defaults.capital_budget
+        )
+        self.delisting_protection = (
+            delisting_protection
+            if delisting_protection is not None
+            else defaults.delisting_protection
+        )
+        self.exchange = exchange if exchange is not None else defaults.exchange
+        self.monitoring = monitoring if monitoring is not None else defaults.monitoring
+        self.placement_workflow = (
+            placement_workflow
+            if placement_workflow is not None
+            else defaults.placement_workflow
+        )
         self.placement_intents = self.placement_workflow.intents
-        self.trades = Trades()
-        self.accumulation_recovery: RecoverAccumulation | None = None
+        self.trades = trades if trades is not None else defaults.trades
+        self.routing = routing
+        if self.routing is None:
+            self.routing = OrderLifecycleRouting(
+                trades=self.trades,
+                placement_intents=self.placement_intents,
+            )
+        self.reconciler_factory = reconciler_factory
+
+    @property
+    def finalization(self) -> DcaFinalizationContext:
+        """Build the finalization context from the current collaborators."""
+        return DcaFinalizationContext(
+            trades=self.trades,
+            monitoring=self.monitoring,
+            placement_workflow=self.placement_workflow,
+            exchange=self.exchange,
+            utils=self.utils,
+        )
+
+    def build_recovery_handler(self) -> PlacementRecoveryHandler:
+        """Build the DCA recovery handler with the call-time finalization context.
+
+        Single owner of the recovery callback wiring: the bybit default reconciler
+        and the root placement-recovery entry both compose this handler.
+        """
+        return PlacementRecoveryHandler(
+            exchange=self.exchange,
+            trades=self.trades,
+            validate_buy=has_valid_buy_fill,
+            validate_sell=is_sold_check_status,
+            finalize_buy=lambda status, config, **kwargs: finalize_buy_order(
+                status,
+                config,
+                dependencies=self.finalization,
+                **kwargs,
+            ),
+            finalize_sell=lambda status, config, **kwargs: finalize_completed_sell(
+                status,
+                config,
+                dependencies=self.finalization,
+                **kwargs,
+            ),
+            build_limit_sell_payload=lambda trades, evidence: (
+                build_tp_limit_sell_payload(
+                    trades,
+                    evidence,
+                    dependencies=self.finalization,
+                )
+            ),
+            persist_limit_fallback=lambda limit_status, config, operation_id, **kwargs: (
+                persist_reconciled_limit_fallback(
+                    limit_status,
+                    config,
+                    operation_id,
+                    dependencies=self.finalization,
+                    **kwargs,
+                )
+            ),
+        )
+
+    def _build_placement_reconciler(self) -> PlacementReconciler:
+        """Build the accepted-buy recovery reconciler for the bybit branch."""
+        if self.reconciler_factory is not None:
+            return self.reconciler_factory()
+        return self._build_default_placement_reconciler()
+
+    def _build_default_placement_reconciler(self) -> PlacementReconciler:
+        """Build a recovery reconciler without the accumulation seam."""
+        recovery = self.build_recovery_handler()
+        return PlacementReconciler(
+            self.exchange,
+            recovery.resume,
+            self.placement_intents,
+            accumulation_recovery=None,
+        )
 
     async def close(self) -> None:
         """Close exchange resources owned by this order service."""
         await self.exchange.close()
 
-    async def _legacy_lifecycle_rejection(
-        self,
-        symbol: str,
-        action: str,
-        operation_id: str | None = None,
-    ) -> OrderMutationResult | None:
-        """Reject non-DCA ownership without trusting order payload mode/reason.
-
-        Accumulation uses dedicated lifecycle-authorized execution. Legacy manual endpoints are not a bypass.
-        Reconciliation and cancellation of existing orders remain available.
-        """
-        try:
-            decision = await load_lifecycle_route(symbol)
-        except (BaseORMException, RuntimeError, sqlite3.Error, ValueError):
-            logging.error(
-                "Cannot resolve lifecycle ownership for %s.", symbol, exc_info=True
-            )
-            return self._trade_state_unavailable_result(
-                operation_id=operation_id, symbol=symbol, action=action
-            )
-        if decision.route == LifecycleRoute.CLASSIC_DCA:
-            return None
-        accumulation = decision.route == LifecycleRoute.ACCUMULATION
-        reason = "accumulation_lifecycle_required" if accumulation else decision.reason
-        message = (
-            "This symbol belongs to accumulation. Use its strategy and explicit "
-            "lifecycle actions in Trading Overview."
-            if accumulation
-            else "Lifecycle ownership is invalid. No mutation was performed; repair the state first."
-        )
-        logging.warning("Rejecting legacy %s for %s: %s.", action, symbol, reason)
-        return OrderMutationResult(
-            operation_id=str(operation_id or ""),
-            symbol=symbol,
-            action=action,
-            status=OrderMutationStatus.REJECTED,
-            reason_code=reason,
-            user_message=message,
-        )
-
-    @staticmethod
-    def _expected_lifecycle_snapshot(
-        order: dict[str, Any],
-    ) -> LifecycleSnapshotIdentity | None:
-        """Parse an optional evaluated lifecycle identity from an order."""
-        raw_snapshot = order.get("lifecycle_snapshot")
-        if not isinstance(raw_snapshot, dict):
-            return None
-        try:
-            return LifecycleSnapshotIdentity.from_dict(raw_snapshot)
-        except (TypeError, ValueError):
-            logging.warning(
-                "Rejecting %s mutation with invalid lifecycle snapshot.",
-                order.get("symbol"),
-            )
-            return None
-
-    async def _load_fresh_trade(self, symbol: str) -> dict[str, Any] | None:
-        """Reload authoritative trade state without the dashboard TTL cache."""
-        fresh_loader = getattr(self.trades, "get_trades_for_orders_fresh", None)
-        if callable(fresh_loader):
-            return await fresh_loader(symbol)
-        return await self.trades.get_trades_for_orders(symbol)
-
-    async def _load_authoritative_trade(self, symbol: str) -> dict[str, Any] | None:
-        """Load mutation state without converting database failures to absence."""
-        authoritative_loader = getattr(
-            self.trades,
-            "get_trades_for_orders_authoritative",
-            None,
-        )
-        if callable(authoritative_loader):
-            return await authoritative_loader(symbol)
-        return await self._load_fresh_trade(symbol)
-
-    @staticmethod
-    def _trade_state_unavailable_result(
-        *,
-        operation_id: str | None,
-        symbol: str,
-        action: str,
-    ) -> OrderMutationResult:
-        """Return a fail-closed operator result for an unreadable trade ledger."""
-        return OrderMutationResult(
-            operation_id=str(operation_id or ""),
-            symbol=symbol,
-            action=action,
-            status=OrderMutationStatus.REJECTED,
-            reason_code="trade_state_unavailable",
-            user_message="Trade state could not be loaded. No order was sent.",
-        )
-
-    async def _get_placement_intent(self, operation_id: str) -> Any | None:
-        """Read a durable intent when persistence is available."""
-        try:
-            return await self.placement_intents.get(operation_id)
-        except (RuntimeError, ConfigurationError):
-            return None
-
-    @staticmethod
-    def _operator_status_from_intent(
-        intent: Any,
-        *,
-        applied: bool,
-        preexisting_operation: bool,
-    ) -> tuple[OrderMutationStatus, str]:
-        """Map durable placement state to the public mutation result contract."""
-        intent_state = str(intent.state)
-        status = (
-            OrderMutationStatus.APPLIED if applied else OrderMutationStatus.REJECTED
-        )
-        reason_code = str(intent.reason_code or intent_state)
-        if (
-            intent_state == PlacementIntentState.COMPLETED.value
-            and preexisting_operation
-        ):
-            return OrderMutationStatus.DEDUPLICATED, "duplicate_operation"
-        if intent_state in {
-            PlacementIntentState.INDETERMINATE.value,
-            PlacementIntentState.RECONCILING.value,
-            PlacementIntentState.ACCEPTED.value,
-            PlacementIntentState.FILLED.value,
-            PlacementIntentState.PERSISTED.value,
-        }:
-            return OrderMutationStatus.INDETERMINATE, reason_code
-        if intent_state in {
-            PlacementIntentState.QUARANTINED.value,
-            PlacementIntentState.RESTORED_QUARANTINED.value,
-        }:
-            return OrderMutationStatus.QUARANTINED, reason_code
-        if intent_state == PlacementIntentState.REJECTED.value:
-            return OrderMutationStatus.REJECTED, reason_code
-        return status, reason_code
-
-    @classmethod
-    def _operator_result_from_intent(
-        cls,
-        *,
-        intent: Any,
-        operation_id: str,
-        symbol: str,
-        action: str,
-        applied: bool,
-        preexisting_operation: bool,
-    ) -> OrderMutationResult:
-        """Build an operator-visible result from the resolved durable intent."""
-        status, reason_code = cls._operator_status_from_intent(
-            intent,
-            applied=applied,
-            preexisting_operation=preexisting_operation,
-        )
-        messages = {
-            OrderMutationStatus.APPLIED: "The order was applied.",
-            OrderMutationStatus.DEDUPLICATED: (
-                "This operation was already completed; no duplicate order was sent."
-            ),
-            OrderMutationStatus.REJECTED: "The order was rejected before completion.",
-            OrderMutationStatus.STALE: (
-                "Trade state changed before execution. Refresh and try again."
-            ),
-            OrderMutationStatus.INDETERMINATE: (
-                "The exchange outcome is not yet known. Reconciliation is required."
-            ),
-            OrderMutationStatus.QUARANTINED: (
-                "The operation is quarantined and requires operator review."
-            ),
-        }
-        return OrderMutationResult(
-            operation_id=operation_id,
-            symbol=symbol,
-            action=action,
-            status=status,
-            reason_code=reason_code,
-            exchange_order_id=str(intent.exchange_order_id or "") or None,
-            client_order_id=str(intent.client_order_id or "") or None,
-            user_message=messages[status],
-        )
-
-    async def _snapshot_is_current(
-        self,
-        expected: LifecycleSnapshotIdentity | None,
-        symbol: str,
-        config: dict[str, Any],
-    ) -> bool:
-        """Fail closed when locked lifecycle state differs from evaluation."""
-        if expected is None:
-            return True
-        current_trade = await self._load_fresh_trade(symbol)
-        if snapshots_match(expected, current_trade, config):
-            return True
-        logging.info(
-            "Rejecting lifecycle mutation for %s: stale_snapshot.",
-            symbol,
-        )
-        return False
-
-    async def _order_snapshot_is_current(
-        self,
-        order: dict[str, Any],
-        config: dict[str, Any],
-    ) -> bool:
-        """Validate and compare an order's optional lifecycle snapshot."""
-        if order.get("lifecycle_snapshot") is None:
-            return True
-        expected = self._expected_lifecycle_snapshot(order)
-        if expected is None:
-            return False
-        return await self._snapshot_is_current(
-            expected,
-            str(order.get("symbol") or ""),
-            config,
-        )
-
-    async def reconcile_placement_intents(
-        self,
-        config: dict[str, Any],
-    ) -> PlacementReconciliationSummary:
-        """Reconcile durable exchange effects before runtime producers start."""
-        reconciler = self._build_placement_reconciler()
-        try:
-            return await reconciler.reconcile(config)
-        finally:
-            await self.exchange.close()
-
-    def _build_placement_reconciler(self) -> PlacementReconciler:
-        """Build recovery callbacks for startup and accepted runtime buys."""
-        recovery = PlacementRecoveryHandler(
-            exchange=self.exchange,
-            trades=self.trades,
-            validate_buy=self._has_valid_buy_fill,
-            validate_sell=self._is_sold_check_status,
-            finalize_buy=self._finalize_buy_order,
-            finalize_sell=self._finalize_completed_sell,
-            build_limit_sell_payload=self._build_tp_limit_sell_payload,
-            persist_limit_fallback=self._persist_reconciled_limit_fallback,
-        )
-        return PlacementReconciler(
-            self.exchange,
-            recovery.resume,
-            self.placement_intents,
-            accumulation_recovery=self.accumulation_recovery,
-        )
-
-    async def _persist_reconciled_limit_fallback(
-        self,
-        limit_status: dict[str, Any],
-        config: dict[str, Any],
-        operation_id: str,
-    ) -> bool:
-        """Persist a recovered partial limit fill without replaying fallback."""
-        partial_status = build_partial_status_from_fallback(
-            limit_status,
-            default_symbol=str(limit_status.get("symbol") or ""),
-        )
-        if float(partial_status.get("partial_filled_amount") or 0.0) <= 0:
-            return False
-        await self.__handle_partial_sell_status(
-            partial_status,
-            config,
-            placement_operation_id=operation_id,
-        )
-        return True
-
-    @staticmethod
-    def _parse_metadata_json(raw_value: Any) -> dict[str, Any]:
-        """Return structured order metadata from a JSON payload when possible."""
-        if isinstance(raw_value, dict):
-            return dict(raw_value)
-        if not isinstance(raw_value, str) or not raw_value.strip():
-            return {}
-        try:
-            parsed = json.loads(raw_value)
-        except json.JSONDecodeError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-
-    def _build_entry_size_retry_order(
-        self,
-        order: dict[str, Any],
-        precheck: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
-        """Return a one-shot baseline retry order for entry-sizing failures."""
-        if not bool(order.get("baseorder")) or not bool(
-            order.get("entry_size_applied")
-        ):
-            return None
-
-        reason = str((precheck or {}).get("reason") or "")
-        if reason not in self._ENTRY_SIZING_RETRY_REASONS:
-            return None
-
-        baseline_order_size = float(order.get("baseline_order_size") or 0.0)
-        current_order_size = float(order.get("ordersize") or 0.0)
-        if (
-            baseline_order_size <= 0
-            or abs(current_order_size - baseline_order_size) < 1e-12
-        ):
-            return None
-
-        retry_order = dict(order)
-        retry_order["ordersize"] = baseline_order_size
-        retry_order["entry_size_applied"] = False
-        retry_order["entry_size_fallback_applied"] = True
-        retry_order["entry_size_fallback_reason"] = reason
-
-        metadata = self._parse_metadata_json(order.get("metadata_json"))
-        entry_sizing = metadata.get("entry_sizing")
-        if not isinstance(entry_sizing, dict):
-            entry_sizing = {}
-        entry_sizing["applied"] = False
-        entry_sizing["fallback_applied"] = True
-        entry_sizing["fallback_reason_code"] = reason
-        entry_sizing["resolved_order_size"] = baseline_order_size
-        metadata["entry_sizing"] = entry_sizing
-        retry_order["metadata_json"] = json.dumps(metadata, sort_keys=True)
-        return retry_order
-
-    async def _finalize_buy_order(
-        self,
-        order_status: ExchangeOrderPayload,
-        config: dict[str, Any],
-        *,
-        original_order: dict[str, Any],
-        placement_operation_id: str | None = None,
-    ) -> bool:
-        """Persist a filled buy order and emit monitoring."""
-        logging.debug(
-            "Finalizing buy symbol=%s order_id=%s",
-            order_status.get("symbol"),
-            order_status.get("id") or order_status.get("orderid"),
-        )
-        if not self._has_valid_buy_fill(order_status):
-            logging.error(
-                "Skipping trade creation for %s: invalid order status.",
-                order_status.get("symbol"),
-            )
-            return False
-        for key in (
-            "signal_name",
-            "strategy_name",
-            "strategy_slug",
-            "strategy_version",
-            "timeframe",
-            "metadata_json",
-            "baseline_order_size",
-            "entry_size_applied",
-            "entry_size_reason_code",
-            "entry_size_fallback_applied",
-            "entry_size_fallback_reason",
-        ):
-            if order_status.get(key) is None and original_order.get(key) is not None:
-                order_status[key] = original_order[key]
-        if bool(order_status.get("safetyorder")):
-            metadata = self._parse_metadata_json(order_status.get("metadata_json"))
-            recovery_so = metadata.get("recovery_so")
-            if isinstance(recovery_so, dict):
-                fill_price = float(order_status.get("price") or 0.0)
-                reference_price = float(recovery_so.get("reference_price") or 0.0)
-                trigger_market_price = float(recovery_so.get("current_price") or 0.0)
-                recovery_so["fill_price"] = fill_price
-                if reference_price > 0 and fill_price > 0:
-                    recovery_so["fill_deviation_percent"] = round(
-                        ((fill_price - reference_price) / reference_price) * 100,
-                        8,
-                    )
-                if trigger_market_price > 0 and fill_price > 0:
-                    recovery_so["fill_vs_trigger_percent"] = round(
-                        ((fill_price - trigger_market_price) / trigger_market_price)
-                        * 100,
-                        8,
-                    )
-                metadata["recovery_so"] = recovery_so
-                order_status["metadata_json"] = json.dumps(metadata, sort_keys=True)
-        if bool(order_status.get("baseorder")):
-            metadata = self._parse_metadata_json(order_status.get("metadata_json"))
-            metadata["dca_policy"] = build_recovery_sizing_policy(config).to_dict()
-            order_status["metadata_json"] = json.dumps(metadata, sort_keys=True)
-        payload = build_buy_trade_payload(order_status)
-        persistence_options: dict[str, Any] = {
-            "create_open_trade": not bool(order_status["safetyorder"]),
-            "entry_evaluation": original_order.get("_ai_entry_evaluation"),
-        }
-        if placement_operation_id:
-            persistence_options["placement_operation_id"] = placement_operation_id
-        await persist_buy_trade(
-            order_status["symbol"],
-            payload,
-            **persistence_options,
-        )
-        self.placement_workflow.log_persisted(
-            placement_operation_id,
-            symbol=order_status["symbol"],
-            side="buy",
-            order_id=str(order_status.get("id") or order_status.get("orderid") or ""),
-            amount=str(order_status.get("amount") or "0"),
-            quote_cost=str(order_status.get("ordersize") or "0"),
-        )
-        await self._reset_unsellable_state(order_status["symbol"])
-        await self.monitoring.notify_trade(
-            "trade.buy",
-            build_buy_monitor_payload(order_status),
-            config,
-        )
-        return True
-
-    @staticmethod
-    def _log_buy_failure(
-        symbol: str,
-        precheck: dict[str, Any] | None,
-    ) -> None:
-        """Emit the shared failure log for an unfilled buy order."""
-        if precheck and not bool(precheck.get("ok", False)):
-            logging.warning(
-                "Skipping buy order for %s: buy pre-check failed (%s). required=%s available=%s",
-                symbol,
-                precheck.get("reason", "unknown"),
-                precheck.get("required_quote"),
-                precheck.get("available_quote"),
-            )
-            return
-        logging.error("Failed creating buy order for %s", symbol)
-
-    @staticmethod
-    def _is_exchange_order_filled(status: dict[str, Any]) -> bool:
-        """Return whether an exchange order status represents a completed fill."""
-        order_status = str(status.get("status") or "").lower()
-        filled = float(status.get("filled") or 0.0)
-        amount = float(status.get("amount") or 0.0)
-        return order_status in {"closed", "filled"} or (amount > 0 and filled >= amount)
-
-    @staticmethod
-    def _is_exchange_order_inactive(status: dict[str, Any]) -> bool:
-        """Return whether an exchange order is safely no longer open."""
-        order_status = str(status.get("status") or "").lower()
-        return order_status in {"canceled", "cancelled", "rejected", "expired"}
-
-    def _build_tp_limit_sell_payload(
+    async def reconcile_tp_limit_order(
         self,
         trades: dict[str, Any],
-        exchange_status: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Build a sell payload for a filled proactive TP limit order."""
-        fallback_price = float(
-            exchange_status.get("average")
-            or exchange_status.get("price")
-            or trades.get("tp_limit_order_price")
-            or trades.get("tp_price")
-            or trades.get("current_price")
-            or 0.0
-        )
-        amount = float(
-            exchange_status.get("filled")
-            or exchange_status.get("amount")
-            or trades.get("tp_limit_order_amount")
-            or trades.get("total_amount")
-            or 0.0
-        )
-        cost = float(exchange_status.get("cost") or amount * fallback_price)
-        timestamp = int(
-            exchange_status.get("timestamp") or datetime.now().timestamp() * 1000
-        )
-        actual_pnl = self.utils.calculate_actual_pnl(trades, fallback_price)
-        return {
-            "id": str(exchange_status.get("id") or trades["tp_limit_order_id"]),
-            "symbol": str(exchange_status.get("symbol") or trades["symbol"]),
-            "side": str(exchange_status.get("side") or "sell"),
-            "ordertype": str(exchange_status.get("type") or "limit"),
-            "amount": amount,
-            "total_amount": amount,
-            "requested_total_amount": float(
-                trades.get("sellable_amount") or trades.get("total_amount") or amount
-            ),
-            "price": fallback_price,
-            "cost": cost,
-            "timestamp": timestamp,
-            "fee": exchange_status.get("fee") or 0.0,
-            "total_cost": float(trades.get("total_cost") or 0.0),
-            "actual_pnl": actual_pnl,
-        }
-
-    async def _finalize_completed_sell(
-        self,
-        order_status: SoldCheckStatus,
         config: dict[str, Any],
         *,
-        placement_operation_id: str | None = None,
-        placement_operation_ids: list[str] | None = None,
-    ) -> None:
-        """Persist a completed sell status and emit monitoring."""
-        normalized_close_reason = normalize_close_reason(
-            order_status.get("close_reason")
-        )
-        order_status["close_reason"] = normalized_close_reason
-        close_context = await self.__calculate_closed_trade_stats(order_status)
-        close_options: dict[str, Any] = {}
-        if placement_operation_id:
-            close_options["placement_operation_id"] = placement_operation_id
-        if placement_operation_ids:
-            close_options["placement_operation_ids"] = placement_operation_ids
-        await persist_closed_trade(
-            order_status["symbol"],
-            close_context["payload"],
-            **close_options,
-        )
-        self.placement_workflow.log_persisted(
-            placement_operation_id,
-            symbol=order_status["symbol"],
-            side="sell",
-            order_id=str(order_status.get("id") or ""),
-            amount=str(
-                order_status.get("amount") or order_status.get("total_amount") or "0"
-            ),
-            quote_cost=str(order_status.get("ordersize") or "0"),
-        )
-        await self.trades.invalidate_trade_caches()
-        await self.monitoring.notify_trade(
-            "trade.sell",
-            close_context["monitor_payload"],
-            config,
-        )
+        expected_snapshot: LifecycleSnapshotIdentity | None = None,
+    ) -> bool:
+        """Close the trade if its proactive TP limit order filled."""
+        symbol = str(trades.get("symbol") or "")
+        if not trades.get("tp_limit_order_id") or not symbol:
+            return False
+        async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
+            if not admitted:
+                logging.info("Skipping proactive TP reconciliation during maintenance.")
+                return False
+            if not await self.routing.snapshot_is_current(
+                expected_snapshot,
+                symbol,
+                config,
+            ):
+                return False
+            return await self._reconcile_tp_limit_order(trades, config)
+
+    async def _reconcile_tp_limit_order(
+        self,
+        trades: dict[str, Any],
+        config: dict[str, Any],
+    ) -> bool:
+        """Reconcile one proactive TP limit order with the symbol prelocked."""
+        symbol = str(trades.get("symbol") or "")
+        if not trades.get("tp_limit_order_id") or not symbol:
+            return False
+        async with lifecycle_mutation_coordinator.prelocked(symbol):
+            return await self._reconcile_tp_limit_order_locked(trades, config)
 
     async def _reconcile_tp_limit_order_locked(
         self,
@@ -643,8 +284,12 @@ class Orders:
             )
             if not exchange_status:
                 return False
-            if self._is_exchange_order_filled(exchange_status):
-                payload = self._build_tp_limit_sell_payload(trades, exchange_status)
+            if is_exchange_order_filled(exchange_status):
+                payload = build_tp_limit_sell_payload(
+                    trades,
+                    exchange_status,
+                    dependencies=self.finalization,
+                )
                 order_status = await self.exchange.build_spot_sell_order_status(
                     payload,
                     config,
@@ -657,9 +302,13 @@ class Orders:
                         symbol,
                     )
                     return False
-                if not self._is_sold_check_status(order_status):
-                    if self._is_partial_sell_status(order_status):
-                        await self.__handle_partial_sell_status(order_status, config)
+                if not is_sold_check_status(order_status):
+                    if is_partial_sell_status(order_status):
+                        await handle_partial_sell_status(
+                            order_status,
+                            config,
+                            dependencies=self.finalization,
+                        )
                         await self.trades.clear_tp_limit_order(symbol)
                         logging.info(
                             "Processed partial proactive TP limit fill for %s from order %s.",
@@ -675,14 +324,18 @@ class Orders:
                         order_status,
                     )
                     return False
-                await self._finalize_completed_sell(order_status, config)
+                await finalize_completed_sell(
+                    order_status,
+                    config,
+                    dependencies=self.finalization,
+                )
                 logging.info(
                     "Closed %s from proactive TP limit order %s.",
                     symbol,
                     order_id,
                 )
                 return True
-            if self._is_exchange_order_inactive(exchange_status):
+            if is_exchange_order_inactive(exchange_status):
                 await self.trades.clear_tp_limit_order(
                     symbol,
                     exchange_status=exchange_status,
@@ -695,41 +348,6 @@ class Orders:
             return False
         finally:
             await self.exchange.close()
-
-    async def reconcile_tp_limit_order(
-        self,
-        trades: dict[str, Any],
-        config: dict[str, Any],
-        *,
-        expected_snapshot: LifecycleSnapshotIdentity | None = None,
-    ) -> bool:
-        """Close the trade if its proactive TP limit order filled."""
-        symbol = str(trades.get("symbol") or "")
-        if not trades.get("tp_limit_order_id") or not symbol:
-            return False
-        async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
-            if not admitted:
-                logging.info("Skipping proactive TP reconciliation during maintenance.")
-                return False
-            if not await self._snapshot_is_current(
-                expected_snapshot,
-                symbol,
-                config,
-            ):
-                return False
-            return await self._reconcile_tp_limit_order(trades, config)
-
-    async def _reconcile_tp_limit_order(
-        self,
-        trades: dict[str, Any],
-        config: dict[str, Any],
-    ) -> bool:
-        """Reconcile one proactive TP limit order with the symbol prelocked."""
-        symbol = str(trades.get("symbol") or "")
-        if not trades.get("tp_limit_order_id") or not symbol:
-            return False
-        async with lifecycle_mutation_coordinator.prelocked(symbol):
-            return await self._reconcile_tp_limit_order_locked(trades, config)
 
     async def _cancel_tp_limit_order_locked(
         self,
@@ -759,6 +377,7 @@ class Orders:
             "symbol": symbol,
             "side": "sell",
             "ordertype": "limit",
+            "deal_id": (open_trade or {}).get("deal_id"),
             "operation_id": build_derived_operation_id(
                 PlacementAction.CANCEL,
                 config.get("exchange"),
@@ -773,6 +392,9 @@ class Orders:
             side="sell",
             order_type="limit",
             exchange_order_id=order_id,
+            requested_amount=float(
+                (open_trade or {}).get("tp_limit_order_amount") or 0.0
+            ),
         )
         if placement.completed:
             return True
@@ -800,7 +422,7 @@ class Orders:
                     error_message=str(exc),
                 )
                 return False
-            if exchange_status and self._is_exchange_order_filled(exchange_status):
+            if exchange_status and is_exchange_order_filled(exchange_status):
                 await self.placement_intents.transition(
                     placement.operation_id,
                     PlacementIntentState.FILLED,
@@ -808,25 +430,28 @@ class Orders:
                     result=dict(exchange_status),
                 )
                 if trade_data:
-                    payload = self._build_tp_limit_sell_payload(
+                    payload = build_tp_limit_sell_payload(
                         trade_data,
                         exchange_status,
+                        dependencies=self.finalization,
                     )
                     order_status = await self.exchange.build_spot_sell_order_status(
                         payload,
                         config,
                     )
-                    if order_status and self._is_sold_check_status(order_status):
-                        await self._finalize_completed_sell(
+                    if order_status and is_sold_check_status(order_status):
+                        await finalize_completed_sell(
                             order_status,
                             config,
                             placement_operation_id=placement.operation_id,
+                            dependencies=self.finalization,
                         )
-                    elif order_status and self._is_partial_sell_status(order_status):
-                        await self.__handle_partial_sell_status(
+                    elif order_status and is_partial_sell_status(order_status):
+                        await handle_partial_sell_status(
                             order_status,
                             config,
                             placement_operation_id=placement.operation_id,
+                            dependencies=self.finalization,
                         )
                 recovered = await self.placement_intents.get(
                     str(placement.operation_id or "")
@@ -860,7 +485,7 @@ class Orders:
                 )
                 return False
 
-            if self._is_exchange_order_inactive(exchange_status):
+            if is_exchange_order_inactive(exchange_status):
                 await self.placement_intents.transition(
                     placement.operation_id,
                     PlacementIntentState.ACCEPTED,
@@ -929,7 +554,7 @@ class Orders:
     ) -> bool:
         """Cancel a proactive TP order while the caller owns the symbol lock."""
         lifecycle_mutation_coordinator.assert_prelocked(symbol)
-        if not await self._snapshot_is_current(
+        if not await self.routing.snapshot_is_current(
             expected_snapshot,
             symbol,
             config,
@@ -963,6 +588,13 @@ class Orders:
                 return False
             return await self._arm_tp_limit_order(order, config)
 
+    async def _bind_order_to_open_deal(self, order: dict[str, Any]) -> None:
+        """Bind recoverable placement evidence to the current locked deal."""
+        order.pop("deal_id", None)
+        rows = await self.trades.get_open_trades_by_symbol(str(order["symbol"]))
+        if len(rows) == 1 and rows[0].get("deal_id"):
+            order["deal_id"] = str(rows[0]["deal_id"])
+
     async def _arm_tp_limit_order(
         self,
         order: dict[str, Any],
@@ -971,10 +603,11 @@ class Orders:
         """Arm one proactive TP order with the symbol prelocked."""
         symbol = str(order["symbol"])
         async with lifecycle_mutation_coordinator.prelocked(symbol):
-            if await self._legacy_lifecycle_rejection(symbol, "take_profit_prearm"):
+            if await self.routing.reject_legacy_lifecycle(symbol, "take_profit_prearm"):
                 return False
-            if not await self._order_snapshot_is_current(order, config):
+            if not await self.routing.order_snapshot_is_current(order, config):
                 return False
+            await self._bind_order_to_open_deal(order)
             placement = await self.placement_workflow.begin(
                 order,
                 config,
@@ -1027,10 +660,11 @@ class Orders:
                         )
                         partial_status["unsellable"] = True
                         partial_status["unsellable_reason"] = "minimum_notional"
-                        await self.__handle_partial_sell_status(
+                        await handle_partial_sell_status(
                             partial_status,
                             config,
                             placement_operation_id=placement.operation_id,
+                            dependencies=self.finalization,
                         )
                     logging.info(
                         "Proactive TP limit order for %s was not armed: %s",
@@ -1128,6 +762,19 @@ class Orders:
         source_operation_id: str | None,
     ) -> str:
         """Durably compensate a limit order whose local metadata was not saved."""
+        source = (
+            await self.placement_intents.get(source_operation_id)
+            if source_operation_id
+            else None
+        )
+        source_matches = bool(
+            source is not None
+            and str(source.symbol) == symbol
+            and str(source.exchange_name).lower()
+            == str(config.get("exchange") or "").lower()
+            and str(source.exchange_order_id or "") == order_id
+            and placement_scope_matches(source, config)
+        )
         cancel_order = {
             "symbol": symbol,
             "side": "sell",
@@ -1139,6 +786,9 @@ class Orders:
                 order_id,
             ),
             "source_operation_id": source_operation_id,
+            "deal_id": str(source.deal_id)
+            if source_matches and source.deal_id
+            else None,
         }
         cancellation = await self.placement_workflow.begin(
             cancel_order,
@@ -1147,6 +797,9 @@ class Orders:
             side="sell",
             order_type="limit",
             exchange_order_id=order_id,
+            requested_amount=float(source.requested_amount or 0.0)
+            if source_matches
+            else 0.0,
         )
         if cancellation.completed:
             return "limit_metadata_persistence_failed_compensated"
@@ -1176,10 +829,10 @@ class Orders:
             )
             return "limit_persistence_and_cancel_uncertain"
 
-        if not self._is_exchange_order_inactive(exchange_status):
+        if not is_exchange_order_inactive(exchange_status):
             target_state = (
                 PlacementIntentState.REJECTED
-                if self._is_exchange_order_filled(exchange_status)
+                if is_exchange_order_filled(exchange_status)
                 else PlacementIntentState.INDETERMINATE
             )
             await self.placement_intents.transition(
@@ -1219,6 +872,7 @@ class Orders:
         self, order: SellIntent | dict[str, Any], config: dict[str, Any]
     ) -> bool:
         """Create a sell order and persist closed trades."""
+        order.pop("_exit_guard_canceled_zero_fill", None)
         async with lifecycle_mutation_coordinator.mutation(
             str(order["symbol"])
         ) as admitted:
@@ -1240,7 +894,14 @@ class Orders:
         return await DurableSellFallback(
             exchange=self.exchange,
             workflow=self.placement_workflow,
-            persist_limit_fallback=self._persist_reconciled_limit_fallback,
+            persist_limit_fallback=lambda limit_status, config, operation_id: (
+                persist_reconciled_limit_fallback(
+                    limit_status,
+                    config,
+                    operation_id,
+                    dependencies=self.finalization,
+                )
+            ),
             logger=logging,
         ).execute(remaining_order, config, limit_status)
 
@@ -1251,10 +912,11 @@ class Orders:
         logging.info("Incoming sell order for %s", order["symbol"])
         async with lifecycle_mutation_coordinator.prelocked(order["symbol"]):
             try:
-                if await self._legacy_lifecycle_rejection(order["symbol"], "sell"):
+                if await self.routing.reject_legacy_lifecycle(order["symbol"], "sell"):
                     return False
-                if not await self._order_snapshot_is_current(order, config):
+                if not await self.routing.order_snapshot_is_current(order, config):
                     return False
+                await self._bind_order_to_open_deal(order)
                 if not bool(order.get("skip_tp_limit_cancel", False)):
                     canceled = await self._cancel_tp_limit_order_locked(
                         order["symbol"],
@@ -1366,7 +1028,7 @@ class Orders:
                     if order_status.get(key) is None and order.get(key) is not None:
                         order_status[key] = order[key]
 
-                if self._is_partial_sell_status(order_status):
+                if is_partial_sell_status(order_status):
                     if (
                         order_status.get("close_reason") is None
                         and order.get("sell_reason") is not None
@@ -1376,17 +1038,40 @@ class Orders:
                         order_status.get("partial_filled_amount") or 0.0
                     )
                     if partial_amount <= 0:
-                        await self.placement_intents.transition(
+                        if order_status.get("confirmed_canceled_zero_fill") is True:
+                            # The acknowledged order was explicitly canceled without
+                            # a fill; record that evidence through reconciliation.
+                            await self.placement_intents.transition(
+                                active_operation_id,
+                                PlacementIntentState.RECONCILING,
+                            )
+                        rejected = await self.placement_intents.transition(
                             active_operation_id,
                             PlacementIntentState.REJECTED,
                             result=dict(order_status),
                             reason_code=str(
-                                order_status.get("unsellable_reason")
+                                (
+                                    "exit_guard_canceled_zero_fill"
+                                    if order_status.get("exit_guard_canceled_zero_fill")
+                                    else None
+                                )
+                                or order_status.get("unsellable_reason")
                                 or order_status.get("fallback_reason")
                                 or "no_sell_fill"
                             ),
                         )
-                        await self.__handle_partial_sell_status(order_status, config)
+                        await handle_partial_sell_status(
+                            order_status,
+                            config,
+                            dependencies=self.finalization,
+                        )
+                        if (
+                            order_status.get("exit_guard_canceled_zero_fill") is True
+                            and rejected is not None
+                            and str(rejected.state)
+                            == PlacementIntentState.REJECTED.value
+                        ):
+                            order["_exit_guard_canceled_zero_fill"] = True
                         return False
                     await self.placement_intents.transition(
                         active_operation_id,
@@ -1395,16 +1080,18 @@ class Orders:
                         result=dict(order_status),
                     )
                     if source_operation_id:
-                        await self.__handle_partial_sell_status(
+                        await handle_partial_sell_status(
                             order_status,
                             config,
                             placement_operation_ids=persistence_operation_ids,
+                            dependencies=self.finalization,
                         )
                     else:
-                        await self.__handle_partial_sell_status(
+                        await handle_partial_sell_status(
                             order_status,
                             config,
                             placement_operation_id=active_operation_id,
+                            dependencies=self.finalization,
                         )
                     for operation_id in persistence_operation_ids:
                         await self.placement_intents.transition(
@@ -1413,7 +1100,7 @@ class Orders:
                         )
                     return True
 
-                if not self._is_sold_check_status(order_status):
+                if not is_sold_check_status(order_status):
                     await self.placement_intents.transition(
                         active_operation_id,
                         PlacementIntentState.ACCEPTED,
@@ -1448,16 +1135,18 @@ class Orders:
                     result=dict(order_status),
                 )
                 if source_operation_id:
-                    await self._finalize_completed_sell(
+                    await finalize_completed_sell(
                         order_status,
                         config,
                         placement_operation_ids=persistence_operation_ids,
+                        dependencies=self.finalization,
                     )
                 else:
-                    await self._finalize_completed_sell(
+                    await finalize_completed_sell(
                         order_status,
                         config,
                         placement_operation_id=active_operation_id,
+                        dependencies=self.finalization,
                     )
                 for operation_id in persistence_operation_ids:
                     await self.placement_intents.transition(
@@ -1467,168 +1156,6 @@ class Orders:
                 return True
             finally:
                 await self.exchange.close()
-
-    async def __handle_partial_sell_status(
-        self,
-        order_status: PartialSellStatus,
-        config: dict[str, Any],
-        *,
-        placement_operation_id: str | None = None,
-        placement_operation_ids: list[str] | None = None,
-    ) -> None:
-        """Persist partial sell execution while keeping the trade open."""
-        if bool(order_status.get("unsellable", False)):
-            await self.__handle_unsellable_remainder(
-                order_status,
-                config,
-                placement_operation_id=placement_operation_id,
-                placement_operation_ids=placement_operation_ids,
-            )
-            return
-
-        partial_amount = float(order_status.get("partial_filled_amount") or 0.0)
-        partial_proceeds = float(order_status.get("partial_proceeds") or 0.0)
-        if partial_amount > 0:
-            partial_options: dict[str, Any] = {}
-            if placement_operation_id:
-                partial_options["placement_operation_id"] = placement_operation_id
-            if placement_operation_ids:
-                partial_options["placement_operation_ids"] = placement_operation_ids
-            await persist_partial_sell_execution(
-                order_status["symbol"],
-                partial_amount,
-                partial_proceeds,
-                order_status.get("executions"),
-                **partial_options,
-            )
-            await self.trades.invalidate_trade_caches()
-            logging.info(
-                "Persisted partial sell execution for %s: amount=%s proceeds=%s remaining=%s",
-                order_status["symbol"],
-                partial_amount,
-                partial_proceeds,
-                float(order_status.get("remaining_amount") or 0.0),
-            )
-
-    async def __handle_unsellable_remainder(
-        self,
-        order_status: PartialSellStatus,
-        config: dict[str, Any],
-        *,
-        placement_operation_id: str | None = None,
-        placement_operation_ids: list[str] | None = None,
-    ) -> None:
-        """Delegate DCA dust policy while retaining the current service owners."""
-        await handle_unsellable_remainder(
-            order_status,
-            config,
-            dependencies=DcaDustContext(
-                trades=self.trades,
-                monitoring=self.monitoring,
-                logger=logging,
-                resolve_so_count=self.__resolve_so_count,
-                resolve_open_timestamp=self.__resolve_open_timestamp,
-            ),
-            placement_operation_id=placement_operation_id,
-            placement_operation_ids=placement_operation_ids,
-        )
-
-    async def __calculate_closed_trade_stats(
-        self,
-        order_status: SoldCheckStatus,
-        *,
-        partial_amount: float | None = None,
-        partial_proceeds: float | None = None,
-    ) -> dict[str, Any]:
-        """Build closed-trade payload and monitoring payload.
-
-        When the partial totals are supplied, they are used as the trusted
-        bookkeeping and no second read is performed. A stop passes totals it
-        read through a fail-closed path, so a transient read error aborts the
-        close instead of silently falling back to zero proceeds.
-        """
-        symbol = order_status["symbol"]
-        open_timestamp = await self.__resolve_open_timestamp(symbol)
-        so_count = await self.__resolve_so_count(symbol)
-        if partial_amount is None or partial_proceeds is None:
-            (
-                partial_amount,
-                partial_proceeds,
-            ) = await self.trades.get_partial_sell_execution(symbol)
-
-        return build_closed_trade_payloads(
-            order_status,
-            so_count=so_count,
-            open_timestamp_ms=open_timestamp,
-            partial_amount=partial_amount or 0.0,
-            partial_proceeds=partial_proceeds or 0.0,
-        )
-
-    async def __resolve_open_timestamp(self, symbol: str) -> float:
-        """Resolve base-order timestamp for trade duration calculation."""
-        base_order = await self.trades.get_trade_by_ordertype(symbol, baseorder=True)
-        try:
-            return float(base_order[0]["timestamp"])
-        except (IndexError, KeyError, TypeError, ValueError) as e:
-            logging.debug(
-                "Did not found a timestamp - taking default value. Cause %s", e
-            )
-            return datetime.now().timestamp() * 1000
-
-    async def __resolve_so_count(self, symbol: str) -> int:
-        """Resolve safety-order count from open trade row."""
-        open_trade = await self.trades.get_open_trades_by_symbol(symbol)
-        if open_trade:
-            return int(open_trade[0]["so_count"])
-        return 0
-
-    @staticmethod
-    def _is_partial_sell_status(
-        order_status: dict[str, Any],
-    ) -> TypeGuard[PartialSellStatus]:
-        """Return whether an exchange sell result is a partial-sell status."""
-        return str(order_status.get("type") or "") == "partial_sell"
-
-    @staticmethod
-    def _is_sold_check_status(
-        order_status: dict[str, Any],
-    ) -> TypeGuard[SoldCheckStatus]:
-        """Return whether an exchange sell result is a finalized sell status."""
-        status_type = str(order_status.get("type") or "")
-        if status_type == "sold_check":
-            return True
-        return (
-            status_type == ""
-            and bool(order_status.get("symbol"))
-            and bool(order_status.get("total_amount"))
-        )
-
-    @staticmethod
-    def _has_valid_buy_fill(order_status: ExchangeOrderPayload) -> bool:
-        """Validate that an exchange buy payload contains the core filled values."""
-        return (
-            bool(order_status.get("price"))
-            and bool(order_status.get("amount"))
-            and (float(order_status["amount"]) > 0)
-        )
-
-    async def _reset_unsellable_state(self, symbol: str) -> None:
-        """Clear persisted unsellable markers after a successful buy."""
-        try:
-            await self.trades.update_open_trades(
-                {
-                    "unsellable_amount": 0.0,
-                    "unsellable_reason": None,
-                    "unsellable_min_notional": None,
-                    "unsellable_estimated_notional": None,
-                    "unsellable_since": None,
-                    "unsellable_notice_sent": False,
-                },
-                symbol,
-            )
-        except (RuntimeError, ConfigurationError):
-            # Tests may stub persistence without initializing DB context.
-            pass
 
     async def receive_buy_order(
         self, order: BuyIntent | dict[str, Any], config: dict[str, Any]
@@ -1660,9 +1187,9 @@ class Orders:
         """Execute one buy order with the symbol prelocked."""
         lifecycle_mutation_coordinator.assert_prelocked(str(order["symbol"]))
         logging.info("Incoming buy order for %s", order["symbol"])
-        if not await self._order_snapshot_is_current(order, config):
+        if not await self.routing.order_snapshot_is_current(order, config):
             return False
-        if await self._legacy_lifecycle_rejection(order["symbol"], "buy"):
+        if await self.routing.reject_legacy_lifecycle(order["symbol"], "buy"):
             return False
 
         try:
@@ -1751,7 +1278,7 @@ class Orders:
             )
             if order_filled:
                 return True
-            retry_order = self._build_entry_size_retry_order(order, precheck)
+            retry_order = build_entry_size_retry_order(order, precheck)
             if retry_order is not None:
                 logging.warning(
                     "Retrying buy order for %s with baseline base order %s after entry sizing fallback (%s).",
@@ -1766,7 +1293,7 @@ class Orders:
                 if retry_filled:
                     return True
 
-            self._log_buy_failure(order["symbol"], precheck)
+            log_buy_failure(order["symbol"], precheck)
             return False
         finally:
             await self.exchange.close()
@@ -1777,6 +1304,8 @@ class Orders:
         config: dict[str, Any],
     ) -> tuple[bool, dict[str, Any] | None]:
         """Run capital-budget preflight, exchange buy, and persistence."""
+        if bool(order.get("safetyorder")):
+            await self._bind_order_to_open_deal(order)
         if config.get("exchange") in {
             "bybit",
             "bybiteu",
@@ -1901,7 +1430,7 @@ class Orders:
                     reason_code=str((precheck or {}).get("reason") or "not_filled"),
                 )
                 return False, precheck
-            if not self._has_valid_buy_fill(order_status):
+            if not has_valid_buy_fill(order_status):
                 await self.placement_intents.transition(
                     placement.operation_id,
                     PlacementIntentState.ACCEPTED,
@@ -1931,11 +1460,12 @@ class Orders:
                 or None,
                 result=dict(order_status),
             )
-            finalized = await self._finalize_buy_order(
+            finalized = await finalize_buy_order(
                 order_status,
                 config,
                 original_order=order,
                 placement_operation_id=placement.operation_id,
+                dependencies=self.finalization,
             )
             if not finalized:
                 return False, None
@@ -1988,7 +1518,7 @@ class Orders:
         normalized_symbol = request.symbol
         lifecycle_mutation_coordinator.assert_prelocked(normalized_symbol)
 
-        rejection = await self._legacy_lifecycle_rejection(
+        rejection = await self.routing.reject_legacy_lifecycle(
             normalized_symbol, "manual_buy_add"
         )
         if rejection is not None:
@@ -2134,7 +1664,7 @@ class Orders:
                         normalized_symbol,
                     )
                     return False
-                if not await self._snapshot_is_current(
+                if not await self.routing.snapshot_is_current(
                     expected_snapshot,
                     normalized_symbol,
                     config or {},
@@ -2164,15 +1694,15 @@ class Orders:
                 reason_code="invalid_symbol",
                 user_message="The symbol is invalid.",
             )
-        rejection = await self._legacy_lifecycle_rejection(
+        rejection = await self.routing.reject_legacy_lifecycle(
             normalized_symbol, "manual_stop", operation_id
         )
         if rejection is not None:
             return rejection
         try:
-            trade = await self._load_authoritative_trade(normalized_symbol)
+            trade = await self.routing.load_authoritative_trade(normalized_symbol)
         except TradeStateUnavailableError:
-            return self._trade_state_unavailable_result(
+            return self.routing.trade_state_unavailable_result(
                 operation_id=operation_id,
                 symbol=normalized_symbol,
                 action="manual_stop",
@@ -2205,7 +1735,7 @@ class Orders:
             reason_code = "mutation_applied"
             message = "The trade was stopped."
         else:
-            current_trade = await self._load_fresh_trade(normalized_symbol)
+            current_trade = await self.routing.load_fresh_trade(normalized_symbol)
             is_stale = current_trade is not None and not snapshots_match(
                 snapshot,
                 current_trade,
@@ -2238,7 +1768,7 @@ class Orders:
         logging.info("Incoming stop order")
         symbol = normalize_order_symbol(symbol)
         lifecycle_mutation_coordinator.assert_prelocked(symbol)
-        if await self._legacy_lifecycle_rejection(symbol, "manual_stop"):
+        if await self.routing.reject_legacy_lifecycle(symbol, "manual_stop"):
             return False
         try:
             canceled = await self._cancel_tp_limit_order_locked(
@@ -2249,7 +1779,7 @@ class Orders:
                 return False
             # Cancellation can record another partial fill. Reload under the
             # lifecycle lock so only the remaining coins receive the market mark.
-            trade = await self._load_authoritative_trade(symbol)
+            trade = await self.routing.load_authoritative_trade(symbol)
             if trade is None:
                 return False
             price = float(trade.get("current_price") or 0.0)
@@ -2271,7 +1801,7 @@ class Orders:
                 partial_amount,
                 partial_proceeds,
             ) = await self.trades.get_partial_sell_execution(symbol, fail_on_error=True)
-            close_context = await self.__calculate_closed_trade_stats(
+            close_context = await calculate_closed_trade_stats(
                 {
                     "symbol": symbol,
                     "total_cost": cost,
@@ -2282,6 +1812,7 @@ class Orders:
                         {"valuation_only": True, "source": "manual_stop"}
                     ),
                 },
+                dependencies=self.finalization,
                 partial_amount=partial_amount,
                 partial_proceeds=partial_proceeds,
             )
@@ -2317,7 +1848,7 @@ class Orders:
     async def receive_sell_signal(self, symbol: str, config: dict[str, Any]) -> bool:
         """Handle a manual sell signal."""
         symbol = normalize_order_symbol(symbol)
-        if await self._legacy_lifecycle_rejection(symbol, "manual_sell"):
+        if await self.routing.reject_legacy_lifecycle(symbol, "manual_sell"):
             return False
         trades = await self.trades.get_trades_for_orders(symbol)
         if not trades:
@@ -2328,85 +1859,6 @@ class Orders:
         order = build_manual_sell_order_intent(trades, actual_pnl)
         return await self.receive_sell_order(order, config)
 
-    async def _operator_mutation_result(
-        self,
-        *,
-        order: dict[str, Any],
-        action: str,
-        applied: bool,
-        preexisting_operation: bool,
-        expected_snapshot: LifecycleSnapshotIdentity,
-        config: dict[str, Any],
-    ) -> OrderMutationResult:
-        """Resolve a stable API outcome from lifecycle and placement state."""
-        operation_id = str(order.get("operation_id") or "")
-        intent = (
-            await self._get_placement_intent(operation_id) if operation_id else None
-        )
-
-        status = (
-            OrderMutationStatus.APPLIED if applied else OrderMutationStatus.REJECTED
-        )
-        reason_code = "mutation_applied" if applied else "mutation_rejected"
-        if intent is not None:
-            return self._operator_result_from_intent(
-                intent=intent,
-                operation_id=operation_id,
-                symbol=expected_snapshot.symbol,
-                action=action,
-                applied=applied,
-                preexisting_operation=preexisting_operation,
-            )
-        elif not applied:
-            try:
-                current_trade = await self._load_authoritative_trade(
-                    expected_snapshot.symbol
-                )
-            except TradeStateUnavailableError:
-                return self._trade_state_unavailable_result(
-                    operation_id=operation_id,
-                    symbol=expected_snapshot.symbol,
-                    action=action,
-                )
-            if not snapshots_match(expected_snapshot, current_trade, config):
-                status = OrderMutationStatus.STALE
-                reason_code = "stale_snapshot"
-
-        messages = {
-            OrderMutationStatus.APPLIED: "The order was applied.",
-            OrderMutationStatus.DEDUPLICATED: (
-                "This operation was already completed; no duplicate order was sent."
-            ),
-            OrderMutationStatus.REJECTED: "The order was rejected before completion.",
-            OrderMutationStatus.STALE: (
-                "Trade state changed before execution. Refresh and try again."
-            ),
-            OrderMutationStatus.INDETERMINATE: (
-                "The exchange outcome is not yet known. Reconciliation is required."
-            ),
-            OrderMutationStatus.QUARANTINED: (
-                "The operation is quarantined and requires operator review."
-            ),
-        }
-        return OrderMutationResult(
-            operation_id=operation_id,
-            symbol=expected_snapshot.symbol,
-            action=action,
-            status=status,
-            reason_code=reason_code,
-            exchange_order_id=(
-                str(intent.exchange_order_id or "") or None
-                if intent is not None
-                else None
-            ),
-            client_order_id=(
-                str(intent.client_order_id or "") or None
-                if intent is not None
-                else None
-            ),
-            user_message=messages[status],
-        )
-
     async def receive_sell_signal_result(
         self,
         symbol: str,
@@ -2416,22 +1868,22 @@ class Orders:
     ) -> OrderMutationResult:
         """Handle a manual sell and report its durable execution outcome."""
         symbol = normalize_order_symbol(symbol)
-        rejection = await self._legacy_lifecycle_rejection(
+        rejection = await self.routing.reject_legacy_lifecycle(
             symbol, "manual_sell", operation_id
         )
         if rejection is not None:
             return rejection
         try:
-            trades = await self._load_authoritative_trade(symbol)
+            trades = await self.routing.load_authoritative_trade(symbol)
         except TradeStateUnavailableError:
-            return self._trade_state_unavailable_result(
+            return self.routing.trade_state_unavailable_result(
                 operation_id=operation_id,
                 symbol=symbol,
                 action="manual_sell",
             )
         if not trades:
             if operation_id:
-                existing = await self._get_placement_intent(str(operation_id))
+                existing = await self.routing.get_placement_intent(str(operation_id))
                 if existing is not None:
                     status = (
                         OrderMutationStatus.DEDUPLICATED
@@ -2476,9 +1928,9 @@ class Orders:
             order["operation_id"] = str(operation_id)
         else:
             ensure_operation_id(order, "manual_sell")
-        preexisting = await self._get_placement_intent(order["operation_id"])
+        preexisting = await self.routing.get_placement_intent(order["operation_id"])
         applied = await self.receive_sell_order(order, config)
-        return await self._operator_mutation_result(
+        return await self.routing.operator_mutation_result(
             order=order,
             action="manual_sell",
             applied=applied,
@@ -2492,7 +1944,7 @@ class Orders:
     ) -> bool:
         """Handle a manual buy signal."""
         symbol = normalize_order_symbol(symbol)
-        if await self._legacy_lifecycle_rejection(symbol, "manual_buy"):
+        if await self.routing.reject_legacy_lifecycle(symbol, "manual_buy"):
             return False
         trades = await self.trades.get_trades_for_orders(symbol)
 
@@ -2513,15 +1965,15 @@ class Orders:
     ) -> OrderMutationResult:
         """Handle a manual safety buy and report its durable outcome."""
         symbol = normalize_order_symbol(symbol)
-        rejection = await self._legacy_lifecycle_rejection(
+        rejection = await self.routing.reject_legacy_lifecycle(
             symbol, "manual_buy", operation_id
         )
         if rejection is not None:
             return rejection
         if operation_id:
-            existing = await self._get_placement_intent(str(operation_id))
+            existing = await self.routing.get_placement_intent(str(operation_id))
             if existing is not None:
-                return self._operator_result_from_intent(
+                return self.routing.operator_result_from_intent(
                     intent=existing,
                     operation_id=str(operation_id),
                     symbol=symbol,
@@ -2530,9 +1982,9 @@ class Orders:
                     preexisting_operation=True,
                 )
         try:
-            trades = await self._load_authoritative_trade(symbol)
+            trades = await self.routing.load_authoritative_trade(symbol)
         except TradeStateUnavailableError:
-            return self._trade_state_unavailable_result(
+            return self.routing.trade_state_unavailable_result(
                 operation_id=operation_id,
                 symbol=symbol,
                 action="manual_buy",
@@ -2556,9 +2008,9 @@ class Orders:
             order["operation_id"] = str(operation_id)
         else:
             ensure_operation_id(order, "manual_buy")
-        preexisting = await self._get_placement_intent(order["operation_id"])
+        preexisting = await self.routing.get_placement_intent(order["operation_id"])
         applied = await self.receive_buy_order(order, config)
-        return await self._operator_mutation_result(
+        return await self.routing.operator_mutation_result(
             order=order,
             action="manual_buy",
             applied=applied,

@@ -2,11 +2,13 @@
 
 import asyncio
 import json
+import math
 import sqlite3
 from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import Any
 
+import ccxt.async_support as ccxt
 import helper
 from service.ath import AthService
 from service.autopilot import Autopilot, ResolvedTradingPolicy
@@ -18,14 +20,17 @@ from service.dca.decision import (
     ExitActionContext,
     build_dca_evaluation_context,
     evaluate_exit_action_decision,
+    evaluate_exit_price_guard,
     evaluate_recovery_trigger_decision,
     evaluate_static_dca_decision,
 )
 from service.dca.math import (
     calculate_average_entry_price,
+    calculate_pnl_break_even_price,
     calculate_stop_loss_price,
     calculate_take_profit_price,
 )
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.dca.recovery_sizing import (
     LEGACY_SIZING_MODE,
     RECOVERY_SHADOW_MODE,
@@ -52,12 +57,12 @@ from service.exchange import Exchange
 from service.indicators import Indicators
 from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.lifecycle_snapshot import LifecycleSnapshotIdentity
-from service.orders import Orders
 from service.statistic import Statistic
 from service.strategy_runtime import get_strategy_adapter
 from service.trades import Trades
 from service.trading_controls import is_mission_automation_paused
 from service.trading_maintenance import trading_maintenance_barrier
+from tenacity import RetryError
 from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
@@ -75,7 +80,7 @@ class Dca:
         self.ath_service = AthService()
         self.exchange = Exchange()
         self.indicators = Indicators()
-        self.orders = Orders()
+        self.order_lifecycle = DcaOrderLifecycle()
         self.statistic = Statistic()
         self.trades = Trades()
         self.utils = helper.Utils()
@@ -95,7 +100,7 @@ class Dca:
         """Close exchange resources owned by the DCA runtime."""
         await self.exchange.close()
         await self.ath_service.close()
-        await self.orders.close()
+        await self.order_lifecycle.close()
 
     @property
     def config(self) -> dict[str, Any] | None:
@@ -267,7 +272,7 @@ class Dca:
             "fallback_min_price": take_profit_price,
             **self.__order_snapshot_payload(trades),
         }
-        return await self.orders.arm_tp_limit_order(order, self.config or {})
+        return await self.order_lifecycle.arm_tp_limit_order(order, self.config or {})
 
     async def __dynamic_dca_strategy(self, symbol: str) -> tuple[bool, bool]:
         result = False
@@ -750,6 +755,122 @@ class Dca:
         )
         return round(float(sizing.final_quote), 8), details
 
+    def __exit_guard_bounds(
+        self,
+        *,
+        sell_reason: str | None,
+        trigger_price: float,
+        actual_pnl: float,
+        take_profit_price: float,
+        stop_loss_price: float,
+        take_profit: float,
+        trailing_tp: float,
+        stop_loss: float,
+    ) -> tuple[float | None, float | None]:
+        """Return the live-price bounds that keep a selected exit justified."""
+        if sell_reason == "take_profit":
+            return take_profit_price, None
+        if sell_reason == "stop_loss":
+            return None, stop_loss_price
+        if sell_reason == "trailing_take_profit":
+            return (
+                calculate_pnl_break_even_price(
+                    trigger_price,
+                    actual_pnl,
+                    take_profit - trailing_tp,
+                ),
+                None,
+            )
+        if sell_reason == "autopilot_timeout":
+            return (
+                calculate_pnl_break_even_price(
+                    trigger_price,
+                    actual_pnl,
+                    -abs(stop_loss),
+                ),
+                None,
+            )
+        return None, None
+
+    async def __verify_exit_price(
+        self,
+        *,
+        symbol: str,
+        sell_reason: str | None,
+        min_price: float | None,
+        max_price: float | None,
+        trigger_price: float,
+    ) -> tuple[bool, float | None]:
+        """Verify that a market exit still clears its price guard bounds.
+
+        A market sell would otherwise execute on the trigger price from the
+        ticker stream, which can be stale. Fetch the immediately executable
+        bid once and compare it against the bounds that keep this exit
+        justified. Fetch failures, unusable prices and out-of-bounds prices
+        fail closed and keep the position open for the next event.
+
+        Returns:
+            Tuple of (proceed, verified_price) where verified_price is the
+            fresh bid when one was fetched, else None.
+        """
+        config = self.config or {}
+        if str(config.get("sell_order_type", "market")).lower() != "market":
+            return True, trigger_price
+        try:
+            raw_price = await self.exchange.get_bid_price_for_symbol(symbol, config)
+        except (ccxt.BaseError, RetryError, RuntimeError, TypeError, ValueError):
+            logging.error(
+                "Aborting market sell for %s: exit price guard fetch failed "
+                "(sell_reason=%s).",
+                symbol,
+                sell_reason or "unknown",
+                exc_info=True,
+            )
+            return False, None
+        try:
+            fresh_price = float(raw_price)
+        except (TypeError, ValueError):
+            fresh_price = None
+        if fresh_price is None or not math.isfinite(fresh_price) or fresh_price <= 0:
+            logging.error(
+                "Aborting market sell for %s: exit price guard returned an "
+                "unusable price %r (sell_reason=%s).",
+                symbol,
+                raw_price,
+                sell_reason or "unknown",
+            )
+            return False, None
+        justified, reason_code = evaluate_exit_price_guard(
+            sell_reason=str(sell_reason or ""),
+            fresh_price=fresh_price,
+            min_price=min_price,
+            max_price=max_price,
+        )
+        if not justified:
+            logging.info(
+                "Aborting market sell for %s: fresh bid %.10f no longer "
+                "justifies the %s exit (guard=%s trigger_price=%.10f "
+                "min_price=%s max_price=%s).",
+                symbol,
+                fresh_price,
+                sell_reason or "unknown",
+                reason_code,
+                trigger_price,
+                min_price,
+                max_price,
+            )
+            return False, fresh_price
+        if fresh_price != trigger_price:
+            logging.info(
+                "Market sell for %s verified against fresh bid %.10f "
+                "(trigger_price=%.10f, sell_reason=%s).",
+                symbol,
+                fresh_price,
+                trigger_price,
+                sell_reason or "unknown",
+            )
+        return True, fresh_price
+
     async def __calculate_tp(
         self,
         current_price: float,
@@ -837,12 +958,12 @@ class Dca:
         if not isinstance(expected_snapshot, LifecycleSnapshotIdentity):
             expected_snapshot = None
         if expected_snapshot is None:
-            reconciled = await self.orders.reconcile_tp_limit_order(
+            reconciled = await self.order_lifecycle.reconcile_tp_limit_order(
                 trades,
                 self.config or {},
             )
         else:
-            reconciled = await self.orders.reconcile_tp_limit_order(
+            reconciled = await self.order_lifecycle.reconcile_tp_limit_order(
                 trades,
                 self.config or {},
                 expected_snapshot=expected_snapshot,
@@ -863,12 +984,12 @@ class Dca:
             )
         ):
             if expected_snapshot is None:
-                canceled = await self.orders.cancel_tp_limit_order(
+                canceled = await self.order_lifecycle.cancel_tp_limit_order(
                     trades["symbol"],
                     self.config or {},
                 )
             else:
-                canceled = await self.orders.cancel_tp_limit_order(
+                canceled = await self.order_lifecycle.cancel_tp_limit_order(
                     trades["symbol"],
                     self.config or {},
                     expected_snapshot=expected_snapshot,
@@ -892,6 +1013,10 @@ class Dca:
             else:
                 sell = False
                 sell_reason = None
+
+        # Retain the prior peak if a triggered exit cannot reach submission.
+        trailing_peak = self._trailing_tp_peaks.get(trades["symbol"])
+        trailing_sell = False
 
         # Trailing TP
         if not is_unsellable and trailing_tp > 0:
@@ -961,50 +1086,86 @@ class Dca:
             )
         elif exit_action is DcaAction.SELL:
             sell_reason = resolved_sell_reason
-            if has_tp_limit_order:
-                if expected_snapshot is None:
-                    canceled = await self.orders.cancel_tp_limit_order(
-                        trades["symbol"],
-                        self.config or {},
-                    )
-                else:
-                    canceled = await self.orders.cancel_tp_limit_order(
-                        trades["symbol"],
-                        self.config or {},
-                        expected_snapshot=expected_snapshot,
-                    )
-                if not canceled:
-                    return
-                has_tp_limit_order = False
-            self.__clear_tp_confirmation(
-                trades["symbol"],
-                reason="sell_submitted",
-                current_price=current_price,
-                tp_price=take_profit_price,
+            exit_guard_min_price, exit_guard_max_price = self.__exit_guard_bounds(
+                sell_reason=sell_reason,
+                trigger_price=current_price,
+                actual_pnl=actual_pnl,
+                take_profit_price=take_profit_price,
+                stop_loss_price=stop_loss_price,
+                take_profit=trading_policy.take_profit,
+                trailing_tp=trailing_tp,
+                stop_loss=trading_policy.stop_loss,
             )
-            order = {
-                "symbol": trades["symbol"],
-                "direction": trades["direction"],
-                "side": "sell",
-                "type_sell": "order_sell",
-                "sell_reason": sell_reason,
-                "actual_pnl": actual_pnl,
-                "total_cost": trades["total_cost"],
-                "current_price": current_price,
-                "tp_price": take_profit_price,
-                "limit_price": (
-                    take_profit_price
-                    if sell_reason == "take_profit"
-                    and str((self.config or {}).get("sell_order_type", "")).lower()
-                    == "limit"
-                    else None
-                ),
-                "fallback_min_price": (
-                    take_profit_price if current_price >= take_profit_price else None
-                ),
-                **self.__order_snapshot_payload(trades),
-            }
-            await self.orders.receive_sell_order(order, self.config or {})
+            exit_proceeds, verified_price = await self.__verify_exit_price(
+                symbol=trades["symbol"],
+                sell_reason=sell_reason,
+                min_price=exit_guard_min_price,
+                max_price=exit_guard_max_price,
+                trigger_price=current_price,
+            )
+            if verified_price is not None:
+                current_price = verified_price
+                actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
+            if not exit_proceeds:
+                if trailing_peak is not None and trailing_sell:
+                    self._trailing_tp_peaks[trades["symbol"]] = trailing_peak
+                sell = False
+                sell_reason = None
+            else:
+                if has_tp_limit_order:
+                    if expected_snapshot is None:
+                        canceled = await self.order_lifecycle.cancel_tp_limit_order(
+                            trades["symbol"],
+                            self.config or {},
+                        )
+                    else:
+                        canceled = await self.order_lifecycle.cancel_tp_limit_order(
+                            trades["symbol"],
+                            self.config or {},
+                            expected_snapshot=expected_snapshot,
+                        )
+                    if not canceled:
+                        return
+                    has_tp_limit_order = False
+                self.__clear_tp_confirmation(
+                    trades["symbol"],
+                    reason="sell_submitted",
+                    current_price=current_price,
+                    tp_price=take_profit_price,
+                )
+                order = {
+                    "symbol": trades["symbol"],
+                    "direction": trades["direction"],
+                    "side": "sell",
+                    "type_sell": "order_sell",
+                    "sell_reason": sell_reason,
+                    "actual_pnl": actual_pnl,
+                    "total_cost": trades["total_cost"],
+                    "current_price": current_price,
+                    "tp_price": take_profit_price,
+                    "limit_price": (
+                        take_profit_price
+                        if sell_reason == "take_profit"
+                        and str((self.config or {}).get("sell_order_type", "")).lower()
+                        == "limit"
+                        else None
+                    ),
+                    "fallback_min_price": (
+                        take_profit_price
+                        if current_price >= take_profit_price
+                        else None
+                    ),
+                    "exit_guard_min_price": exit_guard_min_price,
+                    "exit_guard_max_price": exit_guard_max_price,
+                    **self.__order_snapshot_payload(trades),
+                }
+                await self.order_lifecycle.receive_sell_order(order, self.config or {})
+                if (
+                    trailing_peak is not None
+                    and trailing_sell
+                    and order.get("_exit_guard_canceled_zero_fill") is True
+                ):
+                    self._trailing_tp_peaks[trades["symbol"]] = trailing_peak
         elif exit_action is DcaAction.ARM_TP_LIMIT:
             has_tp_limit_order = await self.__arm_tp_limit_order(
                 trades=trades,
@@ -1282,7 +1443,7 @@ class Dca:
                         ),
                         **self.__order_snapshot_payload(trades),
                     }
-                    placed_new_so = await self.orders.receive_buy_order(
+                    placed_new_so = await self.order_lifecycle.receive_buy_order(
                         order, self.config
                     )
 

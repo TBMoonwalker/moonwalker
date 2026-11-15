@@ -1,5 +1,6 @@
 import pytest
 from service.dca.exchange import DcaExchange as Exchange
+from tenacity import RetryError, stop_after_attempt, wait_none
 
 
 @pytest.mark.asyncio
@@ -576,3 +577,103 @@ async def test_recovery_buy_sizes_and_checks_at_submitted_price_tick(
     else:
         assert submitted == []
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_create_spot_market_buy_fails_closed_when_ask_is_never_available(
+    monkeypatch,
+) -> None:
+    """A ticker that keeps last but never exposes ask must skip the buy.
+
+    The fail-closed price fetch raises tenacity.RetryError once the retry
+    budget is exhausted; the DCA queue worker must not die with it.
+    """
+    exchange = Exchange()
+    execute_calls = {"count": 0}
+
+    class _AsklessTickerExchange:
+        def market(self, _symbol: str) -> dict[str, object]:
+            return {"symbol": "BTC/USDT"}
+
+        def price_to_precision(self, _symbol: str, price: float) -> str:
+            return f"{price:.8f}"
+
+        async def fetch_ticker(self, _symbol: str) -> dict[str, float | None]:
+            return {"last": 100.5, "ask": None}
+
+    async def fake_ensure_exchange(_config) -> None:
+        exchange.exchange = _AsklessTickerExchange()
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_execute(_order) -> None:
+        execute_calls["count"] += 1
+        return None
+
+    async def fake_resolve(symbol: str) -> str:
+        return symbol
+
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_resolve_symbol_with_refresh", fake_resolve)
+    monkeypatch.setattr(exchange, "_execute_market_buy", fake_execute)
+    # Fail the exhausted retry immediately instead of waiting the 10x2s budget.
+    retry = exchange._get_price_for_symbol.retry
+    monkeypatch.setattr(retry, "wait", wait_none())
+    monkeypatch.setattr(retry, "stop", stop_after_attempt(1))
+
+    result = await exchange.create_spot_market_buy(
+        {"ordersize": 100.0, "symbol": "BTC/USDT"},
+        {},
+    )
+
+    assert result is None
+    assert execute_calls["count"] == 0
+    precheck = exchange.get_last_buy_precheck_result()
+    assert precheck is not None
+    assert precheck["ok"] is False
+    assert precheck["reason"] == "executable_price_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_create_spot_market_buy_fails_closed_when_amount_resolution_exhausts_retries(
+    monkeypatch,
+) -> None:
+    """A RetryError from amount resolution must skip the buy, not escape."""
+    exchange = Exchange()
+    execute_calls = {"count": 0}
+
+    async def fake_ensure_exchange(_config) -> None:
+        return None
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_get_price(_symbol, **_kwargs) -> str:
+        return "100000.0"
+
+    async def fake_get_amount(_ordersize, _symbol, _price=None) -> str:
+        raise RetryError(None)
+
+    async def fake_execute(_order) -> None:
+        execute_calls["count"] += 1
+        return None
+
+    monkeypatch.setattr(exchange, "_ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(exchange, "_ensure_markets_loaded", fake_ensure_markets_loaded)
+    monkeypatch.setattr(exchange, "_get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "_get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_execute_market_buy", fake_execute)
+
+    result = await exchange.create_spot_market_buy(
+        {"ordersize": 100.0, "symbol": "BTC/USDT"},
+        {},
+    )
+
+    assert result is None
+    assert execute_calls["count"] == 0
+    precheck = exchange.get_last_buy_precheck_result()
+    assert precheck is not None
+    assert precheck["ok"] is False
+    assert precheck["reason"] == "executable_price_unavailable"

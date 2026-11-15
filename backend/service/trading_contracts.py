@@ -54,5 +54,6 @@ class SellIntent(TypedDict):
     client_order_id: NotRequired[str]
     lifecycle_snapshot: NotRequired[dict[str, Any]]
     skip_tp_limit_cancel: NotRequired[bool]
+    _exit_guard_canceled_zero_fill: NotRequired[bool]
     total_amount: NotRequired[float]
     requested_total_amount: NotRequired[float]

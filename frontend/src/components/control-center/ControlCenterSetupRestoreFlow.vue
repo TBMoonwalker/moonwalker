@@ -1,19 +1,29 @@
 <script setup lang="ts">
-import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
+import type {
+    BackupClassification,
+    BackupRestoreMode,
+    RestoreReviewState,
+} from '../../composables/useConfigBackupRestore'
 import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'
 import type { SetupEntryChoice } from '../../control-center/setupEntryHistory'
 
-type BackupRestoreMode = 'config' | 'full'
-
-defineProps<{
-    bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
-    hasSelectedBackupPayload: boolean
-    restoreLoading: boolean
-    restoreReview: RestoreReviewState | null
-    selectedBackupConfigCount: number
-    selectedBackupFileName: string | null
-    selectedBackupHasTradeData: boolean
-}>()
+withDefaults(
+    defineProps<{
+        backupClassifications?: Partial<Record<BackupRestoreMode, BackupClassification>>
+        bindBackupFileInput: (element: Element | import('vue').ComponentPublicInstance | null) => void
+        classificationLoading?: boolean
+        hasSelectedBackupPayload: boolean
+        restoreLoading: boolean
+        restoreReview: RestoreReviewState | null
+        selectedBackupConfigCount: number
+        selectedBackupFileName: string | null
+        selectedBackupHasTradeData: boolean
+    }>(),
+    {
+        backupClassifications: () => ({}),
+        classificationLoading: false,
+    },
+)
 
 const emit = defineEmits<{
     'backup-file-selected': [event: Event]
@@ -53,7 +63,9 @@ const emit = defineEmits<{
             </n-alert>
 
             <ConfigBackupRestoreControls
+                :backup-classifications="backupClassifications"
                 :bind-backup-file-input="bindBackupFileInput"
+                :classification-loading="classificationLoading"
                 :has-selected-backup-payload="hasSelectedBackupPayload"
                 :restore-loading="restoreLoading"
                 :restore-review="restoreReview"

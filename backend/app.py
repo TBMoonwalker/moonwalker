@@ -19,7 +19,7 @@ from controller.frontend import frontend_staging_warning
 from litestar import Litestar
 from litestar.config.compression import CompressionConfig
 from litestar.config.cors import CORSConfig
-from litestar.middleware import DefineMiddleware
+from litestar.middleware import ASGIMiddleware
 from litestar.types import ASGIApp, Receive, Scope, Send
 from service.accumulation.runtime import AccumulationRuntime, build_accumulation_runtime
 from service.ai_provider import ai_provider_client
@@ -32,16 +32,17 @@ from service.coin_market_cap import (
 )
 from service.config import Config
 from service.database import Database
+from service.dca.order_lifecycle import DcaOrderLifecycle
 from service.delisting_protection import DelistingProtectionService
 from service.green_phase import GreenPhaseService
 from service.housekeeper import Housekeeper
-from service.orders import Orders
 from service.origin_policy import (
     TrustedLanHttpMiddleware,
     WebSocketOriginMiddleware,
     parse_allowed_hosts,
     parse_allowed_origins,
 )
+from service.placement_recovery_entry import PlacementRecoveryEntry
 from service.redis import redis_client, start_redis
 from service.replay_repair_queue import replay_repair_queue
 from service.runtime_services import (
@@ -68,7 +69,8 @@ class RuntimeState:
     config_service: Config | None = None
     market_cap_rank_service: CoinMarketCapRankService | None = None
     controller_services: RuntimeServices | None = None
-    placement_orders: Orders | None = None
+    order_lifecycle: DcaOrderLifecycle | None = None
+    placement_recovery: PlacementRecoveryEntry | None = None
     accumulation_runtime: AccumulationRuntime | None = None
     watcher: Watcher | None = None
     housekeeper: Housekeeper | None = None
@@ -77,6 +79,7 @@ class RuntimeState:
     autopilot_memory_service: AutopilotMemoryService | None = None
     signal_plugin: Signal | None = None
     background_tasks: list[asyncio.Task[Any]] = field(default_factory=list)
+    recovery_mode: str | None = None
 
 
 runtime_state = RuntimeState()
@@ -91,41 +94,72 @@ def _repair_only() -> bool:
     )
 
 
-class AccumulationRepairOnlyMiddleware:
-    """Keep HTTP recovery access separate from every trading and config route."""
+def _placement_recovery_action_path(path: str) -> bool:
+    """Match the explicit repair/dismiss action on one quarantined intent."""
+    return path.startswith("/orders/placement-recovery/") and (
+        path.endswith("/repair") or path.endswith("/dismiss")
+    )
 
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
 
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if not _repair_only():
-            await self.app(scope, receive, send)
+class RecoveryOnlyMiddleware(ASGIMiddleware):
+    """Keep restricted-recovery HTTP access separate from trading routes.
+
+    Two recovery modes share this gate: accumulation-only recovery
+    (``/accumulation/repair``) and placement-intent recovery
+    (``/orders/placement-recovery``). Trading workers stay stopped in both,
+    and configuration writes remain unavailable.
+    """
+
+    async def handle(
+        self, scope: Scope, receive: Receive, send: Send, next_app: ASGIApp
+    ) -> None:
+        scope.setdefault("state", {})["moonwalker_recovery_mode"] = (
+            runtime_state.recovery_mode
+        )
+        if runtime_state.recovery_mode is None:
+            await next_app(scope, receive, send)
             return
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 1013})
             return
         if scope["type"] != "http":
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
         path, method = scope["path"], scope.get("method", "")
         reads = {
             "/",
             "/index.html",
+            "/control-center",
+            "/control-center/autopilot",
+            "/backtest",
+            "/monitoring",
+            "/stats",
+            "/statistics",
+            "/config",
+            "/settings",
             "/config/all",
-            "/accumulation/activations",
-            "/accumulation/activation",
-            "/accumulation/strategies",
+            "/orders/placement-recovery",
         }
+        repairs = set()
+        if runtime_state.recovery_mode == "accumulation":
+            reads.update(
+                {
+                    "/accumulation/activations",
+                    "/accumulation/activation",
+                    "/accumulation/strategies",
+                }
+            )
+            repairs.add("/accumulation/repair")
         if (
             method in {"GET", "HEAD"}
             and (path in reads or path.startswith(("/static/", "/assets/")))
             or method == "POST"
-            and path == "/accumulation/repair"
+            and (path in repairs or _placement_recovery_action_path(path))
             or method == "OPTIONS"
         ):
-            await self.app(scope, receive, send)
+            await next_app(scope, receive, send)
             return
-        body = b'{"error":"Recovery only: reconcile quarantined accumulation orders, then restart. Trading and configuration changes are unavailable.","code":"recovery_only"}'
+        body = b'{"error":"Recovery only: repair the outstanding exchange work, then restart. Trading and configuration changes are unavailable.","code":"recovery_only"}'
         await send(
             {
                 "type": "http.response.start",
@@ -175,9 +209,10 @@ async def _run_startup_step(
 
 async def startup() -> None:
     """Initialize core services before the lifespan starts runtime tasks."""
+    runtime_state.recovery_mode = None
     started_at = time.perf_counter()
     logging.info("Moonwalker startup sequence started.")
-    staging_warning = frontend_staging_warning()
+    staging_warning = await asyncio.to_thread(frontend_staging_warning)
     if staging_warning is not None:
         logging.error(
             "Frontend not staged; the web dashboard will be unavailable: %s",
@@ -205,18 +240,21 @@ async def startup() -> None:
             runtime_state.market_cap_rank_service.start,
         )
 
-        runtime_state.placement_orders = Orders()
+        runtime_state.order_lifecycle = DcaOrderLifecycle()
+        runtime_state.placement_recovery = PlacementRecoveryEntry(
+            lifecycle=runtime_state.order_lifecycle
+        )
         runtime_state.accumulation_runtime = build_accumulation_runtime(
             config_service.snapshot
         )
         if runtime_state.accumulation_runtime is not None:
-            runtime_state.placement_orders.accumulation_recovery = (
+            runtime_state.placement_recovery.accumulation_recovery = (
                 runtime_state.accumulation_runtime.recovery.reconcile
             )
         reconciliation = await _run_startup_step(
             "exchange placement reconciliation",
             lambda: runtime_state.database.run_with_context(
-                runtime_state.placement_orders.reconcile_placement_intents,
+                runtime_state.placement_recovery.reconcile_placement_intents,
                 config_service.snapshot(),
             ),
         )
@@ -230,20 +268,53 @@ async def startup() -> None:
             )
         if not reconciliation.ready or not accumulation_ready:
             if _repair_only():
+                runtime_state.recovery_mode = "accumulation"
+            elif (
+                not reconciliation.ready
+                and reconciliation.action_required
+                and reconciliation.remaining == 0
+                and accumulation_ready
+            ):
+                # Only quarantined classic-DCA placement intents block: serve
+                # the placement recovery endpoints with every trading worker
+                # stopped, instead of exiting with no operator access. A
+                # blocked accumulation runtime is not repair-ready, so the
+                # placement-only mode would hide it from the operator.
+                runtime_state.recovery_mode = "placement"
+            if runtime_state.recovery_mode is not None:
                 runtime_state.controller_services = build_runtime_services(
-                    orders=runtime_state.placement_orders,
+                    placement_recovery=runtime_state.placement_recovery,
                     accumulation=runtime_state.accumulation_runtime,
                 )
                 activate_runtime_services(runtime_state.controller_services)
-                logging.error(
-                    "Serving accumulation recovery only; all trading workers remain stopped. Restart after explicit repair."
-                )
+                if runtime_state.recovery_mode == "accumulation":
+                    logging.error(
+                        "Serving accumulation recovery only; all trading workers remain stopped. Restart after explicit repair."
+                    )
+                else:
+                    logging.error(
+                        "Serving placement intent recovery only; all trading workers remain stopped. Repair or dismiss every quarantined intent, then restart."
+                    )
                 return
+            if not reconciliation.ready and not accumulation_ready:
+                raise RuntimeError(
+                    "Both exchange placement reconciliation and the "
+                    "accumulation runtime require operator action, but the "
+                    "accumulation runtime is not in a repair-ready state, so "
+                    "neither the /accumulation/repair endpoints nor the "
+                    "placement recovery endpoints can be served. Resolve the "
+                    "accumulation runtime (see the startup log above), then "
+                    "restart: once it is repair-ready, a restart serves "
+                    "/accumulation/repair together with the placement "
+                    "recovery endpoints."
+                )
             if not reconciliation.ready:
                 operations = ", ".join(reconciliation.action_required)
                 raise RuntimeError(
                     "Exchange placement reconciliation requires operator action "
-                    f"before trading can start: {operations}"
+                    f"before trading can start: {operations}. The dashboard's "
+                    "placement recovery card offers a repair or explicit "
+                    "dismissal for each quarantined intent."
                 )
             raise RuntimeError(
                 "Accumulation recovery requires operator action before trading starts."
@@ -282,9 +353,9 @@ async def startup() -> None:
             runtime_state.delisting_protection_service.start,
         )
 
-        assert runtime_state.placement_orders is not None
+        assert runtime_state.placement_recovery is not None
         runtime_state.controller_services = build_runtime_services(
-            orders=runtime_state.placement_orders,
+            placement_recovery=runtime_state.placement_recovery,
             accumulation=runtime_state.accumulation_runtime,
             delisting_protection=runtime_state.delisting_protection_service,
             statistics_balance_cache_ttl_seconds=(
@@ -292,6 +363,15 @@ async def startup() -> None:
             ),
         )
         activate_runtime_services(runtime_state.controller_services)
+        if (
+            runtime_state.housekeeper is not None
+            and runtime_state.controller_services is not None
+        ):
+            # Retention cleanup prunes rows the timeline resamples; let the
+            # housekeeper drop the cached timeline right after such a prune.
+            runtime_state.housekeeper.on_upnl_history_changed = (
+                runtime_state.controller_services.statistic.invalidate_timeline_cache
+            )
 
         runtime_state.signal_plugin = Signal(runtime_state.watcher_queue)
         if runtime_state.accumulation_runtime is not None:
@@ -393,10 +473,12 @@ async def shutdown() -> None:
         await attempt("controller services", controller_services.shutdown)
         deactivate_runtime_services(controller_services)
         runtime_state.controller_services = None
-        runtime_state.placement_orders = None
-    elif runtime_state.placement_orders is not None:
-        await attempt("placement orders", runtime_state.placement_orders.close)
-        runtime_state.placement_orders = None
+        runtime_state.placement_recovery = None
+        runtime_state.order_lifecycle = None
+    elif runtime_state.placement_recovery is not None:
+        await attempt("placement recovery", runtime_state.placement_recovery.close)
+        runtime_state.placement_recovery = None
+        runtime_state.order_lifecycle = None
     if runtime_state.market_cap_rank_service is not None:
         await attempt(
             "CoinMarketCap rank service",
@@ -481,8 +563,8 @@ async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
     """Own runtime tasks and services for exactly one application lifespan."""
     try:
         await startup()
-        if _repair_only():
-            # The HTTP server owns the repair session; no signal, watcher,
+        if runtime_state.recovery_mode is not None:
+            # The HTTP server owns the recovery session; no signal, watcher,
             # command worker, Autopilot or liquidation task is started.
             yield
             return
@@ -587,14 +669,12 @@ app = Litestar(
         allow_headers=["*"],
     ),
     middleware=[
-        DefineMiddleware(AccumulationRepairOnlyMiddleware),
-        DefineMiddleware(
-            TrustedLanHttpMiddleware,
+        RecoveryOnlyMiddleware(),
+        TrustedLanHttpMiddleware(
             allowed_origins=ALLOWED_ORIGINS,
             allowed_hosts=ALLOWED_HOSTS,
         ),
-        DefineMiddleware(
-            WebSocketOriginMiddleware,
+        WebSocketOriginMiddleware(
             allowed_origins=ALLOWED_ORIGINS,
             allowed_hosts=ALLOWED_HOSTS,
         ),

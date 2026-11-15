@@ -32,7 +32,9 @@ async def test_dynamic_dca_skips_so_when_pnl_is_above_last_so_percentage(
         "_Dca__resolve_safety_order_size",
         fake_resolve_size,
     )
-    monkeypatch.setattr(dca.orders, "receive_buy_order", fake_receive_buy_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_buy_order", fake_receive_buy_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
@@ -100,7 +102,9 @@ async def test_dynamic_dca_allows_so_when_pnl_is_deeper_than_last_so_percentage(
         "_Dca__resolve_safety_order_size",
         fake_resolve_size,
     )
-    monkeypatch.setattr(dca.orders, "receive_buy_order", fake_receive_buy_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_buy_order", fake_receive_buy_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
@@ -171,7 +175,9 @@ async def test_dynamic_dca_skips_so_when_normalized_pnl_matches_last_so_percenta
         "_Dca__resolve_safety_order_size",
         fake_resolve_size,
     )
-    monkeypatch.setattr(dca.orders, "receive_buy_order", fake_receive_buy_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_buy_order", fake_receive_buy_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )
@@ -237,7 +243,9 @@ async def test_dynamic_dca_skips_so_when_strategy_payload_unchanged(
         "_Dca__resolve_safety_order_size",
         fake_resolve_size,
     )
-    monkeypatch.setattr(dca.orders, "receive_buy_order", fake_receive_buy_order)
+    monkeypatch.setattr(
+        dca.order_lifecycle, "receive_buy_order", fake_receive_buy_order
+    )
     monkeypatch.setattr(
         dca.statistic, "update_statistic_data", fake_update_statistic_data
     )

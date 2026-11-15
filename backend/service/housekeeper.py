@@ -2,6 +2,7 @@
 
 import asyncio
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -36,6 +37,9 @@ class Housekeeper:
     def __init__(self) -> None:
         self.config = None
         self._running = True
+        # Optional hook fired after a retention cleanup deleted uPNL rows;
+        # wired by the application to drop the cached profit timeline.
+        self.on_upnl_history_changed: Callable[[], None] | None = None
 
     async def init(self) -> None:
         """Initialize the housekeeper with current configuration."""
@@ -151,6 +155,8 @@ class Housekeeper:
                 deleted,
                 retention_timestamp,
             )
+            if self.on_upnl_history_changed is not None:
+                self.on_upnl_history_changed()
 
     async def shutdown(self) -> None:
         """Stop housekeeping loop."""

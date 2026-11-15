@@ -45,22 +45,19 @@ configuration or strategy is not a guarantee that an exchange order will pass.
 
 1. Select **CSV Signal** instead of ASAP and retain the other accumulation
    requirements above. Configure its input using the [signal plugin guide](signals.md).
-2. Supply actual purchases in the existing format:
-
-   ```csv
-   date;symbol;price;amount
-   2026-01-15 12:00:00;BTC/USDC;90000;0.001
-   ```
-
-   Use your own past date, acquisition price and net owned amount. Do not submit
-   the example as invented inventory. Each row declares already-owned coins;
-   the import does not purchase them. Four-column imports retain unknown fees.
-   To calculate returns, supply the [fee-aware columns](signals.md#csv-signal-setup):
+2. Supply actual purchases in the fee-aware format:
 
    ```csv
    date;symbol;price;amount;fee;fee_currency;amount_type
    2026-01-15 12:00:00;BTC/USDC;90000;0.001;0.000001;BTC;net
    ```
+
+   Use your own past date, acquisition price and net owned amount. Do not submit
+   the example as invented inventory. Each row declares already-owned coins;
+   the import does not purchase them. Blank fee fields retain unknown fees; the
+   legacy four-column format was removed in `6.3.0.0` and is rejected with an
+   explicit error. See the [CSV format](signals.md#csv-signal-setup) for all
+   columns.
 
    `net` keeps 0.001 BTC owned and reconstructs the gross purchase cost from
    0.001001 BTC. Use `gross` only when `amount` is the pre-fee quantity. Quote fees

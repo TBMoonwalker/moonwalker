@@ -39,6 +39,7 @@ export type ControlCenterConfigChangeOrigin =
     | 'restore'
     | 'live_activation'
     | 'trading_pause'
+    | 'deny'
     | 'external_invalidation'
 
 export type ControlCenterConfigTrustKind =
