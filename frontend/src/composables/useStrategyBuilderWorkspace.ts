@@ -54,7 +54,12 @@ export function useStrategyBuilderWorkspace(
     let activeValidationController: AbortController | null = null
     let workspaceDisposed = false
 
-    const isReadOnly = computed(() => Boolean(selectedDetail.value?.is_builtin))
+    const isLegacyAccumulation = computed(
+        () => selectedDetail.value?.ir.capability === 'accumulation/v1',
+    )
+    const isReadOnly = computed(
+        () => Boolean(selectedDetail.value?.is_builtin) || isLegacyAccumulation.value,
+    )
     const selectedNode = computed(() => {
         const nodes = selectedDetail.value?.ir.nodes ?? []
         return (
@@ -139,7 +144,11 @@ export function useStrategyBuilderWorkspace(
             selectedNodeId.value =
                 detail?.ir.root ?? detail?.ir.nodes?.[0]?.id ?? null
         }
-        await renderReteGraph()
+        if (isLegacyAccumulation.value) {
+            destroyRete()
+        } else {
+            await renderReteGraph()
+        }
     })
 
     async function loadStrategies(selectSlug?: string): Promise<void> {
@@ -189,7 +198,7 @@ export function useStrategyBuilderWorkspace(
 
     async function duplicateSelected(): Promise<void> {
         const detail = selectedDetail.value
-        if (!detail || saving.value) {
+        if (!detail || isLegacyAccumulation.value || saving.value) {
             return
         }
         saving.value = true
@@ -261,7 +270,7 @@ export function useStrategyBuilderWorkspace(
 
     async function validateDraft(): Promise<void> {
         const detail = selectedDetail.value
-        if (!detail) {
+        if (!detail || isLegacyAccumulation.value) {
             return
         }
         if (validationTimer !== null) {
@@ -518,7 +527,7 @@ export function useStrategyBuilderWorkspace(
 
     function autoAlignGraph(): void {
         const detail = selectedDetail.value
-        if (!detail) {
+        if (!detail || isLegacyAccumulation.value) {
             return
         }
         autoAlignStrategyGraph(detail.ir, nodeTitle)
@@ -604,6 +613,7 @@ export function useStrategyBuilderWorkspace(
         draftName,
         duplicateSelected,
         errorMessage,
+        isLegacyAccumulation,
         isReadOnly,
         loading,
         nodeTitle,

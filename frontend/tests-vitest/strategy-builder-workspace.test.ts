@@ -231,6 +231,31 @@ describe('StrategyBuilderWorkspace', () => {
         )
     })
 
+    it('shows legacy accumulation presets without opening an editable graph', async () => {
+        const legacy = summary('legacy_accumulation', 'Legacy accumulation', false)
+        apiMocks.fetchStrategyLibrary.mockResolvedValue({
+            strategies: [builtin, legacy],
+            palette,
+        })
+        apiMocks.fetchStrategyDetail.mockImplementation((slug: string) =>
+            Promise.resolve(slug === legacy.slug
+                ? { ...detail(legacy), ir: { schema_version: 1, capability: 'accumulation/v1', parameters: {} } }
+                : detail(builtin)),
+        )
+        const wrapper = mountWorkspace()
+        await flushPromises()
+        await wrapper.findAll('button').find(button => button.text().includes('Legacy accumulation'))!.trigger('click')
+        await flushPromises()
+        expect(wrapper.text()).toContain('This legacy accumulation preset cannot be edited or duplicated')
+        expect(wrapper.find('[aria-label="Strategy graph"]').exists()).toBe(false)
+        expect(wrapper.findAll('button').find(button => button.text().includes('Duplicate selected'))!.attributes('disabled')).toBeDefined()
+        expect(wrapper.findAll('button').find(button => button.text() === 'Delete')!.attributes('disabled')).toBeUndefined()
+        await wrapper.findAll('button').find(button => button.text().includes('EMA cross'))!.trigger('click')
+        await flushPromises()
+        expect(wrapper.get('[aria-label="Strategy graph"]').text()).toContain('Read-only built-in preview')
+        wrapper.unmount()
+    })
+
     it('duplicates a built-in and opens the editable custom result', async () => {
         const wrapper = mountWorkspace()
         await flushPromises()
