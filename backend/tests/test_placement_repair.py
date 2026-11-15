@@ -3149,7 +3149,8 @@ async def test_stored_partial_recovery_uses_execution_proceeds(
     + [
         ("base_buy", scenario)
         for scenario in ("matching", "different", "client_only", "orphan")
-    ],
+    ]
+    + [(kind, "added_purchase") for kind in ("sell", "limit_full", "cancel_full")],
 )
 async def test_startup_full_recovery_binds_original_deal(
     tmp_path, monkeypatch: pytest.MonkeyPatch, kind: str, scenario: str
@@ -3163,11 +3164,13 @@ async def test_startup_full_recovery_binds_original_deal(
         if kind != "base_buy" or scenario == "different":
             current_deal = "newer" if scenario == "different" else "original"
             await _seed_buy_trade(1, deal_id=current_deal)
+            if scenario == "added_purchase":
+                await _seed_buy_trade(1, deal_id=current_deal)
             await model.OpenTrades.create(
                 symbol="BTC/USDC",
                 deal_id=current_deal,
-                amount=1,
-                cost=10,
+                amount=2 if scenario == "added_purchase" else 1,
+                cost=20 if scenario == "added_purchase" else 10,
                 tp_limit_order_id=(
                     "other-tp"
                     if scenario == "conflicting_tp"
@@ -3279,7 +3282,9 @@ async def test_startup_full_recovery_binds_original_deal(
                 if scenario == "conflicting_tp":
                     assert trade.tp_limit_order_id == "other-tp"
             assert await model.ClosedTrades.all().count() == 0
-            assert await model.Trades.all().count() == 1
+            assert await model.Trades.all().count() == (
+                2 if scenario == "added_purchase" else 1
+            )
         elif is_buy:
             assert await model.OpenTrades.filter(symbol="BTC/USDC").exists()
             assert await model.Trades.all().count() == (1 if kind == "base_buy" else 2)

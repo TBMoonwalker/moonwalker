@@ -1105,6 +1105,7 @@ class Dca:
             )
             if verified_price is not None:
                 current_price = verified_price
+                actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
             if not exit_proceeds:
                 if trailing_peak is not None and trailing_sell:
                     self._trailing_tp_peaks[trades["symbol"]] = trailing_peak

@@ -58,6 +58,17 @@ describe('placement recovery card', () => {
     vi.clearAllMocks()
   })
 
+  it('does not offer classic DCA actions for accumulation or blocked ownership', async () => {
+    api.fetchPlacementRecoveryIntents.mockResolvedValue({
+      intents: [intent({ route: 'accumulation' }), intent({ operation_id: 'blocked', route: 'blocked' })],
+    })
+    const wrapper = render()
+    await settle()
+    expect(wrapper.text()).toContain('Use the accumulation recovery controls')
+    expect(wrapper.findAll('button').some((button) => button.text() === 'Repair')).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text() === 'Dismiss…')).toBe(false)
+  })
+
   it('stays hidden when no placement intent blocks startup', async () => {
     api.fetchPlacementRecoveryIntents.mockResolvedValue({ intents: [] })
     const wrapper = render()

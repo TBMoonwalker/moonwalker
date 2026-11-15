@@ -77,4 +77,10 @@ def build_partial_status_from_fallback(
     order_id = fallback_status.get("exchange_order_id")
     if order_id:
         status["id"] = str(order_id)
+        if (
+            fallback_status.get("limit_cancel_confirmed") is True
+            and fallback_status.get("partial_filled_amount") == 0
+            and not fallback_status.get("executions")
+        ):
+            status["confirmed_canceled_zero_fill"] = True
     return status

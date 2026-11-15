@@ -526,6 +526,19 @@ async def persist_closed_trade(
             )
             if resolution is not None and source_holding is None:
                 raise ValueError("Cannot repair a sell without an open trade.")
+            if resolution is not None or recovery_target is not None:
+                if source_holding is None or any(
+                    not math.isclose(
+                        float(actual), float(expected), rel_tol=1e-8, abs_tol=1e-12
+                    )
+                    for actual, expected in (
+                        (payload.get("amount"), source_holding.amount),
+                        (payload.get("cost"), source_holding.cost),
+                    )
+                ):
+                    raise ValueError(
+                        "Recovered sell no longer covers the current position."
+                    )
             summary_payload["lifecycle_mode"] = (
                 source_holding.lifecycle_mode if source_holding is not None else None
             )

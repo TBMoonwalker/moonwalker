@@ -69,10 +69,12 @@ class ScenarioResult:
     latencies_ms: list[float] = field(default_factory=list)
 
     def record_latency(self, seconds: float) -> None:
+        """Record one fetch latency in seconds, converting it to milliseconds."""
         self.fetches += 1
         self.latencies_ms.append(seconds * 1000.0)
 
     def percentiles(self) -> dict[str, float]:
+        """Return median, 95th percentile, and maximum latency in milliseconds."""
         if not self.latencies_ms:
             return {"p50_ms": 0.0, "p95_ms": 0.0, "max_ms": 0.0}
         ordered = sorted(self.latencies_ms)
@@ -163,6 +165,7 @@ def copy_database(source: str, destination: Path) -> None:
 
 
 async def init_database(db_path: Path) -> None:
+    """Initialize Tortoise and create missing tables in the benchmark database."""
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
     await Tortoise.generate_schemas(safe=True)
 
@@ -200,6 +203,7 @@ async def run_sequential(statistic: Statistic) -> ScenarioResult:
 
 
 async def run_concurrent(statistic: Statistic, clients: int) -> ScenarioResult:
+    """Measure simultaneous cold fetches for the given number of clients."""
     result = ScenarioResult(name=f"concurrent-{clients}", row_count=-1)
     start = time.perf_counter()
     await asyncio.gather(*(_timed_fetch(statistic, result) for _ in range(clients)))
@@ -214,6 +218,7 @@ async def _timed_fetch(statistic: Statistic, result: ScenarioResult) -> None:
 
 
 async def run_burst(statistic: Statistic) -> ScenarioResult:
+    """Measure a staggered burst of clients and return their timings."""
     result = ScenarioResult(name="burst", row_count=-1)
     start = time.perf_counter()
     await asyncio.gather(
@@ -243,6 +248,7 @@ async def measure_point_statistic(statistic: Statistic) -> dict[str, Any]:
 
 
 def make_instrumented() -> tuple[Statistic, BuildCounter]:
+    """Create a statistic service paired with its rebuild counter."""
     statistic = Statistic()
     counter = BuildCounter()
     instrument_builds(statistic, counter)
@@ -250,6 +256,7 @@ def make_instrumented() -> tuple[Statistic, BuildCounter]:
 
 
 async def run_scenarios(db_path: Path) -> tuple[list[ScenarioResult], dict[str, Any]]:
+    """Run all fetch scenarios against a database and return results and payload size."""
     await init_database(db_path)
     row_count = await model.UpnlHistory.all().count()
 
@@ -279,6 +286,7 @@ async def run_scenarios(db_path: Path) -> tuple[list[ScenarioResult], dict[str, 
 
 
 async def main_async(args: argparse.Namespace) -> int:
+    """Build benchmark databases and write a JSON report; return an exit code."""
     scenarios_config: list[tuple[str, Path]] = []
     temp_dir = Path(os.environ.get("TMPDIR", "/tmp")) / "moonwalker-timeline-bench"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -329,6 +337,7 @@ async def main_async(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    """Parse command-line options and run the benchmark."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--db",

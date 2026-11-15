@@ -458,13 +458,17 @@ class BackupService:
         for row in kept_rows:
             if row["key"] == "trade_mode":
                 trade_mode_value = str(row.get("value") or "").strip() or None
+        strategy_bundle = backup_payload.get("accumulation_strategies")
         includes_accumulation = bool(validated_trade_data) and (
             any(validated_trade_data.get(name) for name in ACCUMULATION_TABLE_MODELS)
             or any(
                 row.get("lifecycle_mode") == "accumulation"
                 for row in validated_trade_data.get("open_trades", [])
             )
-            or bool(backup_payload.get("accumulation_strategies"))
+            or (
+                isinstance(strategy_bundle, dict)
+                and any(strategy_bundle.get(key) for key in ("definitions", "versions"))
+            )
         )
         if trade_mode_value == "accumulation" or includes_accumulation:
             trade_mode_era = "accumulation"

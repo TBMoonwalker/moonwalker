@@ -20,9 +20,9 @@
     </p>
     <p v-else class="placement-recovery-lead">
       {{ openCount }} placement {{ openCount === 1 ? 'intent is' : 'intents are' }} blocking
-      startup. Repair checks the exchange and applies the confirmed state locally; dismissal
-      records your decision without touching the exchange. Restart Moonwalker once every intent
-      is resolved.
+      startup. For Dynamic DCA, repair checks the exchange and applies the confirmed state locally;
+      dismissal records your decision without touching the exchange. Restart Moonwalker once
+      every intent is resolved.
     </p>
     <p v-if="loading" class="placement-recovery-note">Loading quarantined placements…</p>
     <template v-if="loadError">
@@ -64,6 +64,10 @@
           Client order ID: {{ intent.client_order_id }}
         </p>
         <p class="intent-reason">{{ intent.error_message || intent.reason_code || 'No reason recorded.' }}</p>
+        <p v-if="intent.route !== 'classic_dca'" class="intent-reason">
+          This placement cannot be repaired here. Use the accumulation recovery controls
+          for accumulation ownership, or inspect the ownership conflict before retrying.
+        </p>
         <p
           v-if="resultFor(intent)"
           class="intent-result"
@@ -172,7 +176,7 @@ function resultFor(intent: PlacementRecoveryIntent) {
 
 function actionsVisibleFor(intent: PlacementRecoveryIntent): boolean {
   const result = resultFor(intent)
-  return !result || result.status === 'unchanged'
+  return intent.route === 'classic_dca' && (!result || result.status === 'unchanged')
 }
 
 function actionLabel(intent: PlacementRecoveryIntent): string {

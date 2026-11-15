@@ -311,6 +311,14 @@ def test_classify_trade_mode_era_variants() -> None:
     assert accumulation_by_rows["classification"]["includes_accumulation"] is False
 
 
+def test_empty_strategy_bundle_does_not_reclassify_dca_backup() -> None:
+    payload = _full_payload([_row("trade_mode", "dynamic_dca", "str")])
+    payload["accumulation_strategies"] = {"definitions": [], "versions": []}
+    result = BackupService().classify_backup(payload, restore_trade_data=True)
+    assert result["classification"]["includes_accumulation"] is False
+    assert result["classification"]["trade_mode_era"] == "dynamic_dca"
+
+
 def test_classify_reports_unsupported_schema_version_as_blocking() -> None:
     result = BackupService().classify_backup(
         {"schema_version": 99, "config": []}, restore_trade_data=False

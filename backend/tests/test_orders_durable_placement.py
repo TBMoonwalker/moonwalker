@@ -247,7 +247,9 @@ async def _init_database(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["zero", "partial", "ambiguous"])
+@pytest.mark.parametrize(
+    "outcome", ["zero", "partial", "ambiguous", "disabled", "floor"]
+)
 async def test_trailing_limit_guard_retries_only_confirmed_zero_fill(
     tmp_path, monkeypatch, outcome
 ) -> None:
@@ -279,6 +281,7 @@ async def test_trailing_limit_guard_retries_only_confirmed_zero_fill(
             "trailing_tp": 1,
             "sell_order_type": "limit",
             "mstc": 0,
+            "limit_sell_fallback_to_market": outcome != "disabled",
         }
         policy = ResolvedTradingPolicy(
             symbol="ETH/USDC",
@@ -359,6 +362,8 @@ async def test_trailing_limit_guard_retries_only_confirmed_zero_fill(
         monkeypatch.setattr(dca.order_lifecycle.exchange, "close", noop)
         monkeypatch.setattr(dca.statistic, "update_statistic_data", noop)
         await dca._Dca__calculate_tp(112, trades, policy)
+        if outcome == "floor":
+            dca.config["tp_floor_live_price_fallback"] = False
         await dca._Dca__calculate_tp(108.5, trades, policy)
         assert len(calls) == 1
         assert market_calls == []
@@ -369,6 +374,9 @@ async def test_trailing_limit_guard_retries_only_confirmed_zero_fill(
             await dca._Dca__calculate_tp(108.5, trades, policy)
             assert len(calls) == 2
             assert market_calls == [True]
+        elif outcome in {"disabled", "floor"}:
+            intent = await model.PlacementIntent.first()
+            assert intent.state == PlacementIntentState.REJECTED.value
         else:
             assert "ETH/USDC" not in dca._trailing_tp_peaks
             await dca._Dca__calculate_tp(108.5, trades, policy)

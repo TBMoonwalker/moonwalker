@@ -382,9 +382,9 @@ it remains quarantined. Review the exchange order and local ledger before an
 operator decision; do not guess the missing identity or resubmit the order.
 
 If paused, quarantined accumulation obligations are ready for repair, startup can
-instead serve restricted recovery access with trading workers stopped, including
-when separate DCA work remains unresolved. That work still needs reconciliation
-before normal startup. See the
+instead serve restricted recovery access with trading workers stopped when all
+unresolved obligations meet the accumulation recovery gate. Separate unresolved
+DCA work prevents this restricted startup. See the
 [accumulation recovery guide](howto-recover-accumulation.md#recover-after-restore-or-upgrade).
 
 If only quarantined classic-DCA placement intents remain (with no other

@@ -329,8 +329,10 @@ class Statistic:
         week_start = now - horizons["week"]
         month_start = now - horizons["month"]
         _, range_rows = await Tortoise.get_connection("default").execute_query(
-            "SELECT MIN(timestamp), MAX(timestamp) FROM upnl_history"
-            " WHERE performance_verified = 1"
+            "SELECT (SELECT timestamp FROM upnl_history WHERE performance_verified = 1 "
+            "ORDER BY timestamp ASC LIMIT 1), "
+            "(SELECT timestamp FROM upnl_history WHERE performance_verified = 1 "
+            "ORDER BY timestamp DESC LIMIT 1)"
         )
         data_min, data_max = range_rows[0]
         if data_max is None:

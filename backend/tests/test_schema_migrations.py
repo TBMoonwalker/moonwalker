@@ -962,9 +962,10 @@ async def test_startup_migrates_archive_column_when_old_migrations_already_appli
     database.db_url = f"sqlite://{_migration_database}"
     await database._run_schema_init_steps()
     # Reproduce an installation that completed every pre-archive migration.
-    # The archive column ships with the trade-ledger callback (003): the
-    # 015 dust-archive step that once repeated it is retired.
-    await SchemaMigration.filter(version="2026-07-28-003-trade-ledger-expand").delete()
+    # Earlier callbacks have run, but this installation has not applied 015.
+    await SchemaMigration.filter(
+        version="2026-10-23-015-accumulation-dust-archive"
+    ).delete()
     connection = Tortoise.get_connection("default")
     await UnsellableTrades.create(symbol="BTC/USDC", amount=0.01, cost=1)
     await connection.execute_script(
@@ -975,7 +976,9 @@ async def test_startup_migrates_archive_column_when_old_migrations_already_appli
     row = await UnsellableTrades.get(symbol="BTC/USDC")
     assert row.amount == 0.01 and row.cost == 1
     assert row.accumulation_inventory_json is None
-    ledger = await SchemaMigration.get(version="2026-07-28-003-trade-ledger-expand")
+    ledger = await SchemaMigration.get(
+        version="2026-10-23-015-accumulation-dust-archive"
+    )
     assert ledger.status == "applied"
 
 

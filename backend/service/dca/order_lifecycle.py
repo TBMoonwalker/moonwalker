@@ -1038,7 +1038,7 @@ class DcaOrderLifecycle:
                         order_status.get("partial_filled_amount") or 0.0
                     )
                     if partial_amount <= 0:
-                        if order_status.get("exit_guard_canceled_zero_fill") is True:
+                        if order_status.get("confirmed_canceled_zero_fill") is True:
                             # The acknowledged order was explicitly canceled without
                             # a fill; record that evidence through reconciliation.
                             await self.placement_intents.transition(

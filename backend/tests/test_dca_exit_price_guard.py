@@ -126,13 +126,14 @@ async def test_market_tp_sell_aborts_when_fresh_price_below_tp(
     monkeypatch.setattr(
         dca.order_lifecycle, "receive_sell_order", fake_receive_sell_order
     )
-    _patch_engine(dca, monkeypatch, bid_price="109.5", stat_payloads=stat_payloads)
+    _patch_engine(dca, monkeypatch, bid_price="99.5", stat_payloads=stat_payloads)
 
     await dca._Dca__calculate_tp(111.0, _build_trades(), _build_policy())
 
     assert sell_calls == []
     assert stat_payloads[-1]["sell"] is False
-    assert stat_payloads[-1]["current_price"] == pytest.approx(109.5)
+    assert stat_payloads[-1]["current_price"] == pytest.approx(99.5)
+    assert stat_payloads[-1]["actual_pnl"] == pytest.approx(-0.5)
 
 
 @pytest.mark.asyncio

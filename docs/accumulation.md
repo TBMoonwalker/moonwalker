@@ -361,8 +361,8 @@ If startup finds paused, quarantined accumulation obligations ready for repair, 
 **recovery only**: status/strategy reads and explicit reconciliation, settlement
 acknowledgement or interrupted-command retirement. Trading workers, watcher,
 signal plugins, configuration writes and websocket feeds remain stopped. This
-restricted access can also be served when separate DCA work remains unresolved;
-it does not clear or bypass that work. Repair the available obligations and
+restricted access requires all unresolved obligations to meet the accumulation
+recovery gate; separate unresolved DCA work prevents this startup. Repair the available obligations and
 restart so startup can reconcile all remaining exchange work before trading.
 
 ## Backup and restore

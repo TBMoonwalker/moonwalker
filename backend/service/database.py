@@ -1142,6 +1142,12 @@ class Database:
                     apply=self._ensure_accumulation_initial_entry_schema,
                 ),
                 MigrationDefinition(
+                    version="2026-10-23-015-accumulation-dust-archive",
+                    phase="schema",
+                    description="Add exact inventory evidence to unsellable accumulation dust.",
+                    apply=self._ensure_trade_ledger_columns,
+                ),
+                MigrationDefinition(
                     version="2026-10-26-016-trade-cost-provenance",
                     phase="schema",
                     description="Distinguish fee-inclusive acquisition costs from legacy fee estimates.",
