@@ -2,7 +2,7 @@
 
 All notable changes to Moonwalker are documented in this file.
 
-## [6.4.0.0] - Unreleased
+## [6.4.0.0] - 2026-11-15
 
 ### Breaking Changes
 
@@ -54,26 +54,16 @@ All notable changes to Moonwalker are documented in this file.
   installations without a verified floor marker. Running newer software alone
   does not mark legacy data as compatible or prune its migration history.
 - Pruned the startup migration ledgers on the first startup after an
-  installation reached the minimum supported version: applied ledger rows
+  installation reached the minimum supported version. Applied ledger rows
   older than the floor are removed once (the floor marker and live
   migration records are kept, and installations below the floor keep their
   full history), and the near-duplicate dust-archive ledger entry (015, a
   no-op repeat of 003) is no longer tracked. Operator-invisible ledger
   hygiene; migration behavior for supported and pre-floor installations is
   unchanged.
-- Split `service/orders.py`: classic-DCA trade finalization now lives in
-  `service/dca/finalization.py`, the DCA execution lifecycle in
-  `service/dca/order_lifecycle.py`, and the mode-neutral lifecycle routing in
-  `service/order_routing.py`; `service/orders.py` is now a thin compatibility
-  facade and `dca/engine.py` uses the lifecycle directly. Internal module
-  move — no API, config, or schema change.
-- Removed the `service/orders.py` compatibility facade: its mode-neutral
-  startup seams moved to `service/placement_recovery_entry.py`
-  (`PlacementRecoveryEntry`, which receives a caller-constructed
-  `DcaOrderLifecycle`), and the runtime graph, trading controls, and signal
-  plugins now use the DCA lifecycle directly. The DCA recovery-handler
-  wiring is owned once on `DcaOrderLifecycle.build_recovery_handler()`.
-  Internal refactor — no API, config, schema, or log-message change.
+- Split classic-DCA order execution and finalization into focused services,
+  with a shared entry point for placement recovery. This internal refactor
+  does not change the trading API or configuration.
 - Cache the resampled profit-overall timeline on the server for one snapshot
   interval (60 s): concurrent dashboard clients now share a single rebuild
   per window instead of each re-reading and re-resampling the full 12-month
@@ -82,7 +72,7 @@ All notable changes to Moonwalker are documented in this file.
   rebuild itself resolves every adaptive bucket (15min/4h/1d/Monday-anchored
   week) with an indexed `LIMIT 1` seek on the snapshot timestamp instead of
   scanning and resampling the whole year of snapshots in pandas, so a cold
-  rebuild — the path a single client's page reload or standby→active switch
+  rebuild — the path a single client's page reload or switch from standby to active
   always hits — takes tens of milliseconds even on a two-year database and
   no longer stalls unrelated requests while it runs. The endpoint's path,
   arguments, and response are unchanged;
@@ -91,6 +81,14 @@ All notable changes to Moonwalker are documented in this file.
 
 ### Fixed
 
+- Startup recovery checks that an exchange placement still belongs to its
+  original deal before applying it. Placements without sufficient identity
+  evidence remain quarantined for review.
+- A blocked trailing-profit exit retains its trigger after an unusable bid or
+  a confirmed cancelled limit order with no fill, so it can be reconsidered
+  on a later tick without retrying uncertain exchange work.
+- Legacy accumulation presets now show an explanation in the strategy editor
+  rather than breaking the editor when their data has no editable graph.
 - The dashboard document body now renders at its documented 16px / General
   Sans / 1.5 line-height in both color schemes. Naive UI's internal global
   style was writing its 14px / v-sans defaults directly onto the
@@ -110,7 +108,7 @@ All notable changes to Moonwalker are documented in this file.
   of rendering candles with no explanation. Failed indicator requests are now
   reported to the browser console.
 - Closed dynamic-DCA deals keep their strategy's indicator overlays on the
-  replay chart after the deal closes: the active DCA strategy is now recorded
+  replay chart after the deal closes. The active DCA strategy is now recorded
   on base orders that carry no strategy of their own when the order is
   created. Signal-triggered base orders previously recorded only the optional
   entry-filter strategy, so a deal that never placed a safety order lost its
