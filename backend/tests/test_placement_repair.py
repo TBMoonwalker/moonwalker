@@ -3150,13 +3150,17 @@ async def test_stored_partial_recovery_uses_execution_proceeds(
         ("base_buy", scenario)
         for scenario in ("matching", "different", "client_only", "orphan")
     ]
-    + [(kind, "added_purchase") for kind in ("sell", "limit_full", "cancel_full")],
+    + [
+        (kind, scenario)
+        for kind in ("sell", "limit_full", "cancel_full")
+        for scenario in ("added_purchase", "stale_summary")
+    ],
 )
 async def test_startup_full_recovery_binds_original_deal(
     tmp_path, monkeypatch: pytest.MonkeyPatch, kind: str, scenario: str
 ) -> None:
     """Startup recovery binds its placement to the matching local deal."""
-    valid = scenario in {"matching", "client_only"}
+    valid = scenario in {"matching", "client_only", "stale_summary"}
     await _init_database(tmp_path)
     try:
         _classic_route(monkeypatch)
@@ -3169,8 +3173,16 @@ async def test_startup_full_recovery_binds_original_deal(
             await model.OpenTrades.create(
                 symbol="BTC/USDC",
                 deal_id=current_deal,
-                amount=2 if scenario == "added_purchase" else 1,
-                cost=20 if scenario == "added_purchase" else 10,
+                amount=2
+                if scenario == "added_purchase"
+                else 0.5
+                if scenario == "stale_summary"
+                else 1,
+                cost=20
+                if scenario == "added_purchase"
+                else 5
+                if scenario == "stale_summary"
+                else 10,
                 tp_limit_order_id=(
                     "other-tp"
                     if scenario == "conflicting_tp"

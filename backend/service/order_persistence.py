@@ -527,13 +527,30 @@ async def persist_closed_trade(
             if resolution is not None and source_holding is None:
                 raise ValueError("Cannot repair a sell without an open trade.")
             if resolution is not None or recovery_target is not None:
-                if source_holding is None or any(
-                    not math.isclose(
-                        float(actual), float(expected), rel_tol=1e-8, abs_tol=1e-12
-                    )
-                    for actual, expected in (
-                        (payload.get("amount"), source_holding.amount),
-                        (payload.get("cost"), source_holding.cost),
+                ledger = (
+                    await model.Trades.filter(symbol=symbol)
+                    .using_db(conn)
+                    .annotate(amount_total=Sum("amount"), cost_total=Sum("ordersize"))
+                    .values("amount_total", "cost_total")
+                )
+                if source_holding is None or not ledger:
+                    raise ValueError("Recovered sell has no current position ledger.")
+                expected_amount = ledger[0]["amount_total"]
+                expected_cost = ledger[0]["cost_total"]
+                if source_holding.unsellable_reason:
+                    expected_amount = source_holding.amount
+                    expected_cost = source_holding.cost
+                if (
+                    expected_amount is None
+                    or expected_cost is None
+                    or any(
+                        not math.isclose(
+                            float(actual), float(expected), rel_tol=1e-8, abs_tol=1e-12
+                        )
+                        for actual, expected in (
+                            (payload.get("amount"), expected_amount),
+                            (payload.get("cost"), expected_cost),
+                        )
                     )
                 ):
                     raise ValueError(
