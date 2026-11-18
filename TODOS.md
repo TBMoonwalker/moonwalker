@@ -2,6 +2,40 @@
 
 ## Next up
 
+### Verify the Safari stale-paint fix for the open trades panel (awaiting user re-test)
+
+**Status:** Recorded 2026-11-18 from the round-2 re-diagnosis of the open
+trades resize defect (report section 9,
+`.gstack/qa-reports/run-20261117T114433Z/qa-report-192.168.6.5-2026-11-17.md`).
+Fix #2 (compositing layer promotion of `.trade-table-panel`) shipped as
+commit `c6a0802` on
+`feature/open-trades-resize-breakpoint-debounce` (bundle
+`index-CLgOfvDb.js`). Awaiting user re-test in real Safari on the 8160 test
+instance.
+
+**What was found:** the debounced breakpoint commit (fix #1, `b041017`) is
+verified deployed on 8160, yet the user reports the **whole trades panel
+turns white while dragging the window edge**, recovering on the next resize
+or scroll. A system-WebKit WKWebView harness (real 8160, 29 live trades,
+discrete sweep + continuous fast drags, all breakpoint bands, table scrolled
+into view) reproduced **no blank on either build** — the defect is specific
+to real Safari's app-level compositing path, matching a stale-layer-paint
+signature rather than a data or layout defect (the data pipeline was
+verified end to end: the server always broadcasts arrays; the client keeps
+rows on reconnect/invalidation).
+
+**What is next:**
+- If the user confirms the fix in Safari: merge the feature branch and close
+  this entry.
+- If it persists: next candidates, in order — layer promotion on the deeper
+  `.n-data-table-base-table` scroll container, and/or `:key` remount of the
+  table on committed band change (both recorded in the QA report).
+- The guard test
+  `frontend/tests-vitest/trades-panel-layer-promotion.test.ts` keeps the
+  workaround from being dropped by accident.
+
+**Priority:** P1
+
 ### Upgrade to Litestar 3.x and pandas 4.x after release
 
 **Status:** Recorded 2026-11-07 as the follow-up of the completed "Prepare
