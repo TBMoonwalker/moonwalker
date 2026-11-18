@@ -87,6 +87,57 @@ confirmed it: the full frontend CI passed unmodified, and the typescript
 
 **Priority:** P3
 
+### Ship a patched picomatch for CVE-2026-112366 (CI npm audit is red)
+
+**Status:** Recorded 2026-11-18 from the QA run of the open trades resize
+defect (report:
+`.gstack/qa-reports/run-20261117T114433Z/qa-report-192.168.6.5-2026-11-17.md`).
+The mandatory CI `npm audit --audit-level=high` step fails on one advisory
+with 14 findings: CVE-2026-112366 / GHSA-fc5q-39xc-vjpf (picomatch ReDoS via
+single-branch repeated extglobs, published 2026-10-19, GitHub-reviewed
+2026-11-17, CVSS 8.7 availability-only, EPSS 0.335%). **No patched release
+exists as of 2026-11-18**; the upstream fix (micromatch/picomatch PR #194)
+is unreleased. Pre-existing: the lock file is untouched by the QA change and
+picomatch 4.0.7 is the newest published version.
+
+**What:** In a dedicated dependency PR, once a patched picomatch ships:
+bump it (directly or via the dependents — vite/vitest/vue-tsc/knip/unplugin
+chains), re-run `npm ci` + full frontend CI, and research the release per the
+dependency-hygiene policy (advisory closure, artifact/provenance checks).
+
+**Why not now / constraints:** There is no version to install, and npm's
+`audit fix --force` suggestion (downgrade knip 6.45.0 -> 3.13.2, a breaking
+change) does not fix the chain and must not be taken. Exploitability in
+Moonwalker is assessed as none: the advisory requires the attacker to supply
+the glob *pattern* (picomatch pattern parsing); all flagged packages are dev
+tooling except vue-router, whose picomatch usage lives only in its build-time
+unplugin chunk, not the shipped runtime bundle. Until the patch ships, the
+CI npm audit step stays red and must be investigated, not dismissed, on each
+run.
+
+**Priority:** P2
+
+### Keep last good rows in useTradeTableFeed on invalid WS payloads
+
+**Status:** Deferred 2026-11-18 from the QA run of the open trades resize
+defect (same report). Data-side insurance, not the root cause of that defect
+(which was breakpoint re-rendering, fixed in `useViewport.ts`).
+
+**What:** In `frontend/src/composables/useTradeTableFeed.ts`, a non-array WS
+payload currently resets `rows` to `[]`, which surfaces as an empty table with
+the "No open trades"/waiting text even though the last good push is still in
+memory. Keep the last normalized rows on non-array payloads (optionally
+surfacing staleness through the existing `fresh`/`generation` mechanism)
+instead of clearing, so a one-off bad frame degrades to a stale table rather
+than an empty one.
+
+**Why:** The backend never broadcasts non-arrays and App.vue already refuses
+to certify freshness for invalid payloads, so this is a double-safety against
+any future feed hiccup (or a client-side parse edge) rather than a fix for a
+known producer bug.
+
+**Priority:** P3
+
 ## Completed
 
 ### Harden the frontend-staging guard against partial and masked-out failures
