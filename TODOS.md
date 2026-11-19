@@ -2,49 +2,14 @@
 
 ## Next up
 
-### Verify the Safari stale-paint fix for the open trades panel (awaiting user re-test)
+### Merge PR #208 — Safari open trades resize flicker/blank fix
 
-**Status:** User-confirmed 2026-11-19 — with the pinned build (fix #3,
-commit `e498259`) the user reports **"flicker seems to be gone"** and
-**"Haven't seen a white panel with the new version in the last minutes"** in
-real Safari on 8160. Both symptoms resolved. PR #208 is open against main
-(all three fixes + changelog); merge it and close this entry.
+**Status:** Both symptoms user-confirmed fixed in real Safari (2026-11-19).
+PR #208 is open against main; full CI green.
 
-**What was found:** the debounced breakpoint commit (fix #1, `b041017`) is
-verified deployed on 8160, yet the user reports the **whole trades panel
-turns white while dragging the window edge**, recovering on the next resize
-or scroll. A system-WebKit WKWebView harness (real 8160, 29 live trades,
-discrete sweep + continuous fast drags, all breakpoint bands, table scrolled
-into view) reproduced **no blank on either build** — the defect is specific
-to real Safari's app-level compositing path, matching a stale-layer-paint
-signature rather than a data or layout defect (the data pipeline was
-verified end to end: the server always broadcasts arrays; the client keeps
-rows on reconnect/invalidation).
-
-**Round 3 (2026-11-19):** with fix #2 deployed the user reports the table
-is **still flickering** during drags — the per-frame white flash. Mechanism:
-every resize frame re-flows and re-rasterizes the full ~2000 px table (and
-the fix #2 promotion turned the repaint into a full-layer re-rasterization
-the raster thread cannot keep up with at 60 Hz drags). Fix #3 (this
-changeset) makes the table not resize at all during a drag:
-`usePinnedTableWidth.ts` pins the table wrapper to the panel's last
-committed width (120 ms debounce, same model as the breakpoint commit), so
-a drag performs no table reflow, no layer re-rasterization and no
-naive-ui RO-driven table re-render; the table jumps to its new width once,
-when the drag settles. Probe-verified: `tableW` constant across the full
-drag, single jump at settle.
-
-**What is next:**
-- Merge PR #208 and close this entry (both symptoms are user-confirmed
-  resolved; full CI green on the branch).
-- Contingency only (flicker regressed): the remaining suspect was the
-  single settle-time re-render (band commit) — candidates recorded in the
-  QA report, section 10 (`:key` remount on committed band change; deeper
-  layer promotion on `.n-data-table-base-table`).
-- The guard tests
-  (`trades-panel-layer-promotion.test.ts`,
-  `pinned-table-width.test.ts`) keep the workarounds from being dropped by
-  accident.
+**What:** Merge, then delete this entry. Full defect history and
+verification: `.gstack/qa-reports/run-20261117T114433Z/qa-report-192.168.6.5-2026-11-17.md`
+(also under `~/.gstack/projects/TBMoonwalker-moonwalker/`).
 
 **Priority:** P1
 
