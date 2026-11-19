@@ -2,6 +2,18 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Safari: the open trades table on the Trading overview no longer flickers
+  or blanks out (stale white panel) while dragging the window edge to
+  resize. Column sets now switch only once, after the resize settles; the
+  table keeps its last committed width while the window is moving (the
+  browser performs no table re-layout during the drag) and jumps to its new
+  width once when the drag ends; and the trades panel is promoted to its own
+  compositing layer so Safari repaints it reliably after a resize.
+
 ## [6.4.0.0] - 2026-11-15
 
 ### Breaking Changes
