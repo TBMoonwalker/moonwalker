@@ -4,14 +4,11 @@
 
 ### Verify the Safari stale-paint fix for the open trades panel (awaiting user re-test)
 
-**Status:** Recorded 2026-11-18 from the round-2 re-diagnosis of the open
-trades resize defect (report section 9,
-`.gstack/qa-reports/run-20261117T114433Z/qa-report-192.168.6.5-2026-11-17.md`).
-Fix #2 (compositing layer promotion of `.trade-table-panel`) shipped as
-commit `c6a0802` on
-`feature/open-trades-resize-breakpoint-debounce` (bundle
-`index-CLgOfvDb.js`). Awaiting user re-test in real Safari on the 8160 test
-instance.
+**Status:** User-confirmed 2026-11-19 — with the pinned build (fix #3,
+commit `e498259`), the user reports **"flicker seems to be gone"** in real
+Safari on 8160. PR #208 is open against main (all three fixes + changelog);
+merge it (and close this entry) once the user confirms the persistent-white
+symptom is also resolved or accepts the branch.
 
 **What was found:** the debounced breakpoint commit (fix #1, `b041017`) is
 verified deployed on 8160, yet the user reports the **whole trades panel
@@ -38,13 +35,12 @@ when the drag settles. Probe-verified: `tableW` constant across the full
 drag, single jump at settle.
 
 **What is next:**
-- If the user confirms the fix in Safari: merge the feature branch and close
-  this entry.
-- If the flicker persists: the remaining suspect is the single settle-time
-  re-render (band commit) itself — next candidates are a `:key` remount of
-  the table on committed band change, and layer promotion on the deeper
-  `.n-data-table-base-table` scroll container (both recorded in the QA
-  report, section 10).
+- Merge PR #208 and close this entry when the user signs off (flicker is
+  already confirmed; the persistent-white confirmation is the last check).
+- Contingency only (flicker regressed): the remaining suspect was the
+  single settle-time re-render (band commit) — candidates recorded in the
+  QA report, section 10 (`:key` remount on committed band change; deeper
+  layer promotion on `.n-data-table-base-table`).
 - The guard tests
   (`trades-panel-layer-promotion.test.ts`,
   `pinned-table-width.test.ts`) keep the workarounds from being dropped by
