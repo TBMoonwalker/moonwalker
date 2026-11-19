@@ -5,10 +5,10 @@
 ### Verify the Safari stale-paint fix for the open trades panel (awaiting user re-test)
 
 **Status:** User-confirmed 2026-11-19 — with the pinned build (fix #3,
-commit `e498259`), the user reports **"flicker seems to be gone"** in real
-Safari on 8160. PR #208 is open against main (all three fixes + changelog);
-merge it (and close this entry) once the user confirms the persistent-white
-symptom is also resolved or accepts the branch.
+commit `e498259`) the user reports **"flicker seems to be gone"** and
+**"Haven't seen a white panel with the new version in the last minutes"** in
+real Safari on 8160. Both symptoms resolved. PR #208 is open against main
+(all three fixes + changelog); merge it and close this entry.
 
 **What was found:** the debounced breakpoint commit (fix #1, `b041017`) is
 verified deployed on 8160, yet the user reports the **whole trades panel
@@ -35,8 +35,8 @@ when the drag settles. Probe-verified: `tableW` constant across the full
 drag, single jump at settle.
 
 **What is next:**
-- Merge PR #208 and close this entry when the user signs off (flicker is
-  already confirmed; the persistent-white confirmation is the last check).
+- Merge PR #208 and close this entry (both symptoms are user-confirmed
+  resolved; full CI green on the branch).
 - Contingency only (flicker regressed): the remaining suspect was the
   single settle-time re-render (band commit) — candidates recorded in the
   QA report, section 10 (`:key` remount on committed band change; deeper
