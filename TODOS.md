@@ -24,15 +24,31 @@ signature rather than a data or layout defect (the data pipeline was
 verified end to end: the server always broadcasts arrays; the client keeps
 rows on reconnect/invalidation).
 
+**Round 3 (2026-11-19):** with fix #2 deployed the user reports the table
+is **still flickering** during drags — the per-frame white flash. Mechanism:
+every resize frame re-flows and re-rasterizes the full ~2000 px table (and
+the fix #2 promotion turned the repaint into a full-layer re-rasterization
+the raster thread cannot keep up with at 60 Hz drags). Fix #3 (this
+changeset) makes the table not resize at all during a drag:
+`usePinnedTableWidth.ts` pins the table wrapper to the panel's last
+committed width (120 ms debounce, same model as the breakpoint commit), so
+a drag performs no table reflow, no layer re-rasterization and no
+naive-ui RO-driven table re-render; the table jumps to its new width once,
+when the drag settles. Probe-verified: `tableW` constant across the full
+drag, single jump at settle.
+
 **What is next:**
 - If the user confirms the fix in Safari: merge the feature branch and close
   this entry.
-- If it persists: next candidates, in order — layer promotion on the deeper
-  `.n-data-table-base-table` scroll container, and/or `:key` remount of the
-  table on committed band change (both recorded in the QA report).
-- The guard test
-  `frontend/tests-vitest/trades-panel-layer-promotion.test.ts` keeps the
-  workaround from being dropped by accident.
+- If the flicker persists: the remaining suspect is the single settle-time
+  re-render (band commit) itself — next candidates are a `:key` remount of
+  the table on committed band change, and layer promotion on the deeper
+  `.n-data-table-base-table` scroll container (both recorded in the QA
+  report, section 10).
+- The guard tests
+  (`trades-panel-layer-promotion.test.ts`,
+  `pinned-table-width.test.ts`) keep the workarounds from being dropped by
+  accident.
 
 **Priority:** P1
 
@@ -121,36 +137,6 @@ confirmed it: the full frontend CI passed unmodified, and the typescript
 
 **Priority:** P3
 
-### Ship a patched picomatch for CVE-2026-112366 (CI npm audit is red)
-
-**Status:** Recorded 2026-11-18 from the QA run of the open trades resize
-defect (report:
-`.gstack/qa-reports/run-20261117T114433Z/qa-report-192.168.6.5-2026-11-17.md`).
-The mandatory CI `npm audit --audit-level=high` step fails on one advisory
-with 14 findings: CVE-2026-112366 / GHSA-fc5q-39xc-vjpf (picomatch ReDoS via
-single-branch repeated extglobs, published 2026-10-19, GitHub-reviewed
-2026-11-17, CVSS 8.7 availability-only, EPSS 0.335%). **No patched release
-exists as of 2026-11-18**; the upstream fix (micromatch/picomatch PR #194)
-is unreleased. Pre-existing: the lock file is untouched by the QA change and
-picomatch 4.0.7 is the newest published version.
-
-**What:** In a dedicated dependency PR, once a patched picomatch ships:
-bump it (directly or via the dependents — vite/vitest/vue-tsc/knip/unplugin
-chains), re-run `npm ci` + full frontend CI, and research the release per the
-dependency-hygiene policy (advisory closure, artifact/provenance checks).
-
-**Why not now / constraints:** There is no version to install, and npm's
-`audit fix --force` suggestion (downgrade knip 6.45.0 -> 3.13.2, a breaking
-change) does not fix the chain and must not be taken. Exploitability in
-Moonwalker is assessed as none: the advisory requires the attacker to supply
-the glob *pattern* (picomatch pattern parsing); all flagged packages are dev
-tooling except vue-router, whose picomatch usage lives only in its build-time
-unplugin chunk, not the shipped runtime bundle. Until the patch ships, the
-CI npm audit step stays red and must be investigated, not dismissed, on each
-run.
-
-**Priority:** P2
-
 ### Keep last good rows in useTradeTableFeed on invalid WS payloads
 
 **Status:** Deferred 2026-11-18 from the QA run of the open trades resize
@@ -173,6 +159,24 @@ known producer bug.
 **Priority:** P3
 
 ## Completed
+
+### picomatch CVE-2026-112366 advisory withdrawn — CI npm audit green again
+
+**Status:** Closed 2026-11-19. The advisory behind the red CI `npm audit
+--audit-level=high` step (CVE-2026-112366 / GHSA-fc5q-39xc-vjpf, picomatch
+<= 4.0.7 ReDoS via single-branch repeated extglobs) was **withdrawn by
+GitHub on 2026-11-18: "not a security issue"** (see
+`github.com/advisories/GHSA-fc5q-39xc-vjpf`; the link is maintained to
+preserve external references and points to the upstream analysis in
+micromatch/picomatch#235). Verified against the advisory page (primary
+source) on 2026-11-19: `npm audit --audit-level=high` now reports 0
+vulnerabilities with the lock file unchanged (picomatch 4.0.7), and the full
+CI suite — including the npm vulnerability audit and registry-signature
+gates — passes. No dependency change was made or needed; this closes the
+"Ship a patched picomatch" entry that was recorded 2026-11-18 while the
+advisory was still active.
+
+**Priority:** P2
 
 ### Harden the frontend-staging guard against partial and masked-out failures
 
