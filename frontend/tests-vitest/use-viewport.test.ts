@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
     VIEWPORT_BREAKPOINTS,
+    VIEWPORT_COMMIT_DEBOUNCE_MS,
     useViewport,
 } from '../src/composables/useViewport'
 
@@ -12,6 +13,17 @@ function setViewportWidth(width: number): void {
         configurable: true,
         value: width,
     })
+}
+
+function resizeTo(width: number): void {
+    setViewportWidth(width)
+    window.dispatchEvent(new Event('resize'))
+}
+
+function settleCommits(): Promise<void> {
+    return new Promise((resolve) =>
+        setTimeout(resolve, VIEWPORT_COMMIT_DEBOUNCE_MS + 60),
+    )
 }
 
 const ViewportConsumer = defineComponent({
@@ -49,19 +61,63 @@ describe('useViewport', () => {
         ).toHaveLength(1)
     })
 
-    it('exposes canonical mobile and tablet breakpoints reactively', async () => {
-        setViewportWidth(VIEWPORT_BREAKPOINTS.mobile - 1)
+    it('commits breakpoint booleans only after resizes settle', async () => {
+        setViewportWidth(VIEWPORT_BREAKPOINTS.desktop + 40)
         const wrapper = mount(ViewportConsumer)
-        expect(wrapper.text()).toBe('767:true:false')
+        await settleCommits()
+        expect(wrapper.text()).toBe('1240:false:false')
 
-        setViewportWidth(VIEWPORT_BREAKPOINTS.mobile)
-        window.dispatchEvent(new Event('resize'))
+        // A fast drag updates the raw width immediately, but the booleans
+        // keep the last settled band until the resizes settle.
+        resizeTo(VIEWPORT_BREAKPOINTS.mobile - 1)
+        resizeTo(VIEWPORT_BREAKPOINTS.mobile - 2)
         await nextTick()
-        expect(wrapper.text()).toBe('768:false:true')
+        expect(wrapper.text()).toBe('766:false:false')
 
-        setViewportWidth(VIEWPORT_BREAKPOINTS.desktop)
-        window.dispatchEvent(new Event('resize'))
+        await settleCommits()
+        expect(wrapper.text()).toBe('766:true:false')
+
+        resizeTo(VIEWPORT_BREAKPOINTS.desktop)
         await nextTick()
+        expect(wrapper.text()).toBe('1200:true:false')
+
+        await settleCommits()
         expect(wrapper.text()).toBe('1200:false:false')
+        wrapper.unmount()
+    })
+
+    it('does not re-commit while another consumer owns a pending drag', async () => {
+        setViewportWidth(VIEWPORT_BREAKPOINTS.desktop + 40)
+        const first = mount(ViewportConsumer)
+        await settleCommits()
+        expect(first.text()).toBe('1240:false:false')
+
+        // A drag is in flight (commit pending) when a second consumer
+        // mounts: it must observe the held band, not force a commit.
+        resizeTo(640)
+        const second = mount(ViewportConsumer)
+        await nextTick()
+        expect(second.text()).toBe('640:false:false')
+        expect(first.text()).toBe('640:false:false')
+
+        await settleCommits()
+        expect(first.text()).toBe('640:true:false')
+        expect(second.text()).toBe('640:true:false')
+
+        second.unmount()
+        first.unmount()
+    })
+
+    it('cancels a pending commit when the last consumer unmounts', async () => {
+        setViewportWidth(VIEWPORT_BREAKPOINTS.desktop + 40)
+        const wrapper = mount(ViewportConsumer)
+        await settleCommits()
+        expect(wrapper.text()).toBe('1240:false:false')
+
+        resizeTo(640)
+        wrapper.unmount()
+        await settleCommits()
+        expect(wrapper.vm.isMobile).toBe(false)
+        expect(wrapper.vm.isTablet).toBe(false)
     })
 })

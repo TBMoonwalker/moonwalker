@@ -504,7 +504,18 @@ const admissionToneClass = computed(() =>
 
 .trade-table-panel {
   overflow: visible;
+  overflow-x: clip;
   padding: 12px 16px 16px;
+  /* The table inside is pinned to its last committed width during a window
+   * drag (see usePinnedTableWidth); clip any transient overflow at the panel
+   * edge instead of growing a page-level horizontal scrollbar. */
+  /* WebKit (Safari) can leave this panel's region unpainted (stale white)
+   * after window-resize reflows; it repaints only on the next scroll or
+   * resize. Promoting the panel to its own compositing layer makes resize
+   * re-rasterize the layer bounds instead of relying on main-frame
+   * dirty-rect repaints. No sticky/fixed descendants are affected: the
+   * table has no max-height (no sticky header) and no fixed columns. */
+  transform: translateZ(0);
 }
 
 .trade-table-panel :deep(.n-data-table) {

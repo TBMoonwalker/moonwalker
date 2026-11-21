@@ -1,6 +1,11 @@
 <template>
     <AccumulationPendingEntries :context="accumulation" :open-symbols="open_trades.map(row => row.symbol)" />
     <p v-if="!dcaDataFresh" role="status">Live trade data is refreshing. New trade actions are unavailable until it is current.</p>
+    <div
+        class="open-trades-table-wrap"
+        ref="tableWrapRef"
+        :style="tableWidthStyle"
+    >
     <n-data-table
         size="small"
         remote
@@ -17,6 +22,7 @@
         aria-label="Open trades table"
         @update:sorter="handleSorterChange"
     />
+    </div>
     <n-modal
         v-if="isMobile"
         v-model:show="mobileTradeDetailsOpen"
@@ -60,6 +66,7 @@ import { useMissionPauseActions } from '../composables/useMissionPauseActions'
 import { useOpenTradeActions } from '../composables/useOpenTradeActions'
 import { useOpenTradeColumns } from '../composables/useOpenTradeColumns'
 import { useTradeTableFeed } from '../composables/useTradeTableFeed'
+import { usePinnedTableWidth } from '../composables/usePinnedTableWidth'
 import { useViewport } from '../composables/useViewport'
 import {
     isSymbolDenied,
@@ -93,6 +100,14 @@ const dialog = useDialog()
 const message = useMessage()
 
 const { isMobile, isTablet } = useViewport()
+
+// The table only re-lays out when the window stops moving; during a drag it
+// keeps its last committed width so WebKit never flashes the table region
+// while re-painting it on every drag frame.
+const tableWrapRef = ref<HTMLElement | null>(null)
+const { widthStyle: tableWidthStyle } = usePinnedTableWidth(
+    computed(() => tableWrapRef.value?.parentElement ?? null),
+)
 const configSnapshotStore = useSharedConfigSnapshot()
 const { configuredMinTimeframe, loadConfiguredMinTimeframe } =
     useConfiguredMinTimeframe()
@@ -343,6 +358,10 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.open-trades-table-wrap {
+    min-width: 0;
+}
+
 :deep(.red .profit) {
     color: var(--mw-color-error) !important;
 }
