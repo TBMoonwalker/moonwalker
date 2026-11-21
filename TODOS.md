@@ -2,17 +2,6 @@
 
 ## Next up
 
-### Merge PR #208 — Safari open trades resize flicker/blank fix
-
-**Status:** Both symptoms user-confirmed fixed in real Safari (2026-11-19).
-PR #208 is open against main; full CI green.
-
-**What:** Merge, then delete this entry. Full defect history and
-verification: `.gstack/qa-reports/run-20261117T114433Z/qa-report-192.168.6.5-2026-11-17.md`
-(also under `~/.gstack/projects/TBMoonwalker-moonwalker/`).
-
-**Priority:** P1
-
 ### Upgrade to Litestar 3.x and pandas 4.x after release
 
 **Status:** Recorded 2026-11-07 as the follow-up of the completed "Prepare
