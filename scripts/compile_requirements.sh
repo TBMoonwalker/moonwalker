@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PIP_TOOLS_VERSION="7.6.2"
+PACKAGING_VERSION="26.3"
 cd "$ROOT_DIR/backend"
 
 compile_lock() {
@@ -27,4 +28,8 @@ compile_lock \
     "requirements-dev.in" \
     "requirements-dev.txt"
 
-"$ROOT_DIR/scripts/check_dependency_locks.py"
+# The lock gate needs the `packaging` module. Run it through uv (already a
+# dependency of this script via uvx) instead of the host's system python3,
+# which may not have packaging installed. Pinned to the dev-lock version.
+uv run --no-project --with "packaging==${PACKAGING_VERSION}" python \
+    "$ROOT_DIR/scripts/check_dependency_locks.py"
