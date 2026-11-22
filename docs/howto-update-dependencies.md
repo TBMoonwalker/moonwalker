@@ -7,8 +7,10 @@ and verify a focused dependency changeset.
 
 - A clean feature branch for the dependency update.
 - The repository's supported Python 3.14 and Node 26 runtimes; npm 11, `uvx`
-  and `uv >= 0.2.0` for the documented lock compiler (the lock policy gate runs
-  through `uv run --no-project`, which releases before 0.2.0 reject).
+  and `uv >= 0.3.0` for the documented lock compiler (the lock policy gate runs
+  through `uv run --no-project` without `--preview`, which releases before
+  0.3.0 reject; `uvx` and `--no-project` were preview features until 0.3.0's
+  "Stabilize preview features").
 - An existing development environment with audit tools. Runtime startup switches
   `.venv` between release slots, so it can remove access to development tools.
   See [development environments](development.md#python-dead-code).
