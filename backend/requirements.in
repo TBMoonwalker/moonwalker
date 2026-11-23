@@ -1,6 +1,6 @@
 # Direct production dependencies. Regenerate requirements.txt with
 # ../scripts/compile_requirements.sh after changing this file.
-cachetools==7.3.0
+cachetools==8.0.2
 ccxt==4.5.93
 pandas==3.1.1
 # Reviewed timezone engine for pandas, including post-2038 TZif support.
