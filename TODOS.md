@@ -108,7 +108,76 @@ known producer bug.
 
 **Priority:** P3
 
+### Split the audit-script precheck diagnostic for missing interpreters
+
+**Status:** Recorded 2026-11-22 as a follow-up of the completed "Fix the
+lock policy gate's tooling environment (uv --no-project + venv precheck)"
+entry (pre-landing review finding on PR #209; owner decision 2026-11-22:
+record, do not fix in that changeset).
+
+**What:** `scripts/audit_dependencies.sh` prechecks the selected interpreter
+with `"$PYTHON_BIN" -c "import packaging, pip_audit" 2>/dev/null`, so
+interpreter-level failures (a missing `.venv`, a dangling symlink,
+permission denied, a wrong-arch or mistyped `PYTHON_BIN`) are suppressed and
+reported as "is missing the dev tools (packaging, pip_audit). Install the
+development lock first." — the wrong diagnosis in each of those cases, where
+the interpreter itself does not exist or cannot run. Add an
+`[ -x "$PYTHON_BIN" ]` guard with a distinct "interpreter not found/not
+executable" message, keeping the import probe for the missing-tools case.
+
+**Why:** Behavior is fail-closed (`exit 1` before any step runs) and the
+common fresh-clone case still receives a roughly correct remedy, so this is
+diagnostic confusion only — recorded rather than fixed inside the review
+round cap.
+
+**Priority:** P3
+
 ## Completed
+
+### Fix the lock policy gate's tooling environment (uv --no-project + venv precheck)
+
+**Status:** Completed 2026-11-22 (PR #209) as six CI-green commits on
+`fix/compile-requirements-gate-python` (`0883c7b`, `586f979`, `0f8bf18`,
+`0980998`, `87be854`, `4116083`). Closes a demonstrated defect: the
+dependency lock policy gate (`scripts/check_dependency_locks.py`, which
+imports `packaging`) used to run under a shebang system Python that lacks
+`packaging`, failing with a bare `ModuleNotFoundError` **after** `pip-compile`
+had already written the regenerated locks.
+
+**What shipped:**
+- `scripts/compile_requirements.sh` runs the gate through
+  `uv run --no-project` (uv is already a dependency of this script via
+  `uvx`), so the gate always has `packaging` without relying on the host's
+  system python3. `--no-project` keeps `uv run` from discovering the
+  tooling-only root `pyproject.toml`, syncing `.venv` from it, and writing a
+  `uv.lock`.
+- The gate's `packaging` pin is derived at runtime from the freshly
+  regenerated dev lock (awk extraction, marker-stripped, explicit empty
+  guard) instead of a hardcoded transitive copy, so the standalone gate and
+  the CI gate (`ci.sh`, venv python) cannot drift apart when a future lock
+  regeneration moves the transitive `packaging` pin.
+- `scripts/audit_dependencies.sh` runs the gate through the repository's
+  venv python (overridable via `PYTHON_BIN`) and prechecks that the selected
+  interpreter has the dev tools (`import packaging, pip_audit`), so a
+  runtime-only venv fails with a clear "install the development lock first"
+  message before any step runs, instead of a bare import traceback.
+- `AGENTS.md` records the `uv --no-project` rule under the mandatory CI
+  checks (a project-context `uv run` treats the tooling-only `pyproject.toml`
+  as the project, syncs `.venv` from it, and writes a `uv.lock`).
+- `docs/howto-update-dependencies.md` documents the tool floor:
+  `uv >= 0.3.0` (`uv run --no-project` without `--preview` and `uvx` were
+  preview features until uv 0.3.0's "Stabilize preview features", #6166;
+  verified against the astral-sh/uv changelogs).
+
+**Verification:** full CI green on every branch commit
+(`cd scripts && ./ci.sh`); a lock regeneration on a clean tree is
+byte-identical (the gate is a no-op there); no `uv.lock` is created and the
+development venv is left intact. Pre-landing review: two review passes, the
+adversarial pass, and a scoped fix-check; findings fixed, deferred, or
+recorded (one diagnostic follow-up recorded in Next up; one pre-existing
+regeneration-ordering observation deferred with owner consent).
+
+**Priority:** P3
 
 ### picomatch CVE-2026-112366 advisory withdrawn — CI npm audit green again
 
