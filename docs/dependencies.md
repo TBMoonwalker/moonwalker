@@ -97,7 +97,7 @@ The reviewed `@vue/test-utils` 2.5 line replaces the older dependency tree
 that introduced vulnerable `js-beautify` and `glob` dependencies. Recheck the
 resolved tree with npm audit when updating it.
 
-Ruff is pinned to `0.17.4`. Its lint configuration explicitly selects the
+Ruff is pinned to `0.17.6`. Its lint configuration explicitly selects the
 pre-0.16 rule families (`E4`, `E7`, `E9`, `F`), preserving the existing checks
 through the tool upgrade. This follows the [upstream compatibility migration](https://astral.sh/blog/ruff-v0.16.0).
 Adopting Ruff's expanded default rules is a separate lint-policy change; do not

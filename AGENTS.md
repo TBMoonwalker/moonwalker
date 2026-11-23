@@ -20,6 +20,7 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 ### Mandatory CI Check
 - After every code change, run CI from the scripts directory directly: `cd scripts && ./ci.sh`
 - Frontend CI on OSX runs against Homebrew `node` (26.x)/`npm`; if it is not on the default PATH, prefix the run with `PATH="/opt/homebrew/opt/node/bin:$PATH"` (binary at `/opt/homebrew/Cellar/node/*/bin`).
+- Lock regeneration (`scripts/compile_requirements.sh`) requires `uv` (its pip-compile runs via `uvx`, and the final lock policy gate runs through `uv run --no-project`). Never run `uv run` in project context in this repo: it treats the tooling-only `pyproject.toml` as the project, syncs `.venv` from it (destroying the locked venv), and writes a `uv.lock`. Always use `--no-project` (or plain `uvx`).
 - The **Python dependency audit** step in `ci.sh` runs a strict vulnerability audit of the development lock. Investigate audit failures; do not dismiss them as outdated-package hygiene. Run the separate outdated checks and classify their results under Dependency Hygiene below.
 
 ### Dependency Hygiene (Mandatory)
