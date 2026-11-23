@@ -61,11 +61,17 @@ a dedicated, separately tested changeset:
 - `typescript` 6.0.3 -> 7.0.2 (blocked until Volar supports 7: TypeScript
   7.0 ships no programmatic compiler API — the `typescript` package's main
   entry exports only `version`/`versionMajorMinor` — and `vue-tsc` 3.3.14
-  crashes on it with `ERR_PACKAGE_PATH_NOT_EXPORTED: './lib/tsc'`, while
-  its `@vue/language-core` 3.3.14 peer-declares `typescript: <7` and no
-  newer vue-tsc release exists; the 2026-11-06 TypeScript 7.1 beta
-  restores the compiler API and makes Vue first-class, so revisit together
-  with a TS 7.1 stable release plus a vue-tsc that accepts it).
+  crashes on it with `ERR_PACKAGE_PATH_NOT_EXPORTED: './lib/tsc'`; its
+  `>=5.0.0` peer range formally admits 7.x, so the block is that runtime
+  crash, and no newer vue-tsc release exists; the TypeScript 7.1 beta
+  (announced 2026-10-20) ships a new programmatic API and makes Volar's
+  model first-class, so revisit together with a TS 7.1 stable release
+  plus a vue-tsc that accepts it; re-verified 2026-11-22 with the
+  frontend safe batch: still blocked — TS 7.1 has no stable release yet
+  (npm's latest tag is still 7.0.2; the newest publication is the
+  7.1.0-dev.20261121.1 dev build; the beta announcement promised a
+  release candidate about a month after the beta and the final release
+  shortly after) and vue-tsc's latest is still 3.3.14).
 
 **Why:** Recorded rather than bundled: major bumps need the compatibility
 review the dependency hygiene policy requires, and the axios 1.21.0 wave
