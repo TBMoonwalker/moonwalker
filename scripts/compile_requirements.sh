@@ -27,4 +27,18 @@ compile_lock \
     "requirements-dev.in" \
     "requirements-dev.txt"
 
-"$ROOT_DIR/scripts/check_dependency_locks.py"
+# The lock gate needs the `packaging` module. Run it through uv (already a
+# dependency of this script via uvx) instead of the host's system python3,
+# which may not have packaging installed. Use the freshly regenerated dev
+# lock's own pin so this gate always validates with the same packaging
+# version the venv (and the CI gate) uses, never a stale hardcoded copy.
+PACKAGING_VERSION="$(
+    awk -F'==' '/^packaging==/ { v = $2; sub(/[; ].*$/, "", v); print v; exit }' \
+        "$ROOT_DIR/backend/requirements-dev.txt"
+)"
+if [ -z "$PACKAGING_VERSION" ]; then
+    echo "ERROR: no packaging pin found in backend/requirements-dev.txt" >&2
+    exit 1
+fi
+uv run --no-project --with "packaging==${PACKAGING_VERSION}" python \
+    "$ROOT_DIR/scripts/check_dependency_locks.py"

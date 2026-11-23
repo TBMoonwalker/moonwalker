@@ -34,24 +34,24 @@
     "rete-render-utils": "2.0.3",
     "rete-vue-plugin": "2.1.3",
     "vooks": "0.2.12",
-    "vue": "3.5.45",
+    "vue": "3.5.46",
     "vue-echarts": "8.3.2",
-    "vue-router": "5.5.0"
+    "vue-router": "5.5.1"
   },
   "devDependencies": {
-    "@playwright/test": "1.65.0",
-    "@tsconfig/node26": "26.0.1",
+    "@playwright/test": "1.65.1",
+    "@tsconfig/node26": "26.0.2",
     "@types/node": "26.6.6",
-    "@vitejs/plugin-vue": "6.0.10",
-    "@vitest/coverage-v8": "5.1.0",
-    "@vue/test-utils": "2.5.1",
+    "@vitejs/plugin-vue": "6.0.11",
+    "@vitest/coverage-v8": "5.1.1",
+    "@vue/test-utils": "2.6.0",
     "@vue/tsconfig": "0.9.1",
-    "jsdom": "31.0.0",
-    "knip": "6.45.0",
+    "jsdom": "31.0.1",
+    "knip": "6.47.0",
     "typescript": "6.0.3",
     "unplugin-vue-components": "32.1.0",
     "vite": "8.3.8",
-    "vitest": "5.1.0",
+    "vitest": "5.1.1",
     "vue-tsc": "3.3.14"
   },
   "overrides": {
@@ -62,7 +62,7 @@
     "minimatch": "11.0.5",
     "nanoid": "3.3.18",
     "postcss": "8.5.30",
-    "source-map-js": "1.2.2",
+    "source-map-js": "1.2.4",
     "whatwg-url": "17.3.0",
     "zod": "4.6.7",
     "undici": "8.12.3"

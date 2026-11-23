@@ -61,11 +61,17 @@ a dedicated, separately tested changeset:
 - `typescript` 6.0.3 -> 7.0.2 (blocked until Volar supports 7: TypeScript
   7.0 ships no programmatic compiler API — the `typescript` package's main
   entry exports only `version`/`versionMajorMinor` — and `vue-tsc` 3.3.14
-  crashes on it with `ERR_PACKAGE_PATH_NOT_EXPORTED: './lib/tsc'`, while
-  its `@vue/language-core` 3.3.14 peer-declares `typescript: <7` and no
-  newer vue-tsc release exists; the 2026-11-06 TypeScript 7.1 beta
-  restores the compiler API and makes Vue first-class, so revisit together
-  with a TS 7.1 stable release plus a vue-tsc that accepts it).
+  crashes on it with `ERR_PACKAGE_PATH_NOT_EXPORTED: './lib/tsc'`; its
+  `>=5.0.0` peer range formally admits 7.x, so the block is that runtime
+  crash, and no newer vue-tsc release exists; the TypeScript 7.1 beta
+  (announced 2026-10-20) ships a new programmatic API and makes Volar's
+  model first-class, so revisit together with a TS 7.1 stable release
+  plus a vue-tsc that accepts it; re-verified 2026-11-22 with the
+  frontend safe batch: still blocked — TS 7.1 has no stable release yet
+  (npm's latest tag is still 7.0.2; the newest publication is the
+  7.1.0-dev.20261121.1 dev build; the beta announcement promised a
+  release candidate about a month after the beta and the final release
+  shortly after) and vue-tsc's latest is still 3.3.14).
 
 **Why:** Recorded rather than bundled: major bumps need the compatibility
 review the dependency hygiene policy requires, and the axios 1.21.0 wave
@@ -83,7 +89,7 @@ confirmed it: the full frontend CI passed unmodified, and the typescript
 **What:** Bump the held major-version Python dependency in a dedicated, separately tested changeset:
 - `multidict` 6.9.1 -> 7.2.1 (transitive of aiohttp, hard-pinned to `6.9.1` by ccxt, so the resolver cannot move it until a future ccxt release relaxes the pin; revisit together with the next ccxt release that permits multidict 7).
 
-**Why:** Recorded rather than bundled: major bumps need the compatibility review the dependency hygiene policy requires, and multidict is additionally unresolvable today because of ccxt's hard pin. As of 2026-11-08 the latest ccxt (4.5.92) still pins `multidict==6.9.1`, while aiohttp 3.14.5 already permits `multidict<8.0,>=4.5`, so ccxt's exact pin is the sole blocker and must not be forced through an override. Note: idna stays at 3.18 for the same reason (ccxt 4.5.90-4.5.92 all hard-pin `idna==3.18`), so the idna 3.20 "outdated" row is expected to persist.
+**Why:** Recorded rather than bundled: major bumps need the compatibility review the dependency hygiene policy requires, and multidict is additionally unresolvable today because of ccxt's hard pin. As of 2026-11-08 the latest ccxt (4.5.92) still pins `multidict==6.9.1`, while aiohttp 3.14.5 already permits `multidict<8.0,>=4.5`, so ccxt's exact pin is the sole blocker and must not be forced through an override. Re-verified 2026-11-22 with the backend safe batch (ccxt 4.5.93): the hold is unchanged — 4.5.93 still hard-pins `multidict==6.9.1` plus `idna==3.18` and the full aiohttp stack, so nothing in the lock moved. Note: idna stays at 3.18 for the same reason (ccxt 4.5.90-4.5.93 all hard-pin `idna==3.18`), so the idna 3.20 "outdated" row is expected to persist.
 
 **Priority:** P3
 
@@ -105,6 +111,30 @@ than an empty one.
 to certify freshness for invalid payloads, so this is a double-safety against
 any future feed hiccup (or a client-side parse edge) rather than a fix for a
 known producer bug.
+
+**Priority:** P3
+
+### Split the audit-script precheck diagnostic for missing interpreters
+
+**Status:** Recorded 2026-11-22 as a follow-up of the completed "Fix the
+lock policy gate's tooling environment (uv --no-project + venv precheck)"
+entry (pre-landing review finding on PR #209; owner decision 2026-11-22:
+record, do not fix in that changeset).
+
+**What:** `scripts/audit_dependencies.sh` prechecks the selected interpreter
+with `"$PYTHON_BIN" -c "import packaging, pip_audit" 2>/dev/null`, so
+interpreter-level failures (a missing `.venv`, a dangling symlink,
+permission denied, a wrong-arch or mistyped `PYTHON_BIN`) are suppressed and
+reported as "is missing the dev tools (packaging, pip_audit). Install the
+development lock first." — the wrong diagnosis in each of those cases, where
+the interpreter itself does not exist or cannot run. Add an
+`[ -x "$PYTHON_BIN" ]` guard with a distinct "interpreter not found/not
+executable" message, keeping the import probe for the missing-tools case.
+
+**Why:** Behavior is fail-closed (`exit 1` before any step runs) and the
+common fresh-clone case still receives a roughly correct remedy, so this is
+diagnostic confusion only — recorded rather than fixed inside the review
+round cap.
 
 **Priority:** P3
 
@@ -150,6 +180,48 @@ cache-related test suites and the coverage ratchet, mypy, and
 pip-audit --strict; the pre-landing review panel (specialist, red-team,
 adversarial, targeted) found no blocking issues. No API, config, or
 schema change.
+### Fix the lock policy gate's tooling environment (uv --no-project + venv precheck)
+
+**Status:** Completed 2026-11-22 (PR #209) as six CI-green commits on
+`fix/compile-requirements-gate-python` (`0883c7b`, `586f979`, `0f8bf18`,
+`0980998`, `87be854`, `4116083`). Closes a demonstrated defect: the
+dependency lock policy gate (`scripts/check_dependency_locks.py`, which
+imports `packaging`) used to run under a shebang system Python that lacks
+`packaging`, failing with a bare `ModuleNotFoundError` **after** `pip-compile`
+had already written the regenerated locks.
+
+**What shipped:**
+- `scripts/compile_requirements.sh` runs the gate through
+  `uv run --no-project` (uv is already a dependency of this script via
+  `uvx`), so the gate always has `packaging` without relying on the host's
+  system python3. `--no-project` keeps `uv run` from discovering the
+  tooling-only root `pyproject.toml`, syncing `.venv` from it, and writing a
+  `uv.lock`.
+- The gate's `packaging` pin is derived at runtime from the freshly
+  regenerated dev lock (awk extraction, marker-stripped, explicit empty
+  guard) instead of a hardcoded transitive copy, so the standalone gate and
+  the CI gate (`ci.sh`, venv python) cannot drift apart when a future lock
+  regeneration moves the transitive `packaging` pin.
+- `scripts/audit_dependencies.sh` runs the gate through the repository's
+  venv python (overridable via `PYTHON_BIN`) and prechecks that the selected
+  interpreter has the dev tools (`import packaging, pip_audit`), so a
+  runtime-only venv fails with a clear "install the development lock first"
+  message before any step runs, instead of a bare import traceback.
+- `AGENTS.md` records the `uv --no-project` rule under the mandatory CI
+  checks (a project-context `uv run` treats the tooling-only `pyproject.toml`
+  as the project, syncs `.venv` from it, and writes a `uv.lock`).
+- `docs/howto-update-dependencies.md` documents the tool floor:
+  `uv >= 0.3.0` (`uv run --no-project` without `--preview` and `uvx` were
+  preview features until uv 0.3.0's "Stabilize preview features", #6166;
+  verified against the astral-sh/uv changelogs).
+
+**Verification:** full CI green on every branch commit
+(`cd scripts && ./ci.sh`); a lock regeneration on a clean tree is
+byte-identical (the gate is a no-op there); no `uv.lock` is created and the
+development venv is left intact. Pre-landing review: two review passes, the
+adversarial pass, and a scoped fix-check; findings fixed, deferred, or
+recorded (one diagnostic follow-up recorded in Next up; one pre-existing
+regeneration-ordering observation deferred with owner consent).
 
 **Priority:** P3
 
