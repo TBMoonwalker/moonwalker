@@ -110,6 +110,41 @@ known producer bug.
 
 ## Completed
 
+### Upgrade pip-tools to 7.7.0
+
+**Status:** Completed 2026-11-23 (PR #213) as the user-approved follow-up of
+the 2026-11-21 dependency hygiene wave. Plan of record:
+`~/.gstack/projects/TBMoonwalker-moonwalker/plans/2026-11-23-pip-tools-7-7.md`.
+
+**What shipped:**
+- `pip-tools` 7.6.2 -> 7.7.0 (dev-only tool: pin in `backend/requirements-dev.in`,
+  matching `PIP_TOOLS_VERSION` constant in `scripts/compile_requirements.sh`,
+  and the regenerated `backend/requirements-dev.txt` entry — version + 2 sha256).
+  Only the pip-tools entry moves in the dev lock; no packages added or dropped;
+  the prod lock is byte-identical (pip-tools is never installed in production
+  and never imported by application code).
+- 7.7.0 is a bug-fix/minor release: pip-sync no longer uninstalls a
+  direct-URL-installed pip, and a fix to PyPI JSON API URL construction
+  restores metadata lookups that were silently falling back to download
+  behavior. It is the first release after pip-tools' announced move from
+  Jazzband to PyPA (`pypa/pip-tools`; PyPI ownership sirosen + webknjaz, both
+  long-tenured pip-tools/pip maintainers).
+- Breaking changes reviewed and satisfied: the new `pip >= 26.2.2` floor is
+  already met by the existing `pip==26.3` dev pin (kept unchanged, PYSEC-2026-3721);
+  Python 3.9 removal is moot (repo runs 3.14); the new opt-in `stable` extra
+  (pip<=26.3) is consistent with the pin.
+
+**Verification:** per-version research before applying (PyPI latest, not
+yanked, `vulnerabilities: []`; OSV 0 vulnerabilities for all pip-tools
+versions; no CVE/malicious-release/compromise reports; both locked sha256
+digests exact-equal to the files PyPI publishes for 7.7.0). Full CI green on
+the shipped tree — including the dependency lock policy gate and
+pip-audit --strict with 7.7.0 in the dev lock; the recompile itself ran
+under 7.7.0 and reproduced the locked files (prod lock byte-identical).
+No API, config, or schema change.
+
+**Priority:** P3
+
 ### picomatch CVE-2026-112366 advisory withdrawn — CI npm audit green again
 
 **Status:** Closed 2026-11-19. The advisory behind the red CI `npm audit
