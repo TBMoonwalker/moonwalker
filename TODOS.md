@@ -83,7 +83,7 @@ confirmed it: the full frontend CI passed unmodified, and the typescript
 **What:** Bump the held major-version Python dependency in a dedicated, separately tested changeset:
 - `multidict` 6.9.1 -> 7.2.1 (transitive of aiohttp, hard-pinned to `6.9.1` by ccxt, so the resolver cannot move it until a future ccxt release relaxes the pin; revisit together with the next ccxt release that permits multidict 7).
 
-**Why:** Recorded rather than bundled: major bumps need the compatibility review the dependency hygiene policy requires, and multidict is additionally unresolvable today because of ccxt's hard pin. As of 2026-11-08 the latest ccxt (4.5.92) still pins `multidict==6.9.1`, while aiohttp 3.14.5 already permits `multidict<8.0,>=4.5`, so ccxt's exact pin is the sole blocker and must not be forced through an override. Note: idna stays at 3.18 for the same reason (ccxt 4.5.90-4.5.92 all hard-pin `idna==3.18`), so the idna 3.20 "outdated" row is expected to persist.
+**Why:** Recorded rather than bundled: major bumps need the compatibility review the dependency hygiene policy requires, and multidict is additionally unresolvable today because of ccxt's hard pin. As of 2026-11-08 the latest ccxt (4.5.92) still pins `multidict==6.9.1`, while aiohttp 3.14.5 already permits `multidict<8.0,>=4.5`, so ccxt's exact pin is the sole blocker and must not be forced through an override. Re-verified 2026-11-22 with the backend safe batch (ccxt 4.5.93): the hold is unchanged — 4.5.93 still hard-pins `multidict==6.9.1` plus `idna==3.18` and the full aiohttp stack, so nothing in the lock moved. Note: idna stays at 3.18 for the same reason (ccxt 4.5.90-4.5.93 all hard-pin `idna==3.18`), so the idna 3.20 "outdated" row is expected to persist.
 
 **Priority:** P3
 
