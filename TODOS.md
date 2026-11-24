@@ -140,46 +140,38 @@ round cap.
 
 ## Completed
 
-### Upgrade cachetools to 8.0.2
+### Upgrade pip-tools to 7.7.0
 
-**Status:** Completed 2026-11-23 (PR #212) as the major-upgrade changeset of
-the 2026-11-21 dependency hygiene pass. Plan of record:
-`~/.gstack/projects/TBMoonwalker-moonwalker/plans/2026-11-21-dependency-updates.md`
-(Phase C compatibility review).
+**Status:** Completed 2026-11-23 (PR #213) as the user-approved follow-up of
+the 2026-11-21 dependency hygiene wave. Plan of record:
+`~/.gstack/projects/TBMoonwalker-moonwalker/plans/2026-11-23-pip-tools-7-7.md`.
 
 **What shipped:**
-- `cachetools` 7.3.0 -> 8.0.2 (exact pin in `backend/requirements.in`; both
-  hash locks regenerated via `scripts/compile_requirements.sh`). Only
-  cachetools moves in both locks (the dev lock inherits prod); no packages
-  added or dropped.
-- The 8.0.0 breaking changes (Python 3.10 drop, deprecated `@cachedmethod`
-  features, `@cached(cache=None)`, decorator return-type/`cache_info`
-  changes) affect no API this repo uses: usage is `TTLCache(maxsize=...,
-  ttl=..., getsizeof=len)` plus contains/get/setitem/clear only, grep-
-  verified across `helper/async_cache.py`, `service/indicators.py`,
-  `service/data.py` and `service/data_history_sync.py` — no `cachedmethod`,
-  no `cached(` decorator, no subclassing of cachetools cache classes, and
-  no iteration over or deep-copy of any cache instance (the two behaviors
-  8.0.2 itself changes).
-- 8.0.2 itself is a pure bug-fix release: a deep-copy fix for TTLCache/
-  TLRUCache with `__deepcopy__` timers and a fix for updating TTLCache items
-  while iterating (skipped/repeated keys) — directly relevant, since this
-  codebase updates cache entries in place; 8.0.1 backported the LFUCache
-  deep-copy/pickle fix (broken since 6.1.0). Both locked sha256 digests
-  verified exact-equal to the files PyPI publishes for 8.0.2, and the
-  released artifact was verified byte-identical to the upstream v8.0.2 tag
-  by the pre-landing review.
-- Security/provenance: official `tkem/cachetools` project (long-tenured
-  single maintainer); pure-Python wheel, no dependencies, no install
-  scripts; no vulnerability, malicious-release, or compromise findings for
-  the exact 8.0.2 release (researched 2026-11-21; refreshed 2026-11-23:
-  8.0.2 still the PyPI latest, Snyk clean, CISA KEV zero entries).
+- `pip-tools` 7.6.2 -> 7.7.0 (dev-only tool: pin in `backend/requirements-dev.in`,
+  matching `PIP_TOOLS_VERSION` constant in `scripts/compile_requirements.sh`,
+  and the regenerated `backend/requirements-dev.txt` entry — version + 2 sha256).
+  Only the pip-tools entry moves in the dev lock; no packages added or dropped;
+  the prod lock is byte-identical (pip-tools is never installed in production
+  and never imported by application code).
+- 7.7.0 is a bug-fix/minor release: pip-sync no longer uninstalls a
+  direct-URL-installed pip, and a fix to PyPI JSON API URL construction
+  restores metadata lookups that were silently falling back to download
+  behavior. It is the first release after pip-tools' announced move from
+  Jazzband to PyPA (`pypa/pip-tools`; PyPI ownership sirosen + webknjaz, both
+  long-tenured pip-tools/pip maintainers).
+- Breaking changes reviewed and satisfied: the new `pip >= 26.2.2` floor is
+  already met by the existing `pip==26.3` dev pin (kept unchanged, PYSEC-2026-3721);
+  Python 3.9 removal is moot (repo runs 3.14); the new opt-in `stable` extra
+  (pip<=26.3) is consistent with the pin.
 
-**Verification:** full CI green on the shipped tree — including the
-cache-related test suites and the coverage ratchet, mypy, and
-pip-audit --strict; the pre-landing review panel (specialist, red-team,
-adversarial, targeted) found no blocking issues. No API, config, or
-schema change.
+**Verification:** per-version research before applying (PyPI latest, not
+yanked, `vulnerabilities: []`; OSV 0 vulnerabilities for all pip-tools
+versions; no CVE/malicious-release/compromise reports; both locked sha256
+digests exact-equal to the files PyPI publishes for 7.7.0). Full CI green on
+the shipped tree — including the dependency lock policy gate and
+pip-audit --strict with 7.7.0 in the dev lock; the recompile itself ran
+under 7.7.0 and reproduced the locked files (prod lock byte-identical).
+No API, config, or schema change.
 ### Fix the lock policy gate's tooling environment (uv --no-project + venv precheck)
 
 **Status:** Completed 2026-11-22 (PR #209) as six CI-green commits on
