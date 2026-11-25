@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import model
 import pytest
+from service import analytics as analytics_module
 from service.analytics import Analytics
 from tortoise import Tortoise
 
@@ -382,3 +383,105 @@ async def test_oversview_empty_returns_safe_defaults(analytics) -> None:
     assert result["summary"]["total_trades"] == 0
     assert result["heatmap_daily"] == []
     assert result["duration_extremes"] == {"longest": [], "shortest": []}
+
+
+def _install_aggregation_counter(monkeypatch) -> dict[str, int]:
+    """Count invocations of the module-level aggregation pass."""
+    calls: dict[str, int] = {"count": 0}
+    original = analytics_module.compute_stats_from_trades
+
+    def counting(rows: list) -> dict:
+        calls["count"] += 1
+        return original(rows)
+
+    monkeypatch.setattr(analytics_module, "compute_stats_from_trades", counting)
+    return calls
+
+
+async def _init_db_with_one_closed_trade(tmp_path) -> None:
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'cache.sqlite'}", modules={"models": ["model"]}
+    )
+    await Tortoise.generate_schemas()
+    now = datetime.now(UTC).isoformat()
+    await model.ClosedTrades.create(
+        symbol="BTC/USDC", lifecycle_mode="classic_dca", profit=2, close_date=now
+    )
+
+
+@pytest.mark.asyncio
+async def test_overview_single_aggregation_within_ttl(
+    tmp_path, monkeypatch, analytics
+) -> None:
+    """A second call inside the TTL returns the cached object, no re-aggregation."""
+    await _init_db_with_one_closed_trade(tmp_path)
+    calls = _install_aggregation_counter(monkeypatch)
+
+    first = await analytics.get_overview()
+    second = await analytics.get_overview()
+
+    assert calls["count"] == 1
+    assert first is second
+    assert first["summary"]["total_trades"] == 1
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_overview_cache_isolated_per_mode(tmp_path, analytics) -> None:
+    """Modes None/dynamic_dca/unknown keep independent cache entries."""
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'modes-cache.sqlite'}",
+        modules={"models": ["model"]},
+    )
+    await Tortoise.generate_schemas()
+    now = datetime.now(UTC).isoformat()
+    await model.ClosedTrades.create(
+        symbol="BTC/USDC", lifecycle_mode="classic_dca", profit=2, close_date=now
+    )
+    await model.ClosedTrades.create(
+        symbol="ETH/USDC", lifecycle_mode="accumulation", profit=9, close_date=now
+    )
+
+    dca_first = await analytics.get_overview("dynamic_dca")
+    unknown = await analytics.get_overview("unknown")
+    dca_second = await analytics.get_overview("dynamic_dca")
+    legacy = await analytics.get_overview()
+
+    assert dca_first is dca_second
+    assert dca_first is not unknown
+    assert dca_first["summary"]["total_profit"] == 2
+    assert unknown["summary"]["total_profit"] == 0
+    assert legacy["summary"]["total_profit"] == 11
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_overview_cache_clear_forces_recompute(
+    tmp_path, monkeypatch, analytics
+) -> None:
+    """The cache_clear seam forces a fresh aggregation for future callers."""
+    await _init_db_with_one_closed_trade(tmp_path)
+    calls = _install_aggregation_counter(monkeypatch)
+
+    first = await analytics.get_overview()
+    assert calls["count"] == 1
+    await analytics.get_overview.cache_clear()
+    second = await analytics.get_overview()
+
+    assert calls["count"] == 2
+    assert first is not second
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_overview_ttl_contract_pinned(tmp_path, analytics) -> None:
+    """The staleness contract pins TTL=60 and cached-object identity."""
+    assert analytics_module.ANALYTICS_CACHE_TTL_SECONDS == 60
+    await _init_db_with_one_closed_trade(tmp_path)
+
+    first = await analytics.get_overview()
+    second = await analytics.get_overview()
+
+    assert first is second
+    assert first["summary"]["total_trades"] == 1
+    await Tortoise.close_connections()

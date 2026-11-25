@@ -13,16 +13,27 @@ from service.ai_trust import build_analytics_payload
 
 # Only touch recent data to keep queries fast on large datasets.
 ANALYTICS_LOOKBACK_YEARS = 2
+# Cached overview lifetime. The overview is cached per (instance, mode) for
+# this many seconds, so a freshly closed trade may be up to this many seconds
+# behind until expiry or an explicit ``get_overview.cache_clear()``.
+ANALYTICS_CACHE_TTL_SECONDS = 60
 
 
 class Analytics:
     """On-demand aggregation over closed trades."""
 
+    @helper.async_ttl_cache(maxsize=4, ttl=ANALYTICS_CACHE_TTL_SECONDS)
     async def get_overview(self, mode: str | None = None) -> dict[str, Any]:
         """Return a complete analytics overview from closed trades.
 
         Aggregates summary, heatmap, per-symbol, duration extremes, drawdown,
         and profit distribution in a single pass.
+
+        The result is cached per (instance, mode) for
+        ANALYTICS_CACHE_TTL_SECONDS, so callers may see data up to 60s behind
+        after a trade closes (documented staleness bound). The cached dict is
+        read-only; clear it with ``await get_overview.cache_clear()`` when
+        the backing data changes and freshness matters.
         """
         cutoff = datetime.now(UTC) - timedelta(days=ANALYTICS_LOOKBACK_YEARS * 365)
 
