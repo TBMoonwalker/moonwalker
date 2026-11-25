@@ -202,6 +202,26 @@ performance-fix wave (task T1 of that review).
 
 **Priority:** P3
 
+### Remove the unreferenced legacy logo assets
+
+**Status:** Noted 2026-11-25 during the ship review of the 2026-11-25
+benchmark-fix wave (DT1 re-encoded the header logo as `logo-header.png`).
+
+**What:** Delete `frontend/src/assets/logo.png` and
+`frontend/src/assets/logo.svg` — neither is imported or referenced anywhere
+in `frontend/src`, the tests, or the build config (verified 2026-11-25; the
+only grep match is a string path inside
+`frontend/tests/assetsInlineLimit.test.cjs`, which exercises the
+inline-limit function, not the file).
+
+**Why:** The DT1 header-logo swap left them as dead weight in the asset
+source tree; a knip pass (or a manual prune) can confirm and remove them
+alongside any other dead assets.
+
+**Effort:** XS
+
+**Priority:** P3
+
 ## Completed
 
 ### Upgrade pip-tools to 7.7.0

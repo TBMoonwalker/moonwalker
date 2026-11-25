@@ -7,15 +7,16 @@ base.css (verified 2026-11-25 against the live CSS responses):
   https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;450;500
     &family=Source+Sans+3:wght@400;500;600&display=swap
 
-Manifest (27 files -> 37 @font-face rules):
+Manifest (23 files -> 37 @font-face rules):
   General Sans  400/500/600/700 -> general-sans/general-sans-<w>.woff2
       (4 static files; ITF Free Font License - served unmodified;
       see LICENSES/general-sans-ITF-note.md)
   IBM Plex Mono 400/500         -> ibm-plex-mono/ibm-plex-mono-<w>-<subset>.woff2
       (12 static files; SIL OFL 1.1, LICENSES/ibm-plex-mono-OFL.txt.
       There is NO 450 face: the old wght@450 request was silently dropped
-      by the API, and every 450 declaration resolves to 400 via CSS font
-      matching. Do not source a 450 file.)
+      by the API, and the legacy 450 declarations resolve to 500 via CSS
+      font matching (search-up-first). The CDN served this same 400+500
+      set, so rendering is unchanged. Do not source a 450 file.)
   Source Sans 3 400/500/600     -> source-sans-3/source-sans-3-<subset>.woff2
       (7 shared files; SIL OFL 1.1, LICENSES/source-sans-3-OFL.txt. The
       files are the provider's variable fonts (wght axis 200-900) and are

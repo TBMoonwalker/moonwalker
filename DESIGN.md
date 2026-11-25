@@ -40,11 +40,13 @@ typography:
   mono:
     fontFamily: "IBM Plex Mono, monospace"
     fontSize: "14px"
-    # IBM Plex Mono has no 450 face; a 450 request resolves to Regular 400
-    # via CSS font matching (verified 2026-11-25 against the Google Fonts
-    # CSS — the wght@450 parameter is silently dropped by the API). Monetary
-    # figures therefore render in Regular 400.
-    fontWeight: 400
+    # IBM Plex Mono has no 450 face. The legacy 450 declarations resolve to
+    # Medium 500 via CSS font matching (search-up-first; verified 2026-11-25
+    # in Chromium against the vendored faces — the 500 face loads, the 400
+    # face does not). The CDN served this same 400+500 set, so rendering is
+    # unchanged; the token is normalized to the weight that actually renders
+    # (same pattern as the 550->600 mission-panel normalization, DV-7).
+    fontWeight: 500
     lineHeight: 1.4
     letterSpacing: "normal"
 rounded:
