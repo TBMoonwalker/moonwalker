@@ -316,3 +316,105 @@ test('control-center mission summary renders at 16px', async ({ page, isMobile }
   await expect(missionSummary).toBeVisible()
   expect(await missionSummary.evaluate((el) => getComputedStyle(el).fontSize)).toBe('16px')
 })
+
+/**
+ * Self-hosted font-face contract (2026-11-25 design review, DV-1..DV-6):
+ * the 9 declared faces must resolve to the vendored woff2 files (a missing,
+ * corrupted, or misnamed file degrades to the fallback stack), the unused
+ * Zodiak faces carried by the old Fontshare CSS must not be vendored, and
+ * the mono face must keep its exact metrics (IBM Plex Mono is a true
+ * monospace: every glyph advances 600/1000em).
+ */
+const MONO_PROBE_STRING = '1,234.56'
+const MONO_PROBE_BASELINE_PX = 76.8 // 8 glyphs x 0.6em at 16px
+const MONO_PROBE_TOLERANCE = 0.02 // subpixel/platform rounding guard
+
+test('self-hosted font faces resolve to the vendored faces', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop font-face check')
+  await mockDashboardBoot(page, { closedRows: 12, perSymbol: 11 })
+  await openClosedTradesTable(page)
+
+  const fontState = await page.evaluate(async (probeString: string) => {
+    const faces: Array<[string, number]> = [
+      ['General Sans', 400],
+      ['General Sans', 500],
+      ['General Sans', 600],
+      ['General Sans', 700],
+      ['IBM Plex Mono', 400],
+      ['IBM Plex Mono', 500],
+      ['Source Sans 3', 400],
+      ['Source Sans 3', 500],
+      ['Source Sans 3', 600],
+    ]
+    // load() forces every declared face to fetch and parse; a face whose
+    // @font-face src is missing or broken resolves without loading, and
+    // check() below then reports false for it.
+    await Promise.all(faces.map(([family, weight]) => document.fonts.load(`${weight} 16px '${family}'`)))
+    const probe = document.createElement('span')
+    probe.style.cssText =
+      'position:absolute;visibility:hidden;white-space:pre;font-family:var(--mw-font-mono);font-size:16px;font-weight:400'
+    probe.textContent = probeString
+    document.body.appendChild(probe)
+    const monoWidth = probe.getBoundingClientRect().width
+    probe.remove()
+    const brand = document.querySelector('.brand-title')
+    const brandStyle = brand ? getComputedStyle(brand) : null
+    // The old Fontshare CSS also declared unused 'Zodiak' faces. A system
+    // font named Zodiak would make document.fonts.check() lie, so assert on
+    // the declared @font-face rules instead: the vendored set must not
+    // include them.
+    let zodiakFaceDeclared = false
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList
+      try {
+        rules = sheet.cssRules
+      } catch {
+        continue // cross-origin sheet; ours are local
+      }
+      for (const rule of Array.from(rules)) {
+        if (
+          rule instanceof CSSFontFaceRule &&
+          (rule.style.fontFamily || '').includes('Zodiak')
+        ) {
+          zodiakFaceDeclared = true
+        }
+      }
+    }
+    return {
+      loaded: faces.map(([family, weight]) => document.fonts.check(`${weight} 16px '${family}'`)),
+      zodiakFaceDeclared,
+      monoWidth,
+      brandFamily: brandStyle ? brandStyle.fontFamily : null,
+      brandWeight: brandStyle ? brandStyle.fontWeight : null,
+    }
+  }, MONO_PROBE_STRING)
+
+  expect(fontState.loaded).toEqual([true, true, true, true, true, true, true, true, true])
+  expect(fontState.zodiakFaceDeclared).toBe(false)
+  // A wrong face or a fallback family moves the width well outside the
+  // tolerance; system monospace fallbacks within ~0.5% are accepted because
+  // they are indistinguishable by metrics and are covered by the loaded
+  // assertions above.
+  expect(Math.abs(fontState.monoWidth - MONO_PROBE_BASELINE_PX) / MONO_PROBE_BASELINE_PX).toBeLessThan(
+    MONO_PROBE_TOLERANCE,
+  )
+  expect(fontState.brandFamily).toContain('General Sans')
+  expect(fontState.brandWeight).toBe('700')
+})
+
+test('mission alert title renders at the declared 600 emphasis', async ({ page, isMobile }) => {
+  // 550 was never an importable weight: CSS matching already resolved it to
+  // General Sans 600, so this change is a declaration normalization and the
+  // rendered result is pinned here (DV-7, 2026-11-25 design review).
+  test.skip(isMobile, 'desktop control-center check')
+  await mockDashboardBoot(page, { config: attentionDryRunConfig })
+  await page.goto('/control-center')
+  const title = page.locator('.mission-panel .n-alert-body__title').first()
+  await expect(title).toBeVisible()
+  const style = await title.evaluate((el) => {
+    const s = getComputedStyle(el)
+    return { family: s.fontFamily, weight: s.fontWeight }
+  })
+  expect(style.family).toContain('General Sans')
+  expect(style.weight).toBe('600')
+})
