@@ -138,6 +138,70 @@ round cap.
 
 **Priority:** P3
 
+### Split stable vendor code into its own chunk (manualChunks)
+
+**Status:** Deferred 2026-11-24 from the benchmark-findings plan-eng-review
+(`main @ 630c693`; decision D5 — owner chose to defer rather than build it
+in the performance-fix wave).
+
+**What:** Add `build.rollupOptions.output.manualChunks` to
+`frontend/vite.config.mts` so the stable vendor libraries (vue, naive-ui)
+land in their own chunk(s), separated from app code, so post-deploy
+returning visitors re-fetch only the app-code chunk.
+
+**Why:** There is no `manualChunks` today, and the 2026-11-24 benchmark
+measured 574KB of JS visited on `/` (≈407KB in the initial parse chain —
+already inside the 500KB budget, so no first-visit violation); returning
+visitors re-fetch ≈300–400KB of mixed vendor+app chunks after every deploy.
+The split is a deploy cache-rotation win for repeat visits, not a
+first-visit byte reduction.
+
+**Context:** ECharts (≈167KB) is already outside the initial chain
+(`defineAsyncComponent`, `frontend/src/views/TradesView.vue:22`); the
+remaining lever is the vendor/app split. Start at
+`build.rollupOptions.output.manualChunks` in `frontend/vite.config.mts`
+(currently only `chunkSizeWarningLimit: 600`). Proof requirement before
+keeping the change: re-run `/benchmark http://192.168.6.5:8160` and compare
+against `.gstack/benchmark-reports/baselines/baseline.json` (compare
+`range_ms` ranges, not point values — warm-machine runs vary ~2x).
+
+**Effort:** S
+
+**Priority:** P3
+
+### Invalidate the analytics overview cache when a trade closes
+
+**Status:** Deferred 2026-11-24 from the benchmark-findings plan-eng-review
+(`main @ 630c693`; decision D3 — owner chose TTL 60s without close-time
+invalidation for the `/statistics` aggregation).
+
+**What:** Clear the `/analytics/overview` TTL cache
+(`Analytics.get_overview.cache_clear()`) in the trade-finalize path where a
+trade moves to `ClosedTrades` (locate the seam in the orders service at
+implementation time), so the statistics page reflects a just-closed trade
+immediately instead of within the TTL.
+
+**Why:** The 60s TTL accepted in the performance-fix wave means the
+statistics page can lag a just-closed trade by up to 60s — an accepted
+contract, but this entry is the zero-staleness upgrade if that lag ever
+matters operationally.
+
+**Context:** The cache seam is `wrapper.cache_clear` on
+`backend/helper/async_cache.py` (`async_ttl_cache`, applied to
+`Analytics.get_overview` in `backend/service/analytics.py`). Two in-repo
+invalidation precedents to mirror: the timeline generation pattern
+(`_advance_timeline_generation`, `backend/service/statistic.py:762`) and
+the statistics read-cache invalidation
+(`invalidate_statistics_read_cache`, `backend/controller/statistics.py:82-88`).
+Add an invalidation test (a close → the next fetch recomputes).
+
+**Depends on:** The 60s analytics cache shipped by the 2026-11-24
+performance-fix wave (task T1 of that review).
+
+**Effort:** M
+
+**Priority:** P3
+
 ## Completed
 
 ### Upgrade pip-tools to 7.7.0
