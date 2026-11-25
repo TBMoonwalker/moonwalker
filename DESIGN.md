@@ -40,7 +40,11 @@ typography:
   mono:
     fontFamily: "IBM Plex Mono, monospace"
     fontSize: "14px"
-    fontWeight: 450
+    # IBM Plex Mono has no 450 face; a 450 request resolves to Regular 400
+    # via CSS font matching (verified 2026-11-25 against the Google Fonts
+    # CSS — the wght@450 parameter is silently dropped by the API). Monetary
+    # figures therefore render in Regular 400.
+    fontWeight: 400
     lineHeight: 1.4
     letterSpacing: "normal"
 rounded:
