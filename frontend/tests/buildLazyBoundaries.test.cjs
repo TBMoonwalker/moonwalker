@@ -50,6 +50,37 @@ test('production startup keeps charts behind lazy route boundaries', async () =>
                         chunk.facadeModuleId?.endsWith(`/views/${view}.vue`),
                     ), `${view} lost its lazy entry`)
                 }
+                // Self-hosted font subsets (DV-2): every woff2 must ship as a
+                // separate asset so unicode-range can gate it at the network
+                // level; inlining it as a data URI would defeat the gating.
+                //
+                // Value: protects=real production bundles emit all 23 woff2
+                // as separate hashed assets and no CSS inlines a font data
+                // URI; fails_when=assetsInlineLimit is removed or changed and
+                // unicode-range network gating is defeated (data-URI faces
+                // load fine, so the e2e font gate would stay green); why_new=
+                // the existing lazy-boundary assertions cover route chunks,
+                // not font assets; seam=none; no_claim=build output only -
+                // network-level fetch behavior is the e2e's.
+                const woff2Assets = Object.values(bundle).filter(
+                    (item) => item.type === 'asset' && item.fileName.endsWith('.woff2'),
+                )
+                assert.equal(
+                    woff2Assets.length,
+                    23,
+                    `expected the 23 vendored woff2 files as separate assets, found ${woff2Assets.length}`,
+                )
+                for (const item of Object.values(bundle)) {
+                    if (item.type !== 'asset' || !item.fileName.endsWith('.css')) continue
+                    const source = Buffer.isBuffer(item.source)
+                        ? item.source.toString('utf8')
+                        : String(item.source)
+                    assert.ok(
+                        !source.includes('data:font/woff2')
+                            && !source.includes('data:application/font-woff2'),
+                        `a font subset was inlined into ${item.fileName}`,
+                    )
+                }
                 checked = true
             },
         }],

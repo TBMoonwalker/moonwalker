@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import model
 import pytest
+from cachetools import TTLCache
 from service import analytics as analytics_module
 from service.analytics import Analytics
 from tortoise import Tortoise
@@ -484,4 +485,49 @@ async def test_overview_ttl_contract_pinned(tmp_path, analytics) -> None:
 
     assert first is second
     assert first["summary"]["total_trades"] == 1
+    await Tortoise.close_connections()
+
+
+def _overview_cache() -> TTLCache:
+    """Return the TTLCache the get_overview decorator closes over."""
+    closure = Analytics.get_overview.__closure__ or ()
+    for cell in closure:
+        if isinstance(cell.cell_contents, TTLCache):
+            return cell.cell_contents
+    raise AssertionError("get_overview TTL cache not found in decorator closure")
+
+
+# Value: protects=get_overview TTL expiry at the 60s staleness bound
+# (a call after the TTL recomputes into a new object); fails_when=the
+# ttl= argument is dropped or the cache stops expiring; why_new=existing
+# tests observe only the in-TTL window and the constant pin; seam=none
+# (reads the existing decorator closure, no production hook);
+# no_claim=deterministic clock swap inside cachetools' private _Timer -
+# real wall-clock expiry is not waited out.
+@pytest.mark.asyncio
+async def test_overview_cache_expires_after_ttl(
+    tmp_path, monkeypatch, analytics
+) -> None:
+    """A call after the 60s staleness bound recomputes, not reuses the cache."""
+    await _init_db_with_one_closed_trade(tmp_path)
+    calls = _install_aggregation_counter(monkeypatch)
+    cache = _overview_cache()
+    # cachetools 8 wraps the timer in a private _Timer behind a read-only
+    # property, so swap the wrapped clock function directly. The fake clock
+    # is frozen at the insertion instant, keeping the expiry deterministic.
+    real_clock = cache.timer
+    clock = {"base": real_clock(), "offset": 0.0}
+
+    def fake_clock() -> float:
+        return clock["base"] + clock["offset"]
+
+    monkeypatch.setattr(cache.timer, "_Timer__timer", fake_clock)
+
+    first = await analytics.get_overview()
+    assert calls["count"] == 1
+    clock["offset"] = float(analytics_module.ANALYTICS_CACHE_TTL_SECONDS) + 1.0
+    second = await analytics.get_overview()
+
+    assert calls["count"] == 2
+    assert second is not first
     await Tortoise.close_connections()
