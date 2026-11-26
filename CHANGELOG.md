@@ -7,10 +7,15 @@ All notable changes to Moonwalker are documented in this file.
 ### Changed
 
 - The dashboard no longer asks third-party CDNs for its fonts. All nine
-  font faces the UI uses (General Sans, IBM Plex Mono, Source Sans 3) are
-  now served by the app itself, so a page load makes no external font
-  requests and the look no longer depends on Fontshare or Google Fonts
-  being reachable.
+  font faces the UI uses (Inter, IBM Plex Mono, Source Sans 3) are now
+  served by the app itself, so a page load makes no external font
+  requests and the look no longer depends on external font services being
+  reachable. General Sans was replaced by Inter (SIL OFL 1.1): General
+  Sans is licensed under the ITF Free Font License, which permits
+  self-hosting but prohibits redistributing the font files — explicitly
+  including bundling them in a public source repository — so its bytes
+  cannot ship with this open-source codebase. Inter keeps the same
+  400/500/600/700 weight set and the same fallback stack.
 - The header logo is a re-encoded image that keeps the same look at
   roughly a tenth of the transfer size (about 112 KB down to 20 KB),
   saving around 91 KB on every page load.

@@ -1,3 +1,6 @@
+// TEMP-FONTDIAG (2026-11-26): diagnose the ubuntu-24.04 chromium mono-width
+// failure on PR #214 - remove after the root cause is fixed.
+import { execSync } from 'node:child_process'
 import { expect, test, type Page } from '@playwright/test'
 
 /**
@@ -324,10 +327,43 @@ test('control-center mission summary renders at 16px', async ({ page, isMobile }
  * Zodiak faces carried by the old Fontshare CSS must not be vendored, and
  * the mono face must keep its exact metrics (IBM Plex Mono is a true
  * monospace: every glyph advances 600/1000em).
+ *
+ * The face-state gate is what makes this spec real: document.fonts.check()
+ * returns true vacuously when no @font-face matches the requested family at
+ * all (verified 2026-11-26), so a check()-only gate stays green when the
+ * rules or files are missing entirely - the probe then silently renders in
+ * the platform fallback, and only the metric assertion notices, and only if
+ * the platform fallback differs from 0.6em (a coincidence that holds on
+ * macOS, where `monospace` resolves to a 600-unit face). Every declared
+ * face must therefore exist in the document as a FontFace that is loaded
+ * and whose unicode-range covers the probe digits; with that in place the
+ * width assertion pins the exact metrics of the loaded bytes.
  */
 const MONO_PROBE_STRING = '1,234.56'
 const MONO_PROBE_BASELINE_PX = 76.8 // 8 glyphs x 0.6em at 16px
 const MONO_PROBE_TOLERANCE = 0.02 // subpixel/platform rounding guard
+
+test.beforeAll(() => {
+  try {
+    console.log(
+      '[fontdiag] fc-match monospace:',
+      execSync('fc-match monospace', { encoding: 'utf8' }).trim(),
+    )
+  } catch (e) {
+    console.log('[fontdiag] fc-match unavailable:', (e as Error).message.slice(0, 200))
+  }
+  try {
+    console.log(
+      '[fontdiag] spacing=10 fonts:',
+      execSync('fc-list :spacing=10 family 2>/dev/null | sort -u | head -15', { encoding: 'utf8' })
+        .trim()
+        .split('\n')
+        .join(' | '),
+    )
+  } catch {
+    console.log('[fontdiag] fc-list unavailable (no fontconfig)')
+  }
+})
 
 test('self-hosted font faces resolve to the vendored faces', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop font-face check')
@@ -336,10 +372,10 @@ test('self-hosted font faces resolve to the vendored faces', async ({ page, isMo
 
   const fontState = await page.evaluate(async (probeString: string) => {
     const faces: Array<[string, number]> = [
-      ['General Sans', 400],
-      ['General Sans', 500],
-      ['General Sans', 600],
-      ['General Sans', 700],
+      ['Inter', 400],
+      ['Inter', 500],
+      ['Inter', 600],
+      ['Inter', 700],
       ['IBM Plex Mono', 400],
       ['IBM Plex Mono', 500],
       ['Source Sans 3', 400],
@@ -347,16 +383,56 @@ test('self-hosted font faces resolve to the vendored faces', async ({ page, isMo
       ['Source Sans 3', 600],
     ]
     // load() forces every declared face to fetch and parse; a face whose
-    // @font-face src is missing or broken resolves without loading, and
-    // check() below then reports false for it.
+    // @font-face src is missing or broken resolves in the error state, and
+    // the face-state assertions below then fail for it.
     await Promise.all(faces.map(([family, weight]) => document.fonts.load(`${weight} 16px '${family}'`)))
+    const coversCodePoint = (unicodeRange: string, code: number) =>
+      unicodeRange
+        .split(',')
+        .map((part) => part.trim().replace(/^U\+?/i, ''))
+        .some((part) => {
+          const [lo, hi] = part.split('-').map((s) => parseInt(s, 16))
+          return code >= lo && code <= (hi ?? lo)
+        })
+    const faceStates = faces.map(([family, weight]) => {
+      const matching = [...document.fonts].filter(
+        (face) => face.family === family && face.weight === String(weight),
+      )
+      return {
+        family,
+        weight: String(weight),
+        present: matching.length > 0,
+        loadedCovering: matching.some(
+          (face) => face.status === 'loaded' && coversCodePoint(face.unicodeRange, 0x31),
+        ),
+      }
+    })
     const probe = document.createElement('span')
     probe.style.cssText =
       'position:absolute;visibility:hidden;white-space:pre;font-family:var(--mw-font-mono);font-size:16px;font-weight:400'
     probe.textContent = probeString
     document.body.appendChild(probe)
     const monoWidth = probe.getBoundingClientRect().width
+    const probeStyle = (() => {
+      const cs = getComputedStyle(probe)
+      return {
+        fontFamily: cs.fontFamily,
+        fontSize: cs.fontSize,
+        letterSpacing: cs.letterSpacing,
+        fontStretch: cs.fontStretch,
+      }
+    })()
     probe.remove()
+    // TEMP-FONTDIAG: isolate which family each probe renders in
+    const measureWith = (family: string) => {
+      const s = document.createElement('span')
+      s.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font-family:${family};font-size:16px;font-weight:400`
+      s.textContent = probeString
+      document.body.appendChild(s)
+      const w = s.getBoundingClientRect().width
+      s.remove()
+      return w
+    }
     const brand = document.querySelector('.brand-title')
     const brandStyle = brand ? getComputedStyle(brand) : null
     // The old Fontshare CSS also declared unused 'Zodiak' faces. A system
@@ -381,31 +457,57 @@ test('self-hosted font faces resolve to the vendored faces', async ({ page, isMo
       }
     }
     return {
-      loaded: faces.map(([family, weight]) => document.fonts.check(`${weight} 16px '${family}'`)),
+      faceStates,
       zodiakFaceDeclared,
       monoWidth,
+      probeStyle,
+      devicePixelRatio,
+      // TEMP-FONTDIAG: per-family probe widths (remove with the diagnostics)
+      diagWidths: {
+        plexMonoOnly: measureWith("'IBM Plex Mono'"),
+        systemMono: measureWith('monospace'),
+      },
       brandFamily: brandStyle ? brandStyle.fontFamily : null,
       brandWeight: brandStyle ? brandStyle.fontWeight : null,
     }
   }, MONO_PROBE_STRING)
 
-  expect(fontState.loaded).toEqual([true, true, true, true, true, true, true, true, true])
+  // TEMP-FONTDIAG: log the full state for the CI run (remove after diagnosis)
+  console.log('[fontdiag]', JSON.stringify(fontState))
+
+  // Face-state gate: every declared face must be a real, loaded @font-face
+  // whose unicode-range covers the probe digits. check() alone cannot prove
+  // this - with no matching rule at all it returns true (vacuously) and the
+  // probe silently renders in the platform fallback.
+  for (const faceState of fontState.faceStates) {
+    expect(
+      faceState.present,
+      `${faceState.family} ${faceState.weight}: no @font-face in the document - the probe would render in the platform fallback`,
+    ).toBe(true)
+    expect(
+      faceState.loadedCovering,
+      `${faceState.family} ${faceState.weight}: no loaded face covering the probe digits - the probe would render in the platform fallback`,
+    ).toBe(true)
+  }
   expect(fontState.zodiakFaceDeclared).toBe(false)
-  // A wrong face or a fallback family moves the width well outside the
-  // tolerance; system monospace fallbacks within ~0.5% are accepted because
-  // they are indistinguishable by metrics and are covered by the loaded
-  // assertions above.
+  // With a loaded, probe-covering face guaranteed by the gate above, the
+  // width must be that face's own metrics. A wrong, corrupted, or
+  // mis-substituted file that still parses and loads shows up here (any
+  // non-0.6em fallback would as well); subpixel rounding stays inside the
+  // tolerance.
   expect(Math.abs(fontState.monoWidth - MONO_PROBE_BASELINE_PX) / MONO_PROBE_BASELINE_PX).toBeLessThan(
     MONO_PROBE_TOLERANCE,
   )
-  expect(fontState.brandFamily).toContain('General Sans')
+  expect(fontState.brandFamily).toContain('Inter')
   expect(fontState.brandWeight).toBe('700')
 })
 
 test('mission alert title renders at the declared 600 emphasis', async ({ page, isMobile }) => {
   // 550 was never an importable weight: CSS matching already resolved it to
-  // General Sans 600, so this change is a declaration normalization and the
-  // rendered result is pinned here (DV-7, 2026-11-25 design review).
+  // Inter 600 (static face set; search-up-first), so this change is a
+  // declaration normalization and the rendered result is pinned here (DV-7,
+  // 2026-11-25 design review; Inter replaced General Sans 2026-11-26 for
+  // license compliance - see LICENSES/inter-OFL.txt).
   test.skip(isMobile, 'desktop control-center check')
   await mockDashboardBoot(page, { config: attentionDryRunConfig })
   await page.goto('/control-center')
@@ -415,6 +517,6 @@ test('mission alert title renders at the declared 600 emphasis', async ({ page, 
     const s = getComputedStyle(el)
     return { family: s.fontFamily, weight: s.fontWeight }
   })
-  expect(style.family).toContain('General Sans')
+  expect(style.family).toContain('Inter')
   expect(style.weight).toBe('600')
 })

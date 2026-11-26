@@ -3,14 +3,26 @@
 Exact bytes served by the CDN URLs formerly imported at the top of
 base.css (verified 2026-11-25 against the live CSS responses):
 
-  https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap
   https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;450;500
     &family=Source+Sans+3:wght@400;500;600&display=swap
 
-Manifest (23 files -> 37 @font-face rules):
-  General Sans  400/500/600/700 -> general-sans/general-sans-<w>.woff2
-      (4 static files; ITF Free Font License - served unmodified;
-      see LICENSES/general-sans-ITF-note.md)
+Inter was vendored directly from the Google Fonts css2 API
+(https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap,
+retrieved 2026-11-26) - it was never served from a CDN by this app.
+
+Manifest (20 files -> 37 @font-face rules):
+  Inter 400/500/600/700  -> inter/inter-latin.woff2
+      (1 shared file; SIL OFL 1.1, LICENSES/inter-OFL.txt. The file is the
+      provider's variable font (wght axis 100-900) and is referenced once per
+      declared weight, exactly as the Google Fonts CSS does. It is the latin
+      subset only; non-Latin text falls back to the Source Sans 3 subsets
+      below. It replaces General Sans (2026-11-26), whose ITF Free Font
+      License (section 02) prohibits redistributing the font files -
+      explicitly including distribution through a repository or publicly
+      accessible server - so those bytes cannot be vendored in this public
+      repository. Inter keeps the same 400/500/600/700 weight set, the same
+      self-hosted architecture, and the closest available OFL metrics to the
+      former face.)
   IBM Plex Mono 400/500         -> ibm-plex-mono/ibm-plex-mono-<w>-<subset>.woff2
       (12 static files; SIL OFL 1.1, LICENSES/ibm-plex-mono-OFL.txt.
       There is NO 450 face: the old wght@450 request was silently dropped
@@ -28,35 +40,39 @@ Provider unicode-ranges are preserved per file. woff2 only.
 */
 
 @font-face {
-  font-family: 'General Sans';
+  font-family: 'Inter';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('./general-sans/general-sans-400.woff2') format('woff2');
+  src: url('./inter/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: 'General Sans';
+  font-family: 'Inter';
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url('./general-sans/general-sans-500.woff2') format('woff2');
+  src: url('./inter/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: 'General Sans';
+  font-family: 'Inter';
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url('./general-sans/general-sans-600.woff2') format('woff2');
+  src: url('./inter/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: 'General Sans';
+  font-family: 'Inter';
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url('./general-sans/general-sans-700.woff2') format('woff2');
+  src: url('./inter/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {

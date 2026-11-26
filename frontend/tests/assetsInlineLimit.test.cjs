@@ -23,7 +23,7 @@ test('assetsInlineLimit keeps woff2 out of the inline threshold', async () => {
     const { default: config } = await import('../vite.config.mts')
     const limit = config.build.assetsInlineLimit
     assert.equal(typeof limit, 'function', 'assetsInlineLimit must be a function')
-    assert.equal(limit('assets/fonts/general-sans-400.woff2', CONTENT(100)), false)
+    assert.equal(limit('assets/fonts/inter-latin.woff2', CONTENT(100)), false)
     assert.equal(limit('assets/fonts/x.woff2', CONTENT(1024 * 1024)), false)
 })
 

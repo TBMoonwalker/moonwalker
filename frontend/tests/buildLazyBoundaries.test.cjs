@@ -54,9 +54,10 @@ test('production startup keeps charts behind lazy route boundaries', async () =>
                 // separate asset so unicode-range can gate it at the network
                 // level; inlining it as a data URI would defeat the gating.
                 //
-                // Value: protects=real production bundles emit all 23 woff2
-                // as separate hashed assets and no CSS inlines a font data
-                // URI; fails_when=assetsInlineLimit is removed or changed and
+                // Value: protects=real production bundles emit all 20 woff2
+                // (Inter 1 + IBM Plex Mono 12 + Source Sans 3 7) as separate
+                // hashed assets and no CSS inlines a font data URI;
+                // fails_when=assetsInlineLimit is removed or changed and
                 // unicode-range network gating is defeated (data-URI faces
                 // load fine, so the e2e font gate would stay green); why_new=
                 // the existing lazy-boundary assertions cover route chunks,
@@ -67,8 +68,8 @@ test('production startup keeps charts behind lazy route boundaries', async () =>
                 )
                 assert.equal(
                     woff2Assets.length,
-                    23,
-                    `expected the 23 vendored woff2 files as separate assets, found ${woff2Assets.length}`,
+                    20,
+                    `expected the 20 vendored woff2 files as separate assets, found ${woff2Assets.length}`,
                 )
                 for (const item of Object.values(bundle)) {
                     if (item.type !== 'asset' || !item.fileName.endsWith('.css')) continue

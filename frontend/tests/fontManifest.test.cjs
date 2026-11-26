@@ -23,10 +23,10 @@ const FONTS_CSS = path.join(FONTS_DIR, 'fonts.css')
 const BASE_CSS = path.join(__dirname, '..', 'src', 'assets', 'base.css')
 
 const DECLARED_FACES = new Set([
-    ['General Sans', '400'],
-    ['General Sans', '500'],
-    ['General Sans', '600'],
-    ['General Sans', '700'],
+    ['Inter', '400'],
+    ['Inter', '500'],
+    ['Inter', '600'],
+    ['Inter', '700'],
     ['IBM Plex Mono', '400'],
     ['IBM Plex Mono', '500'],
     ['Source Sans 3', '400'],
