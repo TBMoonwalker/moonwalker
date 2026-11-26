@@ -433,6 +433,23 @@ test('self-hosted font faces resolve to the vendored faces', async ({ page, isMo
       s.remove()
       return w
     }
+    // TEMP-FONTDIAG: font-metric (canvas) vs layout (getBoundingClientRect)
+    // quantization check - canvas reads the font's hmtx advances without the
+    // layout engine's pixel-grid rounding
+    const canvasMeasure = (font: string) => {
+      const c = document.createElement('canvas').getContext('2d')
+      c.font = font
+      return c.measureText(probeString).width
+    }
+    const measureGeometric = (family: string) => {
+      const s = document.createElement('span')
+      s.style.cssText = `position:absolute;visibility:hidden;white-space:pre;text-rendering:geometricPrecision;font-family:${family};font-size:16px;font-weight:400`
+      s.textContent = probeString
+      document.body.appendChild(s)
+      const w = s.getBoundingClientRect().width
+      s.remove()
+      return w
+    }
     const brand = document.querySelector('.brand-title')
     const brandStyle = brand ? getComputedStyle(brand) : null
     // The old Fontshare CSS also declared unused 'Zodiak' faces. A system
@@ -466,6 +483,10 @@ test('self-hosted font faces resolve to the vendored faces', async ({ page, isMo
       diagWidths: {
         plexMonoOnly: measureWith("'IBM Plex Mono'"),
         systemMono: measureWith('monospace'),
+        canvasPlexMono: canvasMeasure('400 16px "IBM Plex Mono"'),
+        canvasSystemMono: canvasMeasure('400 16px monospace'),
+        geometricPlexMono: measureGeometric("'IBM Plex Mono'"),
+        geometricSystemMono: measureGeometric('monospace'),
       },
       brandFamily: brandStyle ? brandStyle.fontFamily : null,
       brandWeight: brandStyle ? brandStyle.fontWeight : null,
