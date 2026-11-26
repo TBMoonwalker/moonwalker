@@ -577,7 +577,8 @@ scoped across modes. Omitting `mode` retains the unfiltered response. Older
 closed records are attributed to accumulation when matching deal, activation and
 order evidence is available, and to classic DCA when their mode is provable (the
 closure predates accumulation on that database, or the database never ran
-accumulation); other records remain unclassified.
+accumulation); other records remain unclassified. The response is cached per
+mode for 60 seconds, so it can lag a just-closed trade by up to 60 seconds.
 
 ## Market Data
 

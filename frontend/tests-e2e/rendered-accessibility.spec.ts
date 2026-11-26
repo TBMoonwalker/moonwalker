@@ -316,3 +316,166 @@ test('control-center mission summary renders at 16px', async ({ page, isMobile }
   await expect(missionSummary).toBeVisible()
   expect(await missionSummary.evaluate((el) => getComputedStyle(el).fontSize)).toBe('16px')
 })
+
+/**
+ * Self-hosted font-face contract (2026-11-25 design review, DV-1..DV-6):
+ * the 9 declared faces must resolve to the vendored woff2 files (a missing,
+ * corrupted, or misnamed file degrades to the fallback stack), the unused
+ * Zodiak faces carried by the old Fontshare CSS must not be vendored, and
+ * the mono face must keep its exact metrics (IBM Plex Mono is a true
+ * monospace: every glyph advances 600/1000em).
+ *
+ * The face-state gate is what makes this spec real: document.fonts.check()
+ * returns true vacuously when no @font-face matches the requested family at
+ * all (verified 2026-11-26), so a check()-only gate stays green when the
+ * rules or files are missing entirely - the probe then silently renders in
+ * the platform fallback, and only the metric assertion notices, and only if
+ * the platform fallback differs from 0.6em (a coincidence that holds on
+ * macOS, where `monospace` resolves to a 600-unit face; the ubuntu-24.04
+ * CI runner's DejaVu Sans Mono measures 0.60205em). Every declared face
+ * must therefore exist in the document as a FontFace that is loaded and
+ * whose unicode-range covers the probe digits; with that in place the width
+ * assertion pins the exact metrics of the loaded bytes.
+ *
+ * The probe measures with text-rendering: geometricPrecision: default
+ * rendering quantizes glyph advances to the pixel grid in the headless
+ * chromium on ubuntu-24.04 (the probe measured 80px, i.e. 0.625em per
+ * glyph, against the font's true 0.6em - verified 2026-11-26 in CI), while
+ * geometricPrecision reports the font's hmtx advances, which are identical
+ * on macOS and linux (76.8125px for this probe).
+ */
+const MONO_PROBE_STRING = '1,234.56'
+const MONO_PROBE_BASELINE_PX = 76.8 // 8 glyphs x 0.6em at 16px
+const MONO_PROBE_TOLERANCE = 0.02 // subpixel/platform rounding guard
+
+test('self-hosted font faces resolve to the vendored faces', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'desktop font-face check')
+  await mockDashboardBoot(page, { closedRows: 12, perSymbol: 11 })
+  await openClosedTradesTable(page)
+
+  const fontState = await page.evaluate(async (probeString: string) => {
+    const faces: Array<[string, number]> = [
+      ['Inter', 400],
+      ['Inter', 500],
+      ['Inter', 600],
+      ['Inter', 700],
+      ['IBM Plex Mono', 400],
+      ['IBM Plex Mono', 500],
+      ['Source Sans 3', 400],
+      ['Source Sans 3', 500],
+      ['Source Sans 3', 600],
+    ]
+    // load() forces every declared face to fetch and parse; a face whose
+    // @font-face src is missing or broken resolves in the error state, and
+    // the face-state assertions below then fail for it.
+    await Promise.all(faces.map(([family, weight]) => document.fonts.load(`${weight} 16px '${family}'`)))
+    const coversCodePoint = (unicodeRange: string, code: number) =>
+      unicodeRange
+        .split(',')
+        .map((part) => part.trim().replace(/^U\+?/i, ''))
+        .some((part) => {
+          const [lo, hi] = part.split('-').map((s) => parseInt(s, 16))
+          return code >= lo && code <= (hi ?? lo)
+        })
+    const faceStates = faces.map(([family, weight]) => {
+      const matching = [...document.fonts].filter(
+        (face) => face.family === family && face.weight === String(weight),
+      )
+      return {
+        family,
+        weight: String(weight),
+        present: matching.length > 0,
+        loadedCovering: matching.some(
+          (face) => face.status === 'loaded' && coversCodePoint(face.unicodeRange, 0x31),
+        ),
+      }
+    })
+    // geometricPrecision keeps the measurement on the font's hmtx advances:
+    // default rendering quantizes advances to the pixel grid on headless
+    // chromium (linux) and would drift the assertion by platform.
+    const probe = document.createElement('span')
+    probe.style.cssText =
+      'position:absolute;visibility:hidden;white-space:pre;text-rendering:geometricPrecision;font-family:var(--mw-font-mono);font-size:16px;font-weight:400'
+    probe.textContent = probeString
+    document.body.appendChild(probe)
+    const monoWidth = probe.getBoundingClientRect().width
+    probe.remove()
+    const brand = document.querySelector('.brand-title')
+    const brandStyle = brand ? getComputedStyle(brand) : null
+    // The old Fontshare CSS also declared unused 'Zodiak' faces. A system
+    // font named Zodiak would make document.fonts.check() lie, so assert on
+    // the declared @font-face rules instead: the vendored set must not
+    // include them.
+    let zodiakFaceDeclared = false
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList
+      try {
+        rules = sheet.cssRules
+      } catch {
+        continue // cross-origin sheet; ours are local
+      }
+      for (const rule of Array.from(rules)) {
+        if (
+          rule instanceof CSSFontFaceRule &&
+          (rule.style.fontFamily || '').includes('Zodiak')
+        ) {
+          zodiakFaceDeclared = true
+        }
+      }
+    }
+    return {
+      faceStates,
+      zodiakFaceDeclared,
+      monoWidth,
+      brandFamily: brandStyle ? brandStyle.fontFamily : null,
+      brandWeight: brandStyle ? brandStyle.fontWeight : null,
+    }
+  }, MONO_PROBE_STRING)
+
+  // Face-state gate: every declared face must be a real, loaded @font-face
+  // whose unicode-range covers the probe digits. check() alone cannot prove
+  // this - with no matching rule at all it returns true (vacuously) and the
+  // probe silently renders in the platform fallback.
+  for (const faceState of fontState.faceStates) {
+    expect(
+      faceState.present,
+      `${faceState.family} ${faceState.weight}: no @font-face in the document - the probe would render in the platform fallback`,
+    ).toBe(true)
+    expect(
+      faceState.loadedCovering,
+      `${faceState.family} ${faceState.weight}: no loaded face covering the probe digits - the probe would render in the platform fallback`,
+    ).toBe(true)
+  }
+  expect(fontState.zodiakFaceDeclared).toBe(false)
+  // With a loaded, probe-covering face guaranteed by the gate above, the
+  // width must be that face's own metrics. A wrong, corrupted, or
+  // mis-substituted file whose advances differ materially still parses and
+  // loads and shows up here; a system monospace within this tolerance is
+  // indistinguishable by metrics, but the face-state gate above already
+  // rules out the missing-face fallback. Subpixel rounding stays inside the
+  // tolerance.
+  expect(Math.abs(fontState.monoWidth - MONO_PROBE_BASELINE_PX) / MONO_PROBE_BASELINE_PX).toBeLessThan(
+    MONO_PROBE_TOLERANCE,
+  )
+  expect(fontState.brandFamily).toContain('Inter')
+  expect(fontState.brandWeight).toBe('700')
+})
+
+test('mission alert title renders at the declared 600 emphasis', async ({ page, isMobile }) => {
+  // 550 was never an importable weight: CSS matching already resolved it to
+  // Inter 600 (static face set; search-up-first), so this change is a
+  // declaration normalization and the rendered result is pinned here (DV-7,
+  // 2026-11-25 design review; Inter replaced General Sans 2026-11-26 for
+  // license compliance - see LICENSES/inter-OFL.txt).
+  test.skip(isMobile, 'desktop control-center check')
+  await mockDashboardBoot(page, { config: attentionDryRunConfig })
+  await page.goto('/control-center')
+  const title = page.locator('.mission-panel .n-alert-body__title').first()
+  await expect(title).toBeVisible()
+  const style = await title.evaluate((el) => {
+    const s = getComputedStyle(el)
+    return { family: s.fontFamily, weight: s.fontWeight }
+  })
+  expect(style.family).toContain('Inter')
+  expect(style.weight).toBe('600')
+})

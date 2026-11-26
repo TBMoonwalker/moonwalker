@@ -30,6 +30,14 @@ export default defineConfig({
     ...(lowMemoryBuild ? { minify: false } : {}),
     cssCodeSplit: !lowMemoryBuild,
     chunkSizeWarningLimit: 600,
+    // Keep the self-hosted woff2 files as separate files so unicode-range can
+    // gate each subset at the network level (2026-11-25 design review DV-2).
+    // Inlining small subsets as data URIs would ship them inside the CSS on
+    // every page, even though the dashboard never renders those scripts.
+    // Everything else keeps Vite's default 4KB inline threshold.
+    assetsInlineLimit(filePath, content) {
+      return filePath.endsWith('.woff2') ? false : content.length < 4096
+    },
     // Automatic splitting keeps route-only dependencies out of startup.
   },
   resolve: {

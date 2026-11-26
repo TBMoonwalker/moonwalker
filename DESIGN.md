@@ -20,19 +20,19 @@ colors:
   info: "#356d86"
 typography:
   display:
-    fontFamily: "General Sans, Source Sans 3, sans-serif"
+    fontFamily: "Inter, Source Sans 3, sans-serif"
     fontSize: "clamp(1.5rem, 2vw, 2.25rem)"
     fontWeight: 600
     lineHeight: 1.2
     letterSpacing: "-0.03em"
   body:
-    fontFamily: "General Sans, Source Sans 3, sans-serif"
+    fontFamily: "Inter, Source Sans 3, sans-serif"
     fontSize: "16px"
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "normal"
   label:
-    fontFamily: "General Sans, Source Sans 3, sans-serif"
+    fontFamily: "Inter, Source Sans 3, sans-serif"
     fontSize: "14px"
     fontWeight: 600
     lineHeight: 1.2
@@ -40,7 +40,13 @@ typography:
   mono:
     fontFamily: "IBM Plex Mono, monospace"
     fontSize: "14px"
-    fontWeight: 450
+    # IBM Plex Mono has no 450 face. The legacy 450 declarations resolve to
+    # Medium 500 via CSS font matching (search-up-first; verified 2026-11-25
+    # in Chromium against the vendored faces — the 500 face loads, the 400
+    # face does not). The CDN served this same 400+500 set, so rendering is
+    # unchanged; the token is normalized to the weight that actually renders
+    # (same pattern as the 550->600 mission-panel normalization, DV-7).
+    fontWeight: 500
     lineHeight: 1.4
     letterSpacing: "normal"
 rounded:
@@ -110,7 +116,7 @@ Use green selectively on active navigation, primary controls, highlighted data, 
 
 ## Typography
 
-General Sans is the display and UI face, with Source Sans 3 as fallback. IBM Plex Mono is for monetary values, ratios, diagnostics, and other tabular figures. The scale remains `12 / 14 / 16 / 20 / 24 / 32 / 40 / 56 px`; body text defaults to 16px, labels to 14px, and dense table text may be 14px. The three trade-ledger feeds (Open/Closed/Unsellable) are a deliberate compact exception to the scale — 11px uppercase headers and 13px cells, scoped in `TradesView.vue` — approved with the 2026-09-28 charcoal design refresh and pinned by the rendered e2e guard; the statistics ledger renders the documented 12px/14px. Use short, plain labels and tabular numerals. Preserve readable system fallbacks when web fonts are unavailable.
+Inter is the display and UI face, with Source Sans 3 as fallback (Inter replaced General Sans on 2026-11-26: General Sans is under the ITF Free Font License, whose section 02 prohibits redistributing the font files — explicitly including distribution through a repository or publicly accessible server — so its bytes cannot be vendored in this public repository; Inter (SIL OFL 1.1, `frontend/src/assets/fonts/LICENSES/inter-OFL.txt`) is the closest open-licensed equivalent, keeps the same 400/500/600/700 weight set, the same self-hosted architecture (one variable woff2 per declared weight), and the same Source Sans 3 fallback). IBM Plex Mono is for monetary values, ratios, diagnostics, and other tabular figures. The scale remains `12 / 14 / 16 / 20 / 24 / 32 / 40 / 56 px`; body text defaults to 16px, labels to 14px, and dense table text may be 14px. The three trade-ledger feeds (Open/Closed/Unsellable) are a deliberate compact exception to the scale — 11px uppercase headers and 13px cells, scoped in `TradesView.vue` — approved with the 2026-09-28 charcoal design refresh and pinned by the rendered e2e guard; the statistics ledger renders the documented 12px/14px. Use short, plain labels and tabular numerals. Preserve readable system fallbacks when web fonts are unavailable.
 
 ## Layout
 
@@ -408,7 +414,7 @@ _Re-checked 2026-09-24 against the tokenized, a11y-1.0 build by source-truth gre
 
 | Issue | Current | Should Be | Severity |
 |-------|---------|-----------|----------|
-| Body font size | **Resolved and rendered-verified (2026-11-10).** Document body renders `16px` / General Sans / line-height 1.5 in both schemes (asserted on real elements by the e2e guard). History: the 2026-09-24 "resolved" status was source-truth only — the rendered body was silently 14px / v-sans / 1.6 because Naive UI's internal `GlobalStyle` writes the merged common theme onto `document.body.style` inline and its lazy-injected `body` reset sits after the app CSS. Fixed 2026-11-10: `fontSize`/`lineHeight` added to both schemes' `naive.common` token map (`frontend/src/theme/tokens.ts`, the single source of truth for the GlobalStyle write) plus an `html body` specificity guard in `frontend/src/assets/base.css`. `14px` remains on component labels (buttons/tags/nav) and statistics-ledger cells (`.ledger-panel .n-data-table --n-font-size: 14px`) — documented intent. The three trade-ledger feeds (Open/Closed/Unsellable) are a further documented compact exception: 11px uppercase headers / 13px cells via scoped rules in `TradesView.vue` (introduced in `05e7cbb`, part of the approved 2026-09-28 charcoal design refresh); the e2e guard pins both values. | `16px` per scale (document scope) | Resolved (base, rendered-verified) · informational (component labels by design) · documented exception (trade ledger 11/13) |
+| Body font size | **Resolved and rendered-verified (2026-11-10).** Document body renders `16px` / General Sans (Inter since the 2026-11-26 license-motivated swap; see Typography) / line-height 1.5 in both schemes (asserted on real elements by the e2e guard). History: the 2026-09-24 "resolved" status was source-truth only — the rendered body was silently 14px / v-sans / 1.6 because Naive UI's internal `GlobalStyle` writes the merged common theme onto `document.body.style` inline and its lazy-injected `body` reset sits after the app CSS. Fixed 2026-11-10: `fontSize`/`lineHeight` added to both schemes' `naive.common` token map (`frontend/src/theme/tokens.ts`, the single source of truth for the GlobalStyle write) plus an `html body` specificity guard in `frontend/src/assets/base.css`. `14px` remains on component labels (buttons/tags/nav) and statistics-ledger cells (`.ledger-panel .n-data-table --n-font-size: 14px`) — documented intent. The three trade-ledger feeds (Open/Closed/Unsellable) are a further documented compact exception: 11px uppercase headers / 13px cells via scoped rules in `TradesView.vue` (introduced in `05e7cbb`, part of the approved 2026-09-28 charcoal design refresh); the e2e guard pins both values. | `16px` per scale (document scope) | Resolved (base, rendered-verified) · informational (component labels by design) · documented exception (trade ledger 11/13) |
 | Pagination touch targets | **Resolved (2026-09-24) and rendered-verified (2026-11-10).** `44px` covers every paged surface: stats-table pagination (`.ledger-panel`/`.ai-trust-card`, `StatisticsView.vue:1278`, ≤767px), control-center pages (`ControlCenterView.vue:609`, ≤767px), mobile **row-action** buttons (`TradesView.vue:851` block, ≤520px), and the three paged trade feeds (Open/Closed/Unsellable), whose Naive `NDataTable` pagination renders inside `.ledger-panel` in `TradesView.vue` (`:deep(.n-pagination-item)` at the foot of its `@media(max-width:520px)` block, mirroring `StatisticsView.vue`). The 2026-09-24 CSSOM check confirmed the rule is loaded, gated, and outranks Naive's base `.n-pagination-item` (`0,0,3` vs `0,0,1`). The 375px eyeball that was then skipped is now closed by the e2e guard: on a data-fed build, closed-trades feed items and statistics symbol-table items render **44×44px at 375px** (mobile-chromium, asserted). **Tablet outcome (recorded exception):** at 768px the phone-width gate is closed and items render the 28px Naive default — the rule is phone-width scoped by design (44px "on mobile"), and the spec pins the 28px outcome at desktop (1280px) and tablet (768px) so the scope cannot drift. | `44x44px` minimum on mobile (phone width) | **Resolved** (all paged surfaces, rendered-verified at 375px; 28px at ≥768px is the documented scope) |
 | Mobile text truncation | **Open (unverified 375px).** Re-audited 2026-09-24: `text-overflow:ellipsis` **does** exist in source — on the ledger symbol cell `.trade-symbol-main` (`TradesView.vue`, at both the `≤767px` gate, line 604, and the `≤520px` gate, line 661) — so the earlier "no ellipsis anywhere" note was a false negative (a `*.css`-only grep never looked at the `.vue` scoped `<style>` blocks). Responsive guards exist (`@media(max-width:767px)` + `520px` in `main.css`, `white-space:normal` tab-wrap at ≤520px). A live clip-scan (`scrollWidth>clientWidth`) on a data-less shell at 800px returned **0 candidates** (desktop has room); the 2026-06-05 `"les mo"` @375px case cannot be reproduced without viewport emulation (absent in this browser toolset) plus live trade data, so it stays open pending a device-emulated, data-fed re-check. | Full text with ellipsis on narrow cells | **Low** (open; re-check on a device-emulated, data-fed session) |
 

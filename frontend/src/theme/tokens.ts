@@ -43,7 +43,7 @@ export const themeTokens = {
    light: {
       naive: {
          common: {
-            fontFamily: "'General Sans', 'Source Sans 3', sans-serif",
+            fontFamily: "'Inter', 'Source Sans 3', sans-serif",
             fontFamilyMono: "'IBM Plex Mono', 'SFMono-Regular', monospace",
             fontWeightStrong: "600",
             primaryColor: "#276b47",
@@ -95,8 +95,8 @@ export const themeTokens = {
          },
      },
       css: {
-         "--mw-font-display": "'General Sans', 'Source Sans 3', sans-serif",
-         "--mw-font-body": "'General Sans', 'Source Sans 3', sans-serif",
+         "--mw-font-display": "'Inter', 'Source Sans 3', sans-serif",
+         "--mw-font-body": "'Inter', 'Source Sans 3', sans-serif",
          "--mw-font-mono": "'IBM Plex Mono', monospace",
          "--mw-color-primary": "#276b47",
          "--mw-color-primary-strong": "#205a3b",
@@ -148,7 +148,7 @@ export const themeTokens = {
   dark: {
      naive: {
         common: {
-           fontFamily: "'General Sans', 'Source Sans 3', sans-serif",
+           fontFamily: "'Inter', 'Source Sans 3', sans-serif",
            fontFamilyMono: "'IBM Plex Mono', 'SFMono-Regular', monospace",
            fontWeightStrong: "600",
            primaryColor: "#9cdb73",

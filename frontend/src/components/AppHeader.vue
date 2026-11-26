@@ -14,7 +14,7 @@ import {
   PulseOutline,
   SettingsOutline,
 } from '@vicons/ionicons5'
-import logoImage from '../assets/logo.png'
+import logoImage from '../assets/logo-header.png'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
 import { useConnectionSync } from '../composables/useConnectionSync'
 import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'

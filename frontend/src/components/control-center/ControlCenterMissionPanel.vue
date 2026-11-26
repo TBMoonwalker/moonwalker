@@ -214,7 +214,7 @@ defineEmits<{
 .mission-panel :deep(.n-alert-body__title) {
     margin-bottom: 2px;
     font-size: 1rem;
-    font-weight: 550;
+    font-weight: 600;
 }
 
 .mission-panel :deep(.n-alert-body__content) {
